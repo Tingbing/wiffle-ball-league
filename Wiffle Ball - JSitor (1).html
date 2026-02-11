@@ -216,6 +216,10 @@
 		<button class="menu-button" onclick="showSchedule()">
   📅 Schedule
 </button>
+		
+<input id="loginEmail" placeholder="Email for login" />
+<button class="menu-button" onclick="sendLoginLink()">📧 Send Login Link</button>
+<button class="menu-button" onclick="logout()">Log Out</button>
 
 	</div>
 </div>
@@ -442,8 +446,14 @@
 </div>
 <!-- SCHEDULE SCREEN -->
 
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
 <script>
 
+const SUPABASE_URL = "https://hunqtklytyorvmztgpqt.supabase.co";
+const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imh1bnF0a2x5dHlvcnZtenRncHF0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzA4NDc0MzcsImV4cCI6MjA4NjQyMzQzN30.ONu6M24_vhaeN-YlqKr-mtNjRuLLMfMeMfdTDMUllfA";
+
+const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 	let league = { teams: [] };
 	let season = { playerStats: {} };
@@ -530,12 +540,27 @@
 		localStorage.setItem("wiggleLeague", JSON.stringify(league));
 	}
 
-	function load() {
-		let data = localStorage.getItem("wiggleLeague");
-		if (data) {
-			league = JSON.parse(data);
-		}
-	}
+	async function load() {
+  // load teams + players from Supabase
+  const { data: teams, error: teamErr } = await supabase
+    .from("teams")
+    .select("id, name, players:players(id, name)")
+    .order("name", { ascending: true });
+
+  if (teamErr) {
+    console.log(teamErr);
+    // fallback to localStorage if you want:
+    const local = localStorage.getItem("wiggleLeague");
+    if (local) league = JSON.parse(local);
+    return;
+  }
+
+  league.teams = (teams || []).map(t => ({
+    name: t.name,
+    players: (t.players || []).map(p => p.name)
+  }));
+}
+
 
 	function saveSeason() {
 		localStorage.setItem("wiggleSeason", JSON.stringify(season));
@@ -798,37 +823,49 @@ document.getElementById("scheduleScreen").classList.add("hidden");
 	}
 
 	// TEAM MANAGEMENT FUNCTIONS
-	function addTeam() {
-		let name = document.getElementById("teamName").value.trim();
-		if (!name) return;
-		
-		league.teams.push({ name: name, players: [] });
-		document.getElementById("teamName").value = "";
-		update();
-	}
+async function addTeam() {
+  const name = document.getElementById("teamName").value.trim();
+  if (!name) return;
 
-	function addPlayer() {
-		let teamIndex = document.getElementById("teamSelect").value;
-		if (teamIndex === null || teamIndex === undefined || teamIndex === "") {
-			alert("Please select a team first!");
-			return;
-		}
-		
-		let player = document.getElementById("playerName").value.trim();
-		if (player === "") return;
+  const { error } = await supabase.from("teams").insert([{ name }]);
+  if (error) return alert(error.message);
 
-		let team = league.teams[teamIndex];
+  document.getElementById("teamName").value = "";
+  await load();
+  update();
+}
 
-		if (team.players.length >= 2) {
-			alert("Only 2 players allowed per team");
-			return;
-		}
 
-		team.players.push(player);
-		initPlayerStats(team.name, player);
-		document.getElementById("playerName").value = "";
-		update();
-	}
+	async function addPlayer() {
+  const teamIndex = document.getElementById("teamSelect").value;
+  if (teamIndex === "" || teamIndex == null) return alert("Select a team");
+
+  const player = document.getElementById("playerName").value.trim();
+  if (!player) return;
+
+  const teamName = league.teams[teamIndex].name;
+
+  // get team id
+  const { data: teamRow, error: tErr } = await supabase
+    .from("teams")
+    .select("id")
+    .eq("name", teamName)
+    .single();
+
+  if (tErr) return alert(tErr.message);
+
+  const { error } = await supabase.from("players").insert([{
+    team_id: teamRow.id,
+    name: player
+  }]);
+
+  if (error) return alert(error.message);
+
+  document.getElementById("playerName").value = "";
+  await load();
+  update();
+}
+
 
 	function removeTeam(teamIndex) {
 		if (confirm("Remove this team?")) {
@@ -1819,6 +1856,22 @@ let era = stats.inningsPitched > 0
 	  document.getElementById("scheduleScreen").classList.remove("hidden");
 	  renderScheduleUI();
 	}
+	
+	async function sendLoginLink() {
+  const email = document.getElementById("loginEmail").value.trim();
+  if (!email) return alert("Enter an email");
+
+  const { error } = await supabase.auth.signInWithOtp({ email });
+  if (error) return alert(error.message);
+
+  alert("Check your email for the login link!");
+}
+
+async function logout() {
+  await supabase.auth.signOut();
+  alert("Logged out");
+}
+
 
 	// Initialize
 	load();
