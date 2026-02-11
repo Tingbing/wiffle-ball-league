@@ -1871,6 +1871,22 @@ async function logout() {
   await supabase.auth.signOut();
   alert("Logged out");
 }
+	async function supabaseConnectionTest() {
+  console.log("Supabase URL:", SUPABASE_URL);
+
+  // This just checks that Supabase responds (no tables required)
+  const { data, error } = await supabase.from("_dummy_does_not_exist").select("*").limit(1);
+
+  // If connected, you'll usually get an error about the table not existing (THAT'S OK)
+  if (error) {
+    console.log("Supabase responded ✅ (expected error):", error.message);
+    alert("Supabase connected ✅ (it responded). Next: add real tables + save/load code.");
+  } else {
+    console.log("Unexpected data:", data);
+    alert("Supabase connected ✅");
+  }
+}
+
 
 
 	// Initialize
