@@ -674,7 +674,7 @@ function submitLeagueCode() {
   const entered = (document.getElementById("gateLeagueCode")?.value || "").trim();
   if (!entered) return alert("Enter the league code.");
 
-  if (entered === LEAGUE_CODE) {
+  if (entered === String(LEAGUE_CODE).trim()) {
     setLeagueUnlocked(true);
     showGate("done", "Access granted. This device will stay unlocked in the future.");
   } else {
