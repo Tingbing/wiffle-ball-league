@@ -1,7 +1,5 @@
-<!doctype html><html><head></head><body><!DOCTYPE html>
-
+<!doctype html>
 <html>
-
 <head>
 	<meta name="viewport" content="width=device-width, initial-scale=1.0">
 	<title>Wiggle Ball League</title>
@@ -1888,15 +1886,16 @@ async function logout() {
 }
 
 
+// Initialize
+(async function init() {
+  await load();        // ✅ wait for Supabase teams to load into league.teams
+  loadSchedule();
+  loadSeason();
+  update();            // ✅ now renders with the loaded teams
+})();
 
-	// Initialize
-	load();
-	loadSchedule();
-	loadSeason();
-	update();
-
+	
 </script>
 
 </body>
-
-</html><script type="text/javascript"></script></body><html>
+</html>
