@@ -1863,7 +1863,7 @@ let era = stats.inningsPitched > 0
   const { error } = await supabaseClient.auth.signInWithOtp({
     email,
     options: {
-      emailRedirectTo: window.location.origin + window.location.pathname
+     emailRedirectTo: "https://tingbing.github.io/wiffle-ball-league/"
     }
   });
 
