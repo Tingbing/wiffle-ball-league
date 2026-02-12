@@ -822,6 +822,8 @@ document.getElementById("scheduleScreen").classList.add("hidden");
 
 	// TEAM MANAGEMENT FUNCTIONS
 async function addTeam() {
+  if (!(await requireLogin())) return;
+
   const name = document.getElementById("teamName").value.trim();
   if (!name) return;
 
@@ -832,9 +834,10 @@ async function addTeam() {
   await load();
   update();
 }
-
-
+	
 	async function addPlayer() {
+  if (!(await requireLogin())) return;
+
   const teamIndex = document.getElementById("teamSelect").value;
   if (teamIndex === "" || teamIndex == null) return alert("Select a team");
 
@@ -843,7 +846,6 @@ async function addTeam() {
 
   const teamName = league.teams[teamIndex].name;
 
-  // get team id
   const { data: teamRow, error: tErr } = await supabaseClient
     .from("teams")
     .select("id")
@@ -863,7 +865,6 @@ async function addTeam() {
   await load();
   update();
 }
-
 
 	function removeTeam(teamIndex) {
 		if (confirm("Remove this team?")) {
@@ -1859,11 +1860,17 @@ let era = stats.inningsPitched > 0
   const email = document.getElementById("loginEmail").value.trim();
   if (!email) return alert("Enter an email");
 
-  const { error } = await supabaseClient.auth.signInWithOtp({ email });
-  if (error) return alert(error.message);
+  const { error } = await supabaseClient.auth.signInWithOtp({
+    email,
+    options: {
+      emailRedirectTo: window.location.origin + window.location.pathname
+    }
+  });
 
+  if (error) return alert(error.message);
   alert("Check your email for the login link!");
 }
+
 
 async function logout() {
   await supabaseClient.auth.signOut();
@@ -1884,6 +1891,16 @@ async function logout() {
     alert("Supabase connected ✅");
   }
 }
+
+	async function requireLogin() {
+  const { data } = await supabaseClient.auth.getSession();
+  if (!data.session) {
+    alert("You must be logged in to add teams/players. Enter your email on the main menu and click 'Send Login Link'.");
+    return false;
+  }
+  return true;
+}
+
 
 
 // Initialize
