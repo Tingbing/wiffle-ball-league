@@ -767,31 +767,35 @@ container.appendChild(dayCard);
 		// ✅ ADD THIS to hideAllScreens()
 	}
 
-	function showTeamConfig() {
-		hideAllScreens();
-		document.getElementById("teamConfigScreen").classList.remove("hidden");
-		update();
+	async function showTeamConfig() {
+	if (!(await requireLogin())) return;
+
+	hideAllScreens();
+	document.getElementById("teamConfigScreen").classList.remove("hidden");
+	update();
+}
+
+async function showGameSetup() {
+	if (!(await requireLogin())) return;
+
+	hideAllScreens();
+	
+	if (league.teams.length < 2) {
+		alert("You need at least 2 teams! Please configure teams first.");
+		showTeamConfig();
+		return;
 	}
 
-	function showGameSetup() {
-		hideAllScreens();
-		
-		if (league.teams.length < 2) {
-			alert("You need at least 2 teams! Please configure teams first.");
-			showTeamConfig();
-			return;
-		}
-
-		let validTeams = league.teams.filter(t => t.players.length > 0);
-		if (validTeams.length < 2) {
-			alert("You need at least 2 teams with players! Please add players first.");
-			showTeamConfig();
-			return;
-		}
-
-		document.getElementById("gameSetupScreen").classList.remove("hidden");
-		updateGameSetupSelects();
+	let validTeams = league.teams.filter(t => t.players.length > 0);
+	if (validTeams.length < 2) {
+		alert("You need at least 2 teams with players! Please add players first.");
+		showTeamConfig();
+		return;
 	}
+
+	document.getElementById("gameSetupScreen").classList.remove("hidden");
+	updateGameSetupSelects();
+}
 
 	function showGame() {
 		hideAllScreens();
@@ -866,19 +870,97 @@ async function addTeam() {
   update();
 }
 
-	function removeTeam(teamIndex) {
-		if (confirm("Remove this team?")) {
-			league.teams.splice(teamIndex, 1);
-			update();
-		}
-	}
+	async function removeTeam(teamIndex) {
+  if (!(await requireLogin())) return;
 
-	function removePlayer(teamIndex, playerIndex) {
-		if (confirm("Remove this player?")) {
-			league.teams[teamIndex].players.splice(playerIndex, 1);
-			update();
-		}
-	}
+  if (game) {
+    alert("Finish the current game before deleting teams/players.");
+    return;
+  }
+
+  const teamName = league.teams?.[teamIndex]?.name;
+  if (!teamName) return;
+
+  if (!confirm(`Remove team "${teamName}"? This will also delete its players.`)) return;
+
+  // 1) find the team id
+  const { data: teamRow, error: tErr } = await supabaseClient
+    .from("teams")
+    .select("id")
+    .eq("name", teamName)
+    .single();
+
+  if (tErr) return alert(tErr.message);
+
+  // 2) delete players for that team (safe even if none)
+  const { error: pDelErr } = await supabaseClient
+    .from("players")
+    .delete()
+    .eq("team_id", teamRow.id);
+
+  if (pDelErr) return alert(pDelErr.message);
+
+  // 3) delete the team
+  const { error: teamDelErr } = await supabaseClient
+    .from("teams")
+    .delete()
+    .eq("id", teamRow.id);
+
+  if (teamDelErr) return alert(teamDelErr.message);
+
+  // 4) clean up season stats + schedule locally
+  removeSeasonStatsByPrefix(teamName + "|");
+  clearScheduleBecauseTeamsChanged();
+
+  // 5) reload fresh from Supabase + refresh UI
+  await load();
+  update();
+}
+
+async function removePlayer(teamIndex, playerIndex) {
+  if (!(await requireLogin())) return;
+
+  if (game) {
+    alert("Finish the current game before deleting teams/players.");
+    return;
+  }
+
+  const teamName = league.teams?.[teamIndex]?.name;
+  const playerName = league.teams?.[teamIndex]?.players?.[playerIndex];
+  if (!teamName || !playerName) return;
+
+  if (!confirm(`Remove player "${playerName}" from "${teamName}"?`)) return;
+
+  // 1) get team id
+  const { data: teamRow, error: tErr } = await supabaseClient
+    .from("teams")
+    .select("id")
+    .eq("name", teamName)
+    .single();
+
+  if (tErr) return alert(tErr.message);
+
+  // 2) delete player row(s) matching team + name
+  // (Assumes player names are unique within a team. If you allow duplicates, we should switch to storing player IDs.)
+  const { error: pDelErr } = await supabaseClient
+    .from("players")
+    .delete()
+    .eq("team_id", teamRow.id)
+    .eq("name", playerName);
+
+  if (pDelErr) return alert(pDelErr.message);
+
+  // 3) clean up season stats + schedule locally
+  delete season.playerStats[getPlayerKey(teamName, playerName)];
+  saveSeason();
+  clearScheduleBecauseTeamsChanged();
+
+  // 4) reload fresh from Supabase + refresh UI
+  await load();
+  update();
+}
+
+	
 
 	function update() {
 		let select = document.getElementById("teamSelect");
@@ -1899,6 +1981,23 @@ async function logout() {
     return false;
   }
   return true;
+}
+
+	function clearScheduleBecauseTeamsChanged() {
+  schedule = { days: [], teamNames: [] };
+  saveSchedule();
+}
+
+function removeSeasonStatsByPrefix(prefix) {
+  // prefix like "TeamName|"  (removes all players on that team)
+  let changed = false;
+  for (const key of Object.keys(season.playerStats || {})) {
+    if (key.startsWith(prefix)) {
+      delete season.playerStats[key];
+      changed = true;
+    }
+  }
+  if (changed) saveSeason();
 }
 
 
