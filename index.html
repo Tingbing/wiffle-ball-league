@@ -451,7 +451,7 @@
 const SUPABASE_URL = "https://hunqtklytyorvmztgpqt.supabase.co";
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imh1bnF0a2x5dHlvcnZtenRncHF0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzA4NDc0MzcsImV4cCI6MjA4NjQyMzQzN30.ONu6M24_vhaeN-YlqKr-mtNjRuLLMfMeMfdTDMUllfA";
 
-const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 	let league = { teams: [] };
 	let season = { playerStats: {} };
@@ -540,7 +540,7 @@ const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 	async function load() {
   // load teams + players from Supabase
-  const { data: teams, error: teamErr } = await supabase
+  const { data: teams, error: teamErr } = await supabaseClient
     .from("teams")
     .select("id, name, players:players(id, name)")
     .order("name", { ascending: true });
@@ -825,7 +825,7 @@ async function addTeam() {
   const name = document.getElementById("teamName").value.trim();
   if (!name) return;
 
-  const { error } = await supabase.from("teams").insert([{ name }]);
+  const { error } = await supabaseClient.from("teams").insert([{ name }]);
   if (error) return alert(error.message);
 
   document.getElementById("teamName").value = "";
@@ -844,7 +844,7 @@ async function addTeam() {
   const teamName = league.teams[teamIndex].name;
 
   // get team id
-  const { data: teamRow, error: tErr } = await supabase
+  const { data: teamRow, error: tErr } = await supabaseClient
     .from("teams")
     .select("id")
     .eq("name", teamName)
@@ -852,7 +852,7 @@ async function addTeam() {
 
   if (tErr) return alert(tErr.message);
 
-  const { error } = await supabase.from("players").insert([{
+  const { error } = await supabaseClient.from("players").insert([{
     team_id: teamRow.id,
     name: player
   }]);
@@ -1859,21 +1859,21 @@ let era = stats.inningsPitched > 0
   const email = document.getElementById("loginEmail").value.trim();
   if (!email) return alert("Enter an email");
 
-  const { error } = await supabase.auth.signInWithOtp({ email });
+  const { error } = await supabaseClient.auth.signInWithOtp({ email });
   if (error) return alert(error.message);
 
   alert("Check your email for the login link!");
 }
 
 async function logout() {
-  await supabase.auth.signOut();
+  await supabaseClient.auth.signOut();
   alert("Logged out");
 }
 	async function supabaseConnectionTest() {
   console.log("Supabase URL:", SUPABASE_URL);
 
   // This just checks that Supabase responds (no tables required)
-  const { data, error } = await supabase.from("_dummy_does_not_exist").select("*").limit(1);
+  const { data, error } = await supabaseClient.from("_dummy_does_not_exist").select("*").limit(1);
 
   // If connected, you'll usually get an error about the table not existing (THAT'S OK)
   if (error) {
