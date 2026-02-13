@@ -780,34 +780,39 @@ function maybeShowNameBox(email) {
   if (getStoredName()) row.classList.add("hidden");
 }
 
+// ===== AUTH GATE =====
 async function evaluateAccess() {
-  const { data } = await supabaseClient.auth.getSession();
+  // 1) Check if user is signed in (session exists)
+  const { data, error } = await supabase.auth.getSession();
   const session = data?.session;
 
+  // OPTIONAL: if you want to see what's happening
+  console.log("Supabase session:", session);
+
+  // 2) If NOT signed in -> show email/name screen
   if (!session) {
-    showGate("login", "To use this app, please log in with your email. Then you must enter the league code.");
-    // keep main menu hidden while locked
-    hideAllScreens();
-    await updateAuthUI();
-    return false;
-
+    showEmailScreen();
+    return;
   }
 
-  // Ensure we have a name stored (ask now if they never entered it)
-  if (!getStoredName()) {
-    showGate("login", "Enter your email and your name, then send the login link (or enter your name now if you're already logged in).");
-    document.getElementById("gateNameRow").classList.remove("hidden");
-    hideAllScreens();
-    await updateAuthUI();
-    return false;
+  // 3) If signed in but NOT joined league yet -> show league code screen
+  // (This assumes you set this when they successfully enter league code)
+  const leagueOk = localStorage.getItem("wbl_leagueOk") === "true";
+
+  if (!leagueOk) {
+    showLeagueCodeScreen();
+    return;
   }
 
-  if (!isLeagueUnlocked()) {
-    showGate("code", "You're logged in. Now enter the league code to unlock the app.");
-    hideAllScreens();
-    await updateAuthUI();
-    return false;
-  }
+  // 4) Signed in AND league is unlocked -> show the app (main menu)
+  showMainMenu();
+}
+
+// Runs whenever auth state changes (magic link sign-in happens here)
+supabase.auth.onAuthStateChange((_event, session) => {
+  console.log("Auth change:", _event, session);
+  evaluateAccess();
+});
 
   // unlocked
   document.getElementById("accessGate").classList.add("hidden");
@@ -2466,7 +2471,9 @@ async function logout() {
   loadSeason();
   syncTeamRecordsWithLeague();
   saveSeason();
-  update();            // ✅ now renders with the loaded teams
+  update();    
+evaluateAccess();
+	// ✅ now renders with the loaded teams
 
   // Finally, enforce access (blocks the app until login + code)
   await evaluateAccess();
