@@ -1404,44 +1404,65 @@ async function submitLeagueCode() {
 	}
 
 	async function resetSeason() {
-  const ok = confirm("Are you sure you want to delete ALL season stats and scheduled game results?
+  const msg =
+    "⚠️ Reset Season?\n\n" +
+    "This will permanently delete:\n" +
+    "• All season stats\n" +
+    "• All schedule game results\n" +
+    "• Local saved season/schedule data\n" +
+    "• Server backup (season_data) for this league\n\n" +
+    "This cannot be undone.\n\n" +
+    "Are you sure you want to continue?";
+  if (!confirm(msg)) return;
 
-This will clear this device AND the server backup (Supabase) so the next season starts fresh.");
-  if (!ok) return;
-
-  // Prevent autosync loops while clearing
-  suppressAutoSync = true;
-
-  // Clear in-memory
-  season = { playerStats: {}, teamRecords: {} };
-  schedule = { days: [], teamNames: [] };
-
-  // Clear localStorage
-  try { localStorage.removeItem("wiggleSeason"); } catch (e) {}
-  try { localStorage.removeItem("wiggleSchedule"); } catch (e) {}
-
-  // Clear server backup (optional table)
-  let serverCleared = false;
   try {
-    const { data } = await supabaseClient.auth.getSession();
-    const loggedIn = !!data?.session;
-    if (loggedIn && isLeagueUnlocked() && !!getStoredName()) {
-      const { error } = await supabaseClient
-        .from("season_data")
-        .delete()
-        .eq("league_code", String(LEAGUE_CODE));
-      if (!error) serverCleared = true;
+    // 1) Clear local season + schedule
+    try { localStorage.removeItem("wbl_season"); } catch (e) {}
+    try { localStorage.removeItem("wbl_schedule"); } catch (e) {}
+    try { localStorage.removeItem("wbl_lastSchedule"); } catch (e) {}
+    try { localStorage.removeItem("wbl_lastScheduleKey"); } catch (e) {}
+
+    // Reset in-memory structures if they exist
+    if (typeof season !== "undefined") {
+      season = { teamRecords: {}, playerStats: {}, games: [] };
     }
-  } catch (e) {
-    console.log("season_data delete failed:", e);
+    if (typeof schedule !== "undefined") {
+      schedule = [];
+    }
+
+    // 2) Delete server backup row (best-effort)
+    // Only runs if supabaseClient exists and user is logged in
+    if (typeof supabaseClient !== "undefined") {
+      const { data: { user } = {} } = await supabaseClient.auth.getUser();
+      const leagueCode = (typeof LEAGUE_CODE !== "undefined" ? String(LEAGUE_CODE) : "").trim();
+
+      if (user && leagueCode) {
+        const { error } = await supabaseClient
+          .from("season_data")
+          .delete()
+          .eq("league_code", leagueCode);
+
+        if (error) {
+          console.warn("Season reset: server delete failed:", error);
+          // Don’t throw—local reset still succeeded
+        }
+      }
+    }
+
+    // 3) Re-render UI / save fresh empty season locally
+    if (typeof loadSeason === "function") loadSeason();
+    if (typeof loadSchedule === "function") loadSchedule();
+    if (typeof renderSeasonStats === "function") renderSeasonStats();
+    if (typeof renderSchedule === "function") renderSchedule();
+    if (typeof showToast === "function") {
+      showToast("✅ Season reset complete.");
+    } else {
+      alert("✅ Season reset complete.");
+    }
+  } catch (err) {
+    console.error(err);
+    alert("❌ Reset failed. Check console for details.");
   }
-
-  suppressAutoSync = false;
-
-  // Refresh UI
-  try { displaySeasonStats(); } catch (e) {}
-  try { renderScheduleUI(); } catch (e) {}
-  showNotification(serverCleared ? "✅ Season cleared (local + server)" : "✅ Season cleared locally", 2000);
 }
 
 
