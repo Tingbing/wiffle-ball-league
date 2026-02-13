@@ -2439,7 +2439,15 @@ async function logout() {
   return true;
 }
 
+function showEmailScreen() {
+  hideAllScreens();
+  document.getElementById("emailScreen").classList.remove("hidden");
+}
 
+function showLeagueCodeScreen() {
+  hideAllScreens();
+  document.getElementById("leagueCodeScreen").classList.remove("hidden");
+}
 
 
 // Initialize
