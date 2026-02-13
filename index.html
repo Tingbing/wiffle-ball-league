@@ -780,47 +780,40 @@ function maybeShowNameBox(email) {
   if (getStoredName()) row.classList.add("hidden");
 }
 
-// ===== AUTH GATE =====
+// ===== AUTH GATE (FIXED) =====
 async function evaluateAccess() {
-  // 1) Check if user is signed in (session exists)
-  const { data, error } = await supabase.auth.getSession();
+  const { data } = await supabaseClient.auth.getSession();
   const session = data?.session;
 
-  // OPTIONAL: if you want to see what's happening
-  console.log("Supabase session:", session);
-
-  // 2) If NOT signed in -> show email/name screen
+  // 1) Not logged in -> show email gate
   if (!session) {
-    showEmailScreen();
+    showGate("login", "Enter your email to get a login link.");
+    await updateAuthUI();
     return;
   }
 
-  // 3) If signed in but NOT joined league yet -> show league code screen
-  // (This assumes you set this when they successfully enter league code)
-  const leagueOk = localStorage.getItem("wbl_leagueOk") === "true";
-
-  if (!leagueOk) {
-    showLeagueCodeScreen();
+  // 2) Logged in but no name saved yet -> keep them on login gate + show name box
+  if (!getStoredName()) {
+    showGate("login", "You’re logged in — enter your name once to continue.");
+    const row = document.getElementById("gateNameRow");
+    if (row) row.classList.remove("hidden");
+    await updateAuthUI();
     return;
   }
 
-  // 4) Signed in AND league is unlocked -> show the app (main menu)
-  showMainMenu();
-}
+  // 3) Logged in + name, but league code not unlocked -> show code gate
+  if (!isLeagueUnlocked()) {
+    showGate("code", "Logged in. Now enter the league code.");
+    await updateAuthUI();
+    return;
+  }
 
-// Runs whenever auth state changes (magic link sign-in happens here)
-supabase.auth.onAuthStateChange((_event, session) => {
-  console.log("Auth change:", _event, session);
-  evaluateAccess();
-});
-
-  // unlocked
+  // 4) All good -> unlock app
   document.getElementById("accessGate").classList.add("hidden");
   await updateAuthUI();
-  return true;
+  showMainMenu();
 }
-
-
+	
 async function submitLeagueCode() {
   const entered = (document.getElementById("gateLeagueCode")?.value || "").trim();
   if (!entered) return alert("Enter the league code.");
@@ -2452,10 +2445,15 @@ function showLeagueCodeScreen() {
 
 // Initialize
 // Initialize
+
 (async function init() {
   // Gate email typing -> show name box after email entered
   const gateEmailEl = document.getElementById("gateLoginEmail");
-  gateEmailEl.addEventListener("input", (e) => maybeShowNameBox(e.target.value.trim()));
+  if (gateEmailEl) {
+    gateEmailEl.addEventListener("input", (e) =>
+      maybeShowNameBox((e.target.value || "").trim())
+    );
+  }
 
   // Keep main menu email typing behavior too (optional)
   const mainEmailEl = document.getElementById("loginEmail");
@@ -2463,7 +2461,6 @@ function showLeagueCodeScreen() {
     mainEmailEl.addEventListener("change", (e) => {
       const email = (e.target.value || "").trim();
       if (email) setStoredEmail(email);
-      // If they type email here, nudge them to use the gate for name + code
       if (email && !getStoredName()) showGate("login");
     });
   }
@@ -2474,20 +2471,17 @@ function showLeagueCodeScreen() {
     await updateAuthUI();
   });
 
-  await load();        // ✅ wait for Supabase teams to load into league.teams
+  await load(); // pulls teams from Supabase
   loadSchedule();
   loadSeason();
   syncTeamRecordsWithLeague();
   saveSeason();
-  update();    
-evaluateAccess();
-	// ✅ now renders with the loaded teams
+  update();
 
-  // Finally, enforce access (blocks the app until login + code)
+  // ✅ THIS IS THE KEY: run the gate check ON PAGE LOAD (including magic-link redirects)
   await evaluateAccess();
   await updateAuthUI();
 })();
-
 	
 </script>
 
