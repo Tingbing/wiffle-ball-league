@@ -1,0 +1,48 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>WBL</title>
+  <script>
+    (async function () {
+      // Fallback in case latest.json can't be fetched
+      let latest = "app.v2026-02-13-3.html";
+
+      // Preserve the incoming Supabase auth params:
+      // - query params (PKCE uses ?code=...)
+      // - hash params (implicit flow uses #access_token=...)
+      const incomingSearch = new URLSearchParams(location.search);
+      const incomingHash = location.hash || "";
+
+      // Try to fetch the latest filename from latest.json (recommended)
+      try {
+        const res = await fetch("latest.json?cb=" + Date.now(), { cache: "no-store" });
+        if (res.ok) {
+          const j = await res.json();
+          if (j && typeof j.latest === "string" && j.latest.trim()) {
+            latest = j.latest.trim();
+          }
+        }
+      } catch (e) {}
+
+      // Build target URL
+      const target = new URL(latest, location.href);
+
+      // Carry through ALL incoming query params first (important for Supabase)
+      for (const [k, v] of incomingSearch.entries()) {
+        target.searchParams.set(k, v);
+      }
+
+      // Add a cache-buster so the browser never reuses a cached HTML response
+      target.searchParams.set("t", String(Date.now()));
+
+      // Carry through the hash (important for Supabase magic-link tokens)
+      target.hash = incomingHash;
+
+      location.replace(target.toString());
+    })();
+  </script>
+</head>
+<body></body>
+</html>
