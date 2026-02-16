@@ -273,11 +273,6 @@
 	}
 
 
-/* ================================
-   ✅ BOOT + ERROR OVERLAYS
-   - Prevent showing menu before startup finishes
-   - Show a clear error if Supabase fails to load
-==================================*/
 .boot-screen, .fatal-screen {
   position: fixed;
   inset: 0;
@@ -334,24 +329,6 @@
 <body>
 
 <!-- ✅ BOOT SCREEN: prevents menu flash until startup finishes -->
-<div id="bootScreen" class="boot-screen">
-  <div class="boot-panel">
-    <div class="boot-title">Loading…</div>
-    <div class="boot-sub">Starting the app. This should only take a moment.</div>
-    <button type="button" onclick="window.location.reload()">Reload</button>
-    <div class="boot-small">If this keeps happening, try disabling content blockers for this site or clearing Safari/Browser website data.</div>
-  </div>
-</div>
-
-<!-- ✅ FATAL ERROR: shown if Supabase doesn’t load -->
-<div id="fatalScreen" class="fatal-screen hidden">
-  <div class="boot-panel">
-    <div class="boot-title" id="fatalTitle">Error</div>
-    <div class="boot-sub" id="fatalMsg">Supabase failed to load.</div>
-    <button type="button" onclick="window.location.reload()">Reload</button>
-    <div class="boot-small" id="fatalDetails"></div>
-  </div>
-</div><!-- ✅ BOOT SCREEN: prevents menu flash until startup finishes -->
 <div id="bootScreen" class="boot-screen">
   <div class="boot-panel">
     <div class="boot-title">Loading…</div>
@@ -709,7 +686,7 @@
 </div>
 <!-- SCHEDULE SCREEN -->
 
-<script src="/wiffle-ball-league/vendor/supabase.js"></script>
+<script src="./vendor/supabase.js"></script>
 
 <script>
 
