@@ -721,6 +721,8 @@ function showFatalError(title, msg, details) {
   if (d) d.innerText = details || "";
 }
 
+console.log("SUPABASE AT CHECK TIME:", window.supabase, window.supabase?.createClient);
+	
 if (!window.supabase || !window.supabase.createClient) {
   showFatalError(
     "Login system didn’t load",
