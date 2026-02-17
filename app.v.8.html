@@ -273,7 +273,7 @@
 	}
 
 
-.boot-screen, .fatal-screen {
+.fatal-screen {
   position: fixed;
   inset: 0;
   background: rgba(0,0,0,0.88);
@@ -283,44 +283,6 @@
   z-index: 999999;
   padding: 20px;
 }
-.boot-panel {
-  background: #1b1b1b;
-  border: 1px solid #333;
-  border-radius: 14px;
-  padding: 18px;
-  max-width: 460px;
-  width: 100%;
-  text-align: center;
-  box-shadow: 0 10px 30px rgba(0,0,0,0.35);
-}
-.boot-title {
-  font-size: 22px;
-  font-weight: 700;
-  margin: 0 0 8px 0;
-}
-.boot-sub {
-  color: #ddd;
-  margin: 0 0 14px 0;
-  line-height: 1.35;
-}
-.boot-small {
-  color: #aaa;
-  font-size: 12px;
-  margin-top: 12px;
-  line-height: 1.35;
-}
-.boot-panel button {
-  background: #2d7cff;
-  color: white;
-  border: none;
-  border-radius: 10px;
-  padding: 10px 14px;
-  font-size: 16px;
-  cursor: pointer;
-}
-.boot-panel button:active {
-  transform: scale(0.98);
-}
 
 </style>
 
@@ -328,15 +290,6 @@
 
 <body>
 
-<!-- ✅ BOOT SCREEN: prevents menu flash until startup finishes -->
-<div id="bootScreen" class="boot-screen">
-  <div class="boot-panel">
-    <div class="boot-title">Loading…</div>
-    <div class="boot-sub">Starting the app. This should only take a moment.</div>
-    <button type="button" onclick="window.location.reload()">Reload</button>
-    <div class="boot-small">If this keeps happening, try disabling content blockers for this site or clearing Safari/Browser website data.</div>
-  </div>
-</div>
 
 <!-- ✅ FATAL ERROR: shown if Supabase doesn’t load -->
 <div id="fatalScreen" class="fatal-screen hidden">
@@ -699,16 +652,10 @@ const BUILD_LABEL = location.pathname.split("/").pop(); // shows app.v2026-...ht
 let supabaseClient = null;
 let SUPABASE_READY = false;
 
-function hideBootScreen() {
-  const b = document.getElementById("bootScreen");
-  if (b) b.classList.add("hidden");
-}
-
 function showFatalError(title, msg, details) {
   try { hideAllScreens(); } catch (e) {}
   try { document.getElementById("accessGate")?.classList.add("hidden"); } catch (e) {}
-  hideBootScreen();
-
+ 
   const fs = document.getElementById("fatalScreen");
   if (fs) fs.classList.remove("hidden");
 
@@ -3198,8 +3145,6 @@ window.__INIT_STARTED = true;
   await evaluateAccess();
   await updateAuthUI();
 
-  // Boot is complete — show either the gate (locked) or the menu (unlocked)
-  hideBootScreen();
 
  } catch (err) {
   console.error("INIT CRASHED:", err);
