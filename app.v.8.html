@@ -724,22 +724,17 @@ function showFatalError(title, msg, details) {
 console.log("SUPABASE AT CHECK TIME:", window.supabase, window.supabase?.createClient);
 	
 if (!window.supabase || !window.supabase.createClient) {
-  showFatalError(
-    "Login system didn’t load",
-    "Supabase failed to load, so login and syncing won’t work.",
-    "Try reloading. If you use an ad/content blocker, disable it for this site. On iPad Safari: Settings → Safari → Advanced → Website Data → remove this site, then reload."
-  );
+  const details =
+    `window.supabase=${typeof window.supabase}, ` +
+    `createClient=${typeof window.supabase?.createClient}, ` +
+    `path=${location.pathname}, href=${location.href}`;
+
+  console.error("FATAL TRIGGERED:", details);
+
+  showFatalError("Error", "Supabase failed to load.", details);
 } else {
-  try {
-    supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-    SUPABASE_READY = true;
-  } catch (e) {
-    showFatalError(
-      "Login system failed to start",
-      "Supabase loaded but couldn’t initialize.",
-      (e && (e.stack || e.message)) ? (e.stack || e.message) : String(e)
-    );
-  }
+  console.log("Supabase OK at check:", window.supabase, window.supabase.createClient);
+  // (your existing createClient code continues here)
 }
 /* ================================
    ✅ LEAGUE ACCESS SETTINGS
