@@ -668,6 +668,12 @@ function showFatalError(title, msg, details) {
   if (d) d.innerText = details || "";
 }
 
+function fetchWithTimeout(url, opts = {}, ms = 8000) {
+  const controller = new AbortController();
+  const t = setTimeout(() => controller.abort(), ms);
+  return fetch(url, { ...opts, signal: controller.signal })
+    .finally(() => clearTimeout(t));
+}
 console.log("SUPABASE AT CHECK TIME:", window.supabase, window.supabase?.createClient);
 	
 if (!window.supabase || !window.supabase.createClient) {
@@ -682,8 +688,10 @@ if (!window.supabase || !window.supabase.createClient) {
 } else {
   console.log("Supabase OK at check:", window.supabase, window.supabase.createClient);
   try {
-    supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-    SUPABASE_READY = true;
+supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+  global: { fetch: (url, opts) => fetchWithTimeout(url, opts, 8000) }
+});
+SUPABASE_READY = true;
   } catch (e) {
     showFatalError(
       "Login system failed to start",
