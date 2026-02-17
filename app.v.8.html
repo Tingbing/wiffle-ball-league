@@ -734,7 +734,16 @@ if (!window.supabase || !window.supabase.createClient) {
   showFatalError("Error", "Supabase failed to load.", details);
 } else {
   console.log("Supabase OK at check:", window.supabase, window.supabase.createClient);
-  // (your existing createClient code continues here)
+  try {
+    supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+    SUPABASE_READY = true;
+  } catch (e) {
+    showFatalError(
+      "Login system failed to start",
+      "Supabase loaded but couldn’t initialize.",
+      (e && (e.stack || e.message)) ? (e.stack || e.message) : String(e)
+    );
+  }
 }
 /* ================================
    ✅ LEAGUE ACCESS SETTINGS
