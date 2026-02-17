@@ -3142,7 +3142,10 @@ function showLeagueCodeScreen() {
 // Initialize
 
 (async function init() {
-
+	
+console.log("INIT STARTED");
+window.__INIT_STARTED = true;
+	
   // Always start hidden until boot finishes (prevents UI flash / partial state)
   try { hideAllScreens(); } catch (e) {}
 
@@ -3189,13 +3192,15 @@ function showLeagueCodeScreen() {
   // Boot is complete — show either the gate (locked) or the menu (unlocked)
   hideBootScreen();
 
-  } catch (err) {
-    showFatalError(
-      "Startup error",
-      "The app hit an error while starting.",
-      (err && (err.stack || err.message)) ? (err.stack || err.message) : String(err)
-    );
-  }
+ } catch (err) {
+  console.error("INIT CRASHED:", err);
+
+  showFatalError(
+    "Startup error",
+    "The app hit an error while starting.",
+    (err && (err.stack || err.message)) ? (err.stack || err.message) : String(err)
+  );
+}
 })();
 	
 </script>
