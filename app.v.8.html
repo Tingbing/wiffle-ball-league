@@ -1,6 +1,7 @@
 <!doctype html>
 <html>
 <head>
+	<meta charset="utf-8">
 	<meta name="viewport" content="width=device-width, initial-scale=1.0">
 	<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
 	<meta http-equiv="Pragma" content="no-cache" />
@@ -280,8 +281,11 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 999999;
+  z-index: 9000;
   padding: 20px;
+}
+.fatal-screen.hidden {
+  display: none;
 }
 
 </style>
@@ -302,7 +306,7 @@
 </div>
 
 <!-- ✅ ACCESS GATE: blocks app until login + league code -->
-<div id="accessGate" class="gate hidden">
+<div id="accessGate" class="gate">
 	<div class="gate-panel">
 		<h2 id="gateTitle">🔒 League Access Required</h2>
 		<p class="gate-note" id="gateMsg">
@@ -639,7 +643,6 @@
 </div>
 <!-- SCHEDULE SCREEN -->
 
-<script src="/wiffle-ball-league/vendor/supabase.js"></script>
 
 <script>
 
@@ -653,8 +656,9 @@ let supabaseClient = null;
 let SUPABASE_READY = false;
 
 function showFatalError(title, msg, details) {
+  console.trace("showFatalError called", { title, msg, details });
   try { hideAllScreens(); } catch (e) {}
-  try { document.getElementById("accessGate")?.classList.add("hidden"); } catch (e) {}
+  try { showGate("login", "Enter your email to get a login link."); } catch (e) {}
  
   const fs = document.getElementById("fatalScreen");
   if (fs) fs.classList.remove("hidden");
@@ -668,36 +672,116 @@ function showFatalError(title, msg, details) {
   if (d) d.innerText = details || "";
 }
 
-function fetchWithTimeout(url, opts = {}, ms = 8000) {
-  const controller = new AbortController();
-  const t = setTimeout(() => controller.abort(), ms);
-  return fetch(url, { ...opts, signal: controller.signal })
-    .finally(() => clearTimeout(t));
+function hideFatalError() {
+  const fs = document.getElementById("fatalScreen");
+  if (fs) fs.classList.add("hidden");
 }
+
 console.log("SUPABASE AT CHECK TIME:", window.supabase, window.supabase?.createClient);
-	
-if (!window.supabase || !window.supabase.createClient) {
-  const details =
-    `window.supabase=${typeof window.supabase}, ` +
-    `createClient=${typeof window.supabase?.createClient}, ` +
-    `path=${location.pathname}, href=${location.href}`;
 
-  console.error("FATAL TRIGGERED:", details);
+function loadScript(src) {
+  return new Promise((resolve, reject) => {
+    const s = document.createElement("script");
+    s.src = src;
+    s.onload = () => resolve(src);
+    s.onerror = () => reject(new Error("Failed to load " + src));
+    document.head.appendChild(s);
+  });
+}
 
-  showFatalError("Error", "Supabase failed to load.", details);
-} else {
-  console.log("Supabase OK at check:", window.supabase, window.supabase.createClient);
+async function ensureSupabaseGlobal() {
+  if (window.supabase && window.supabase.createClient) return { ok: true, tried: [] };
+
+  const tried = [];
+  const candidates = [
+    "vendor/supabase.js",
+    "./vendor/supabase.js",
+    "/vendor/supabase.js",
+    "/wiffle-ball-league/vendor/supabase.js"
+  ];
+
+  for (const src of [...new Set(candidates)]) {
+    tried.push(src);
+    try {
+      await loadScript(src);
+    } catch (e) {
+      // try next candidate
+    }
+    if (window.supabase && window.supabase.createClient) {
+      return { ok: true, tried };
+    }
+  }
+
+  return { ok: false, tried };
+}
+
+async function initializeSupabaseClient() {
+  if (SUPABASE_READY && supabaseClient) return true;
+
+  const loadState = await ensureSupabaseGlobal();
+  if (!loadState.ok) {
+    const details =
+      "window.supabase=" + (typeof window.supabase) + ", " +
+      "createClient=" + (typeof window.supabase?.createClient) + ", " +
+      "path=" + location.pathname + ", href=" + location.href + ", " +
+      "tried=" + loadState.tried.join(",");
+
+    console.error("FATAL TRIGGERED:", details);
+    showFatalError("Error", "Supabase failed to load.", details);
+    return false;
+  }
+
+  let initStage = "preflight";
+  const supabaseInitDiag = {
+    href: location.href,
+    path: location.pathname,
+    supabaseType: typeof window.supabase,
+    createClientType: typeof window.supabase?.createClient,
+    urlType: typeof SUPABASE_URL,
+    keyType: typeof SUPABASE_ANON_KEY,
+    keyParts: (typeof SUPABASE_ANON_KEY === "string") ? SUPABASE_ANON_KEY.split(".").length : 0
+  };
+
   try {
-supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
-  global: { fetch: (url, opts) => fetchWithTimeout(url, opts, 8000) }
-});
-SUPABASE_READY = true;
+    initStage = "validate-url";
+    // Throws if malformed
+    new URL(SUPABASE_URL);
+
+    initStage = "create-client";
+    supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+      auth: {
+        detectSessionInUrl: true,
+        persistSession: true,
+        autoRefreshToken: true,
+        // Avoid browser LockManager abort issues seen in some localhost/browser states.
+        lock: async (_name, _acquireTimeout, fn) => await fn()
+      }
+    });
+
+    initStage = "mark-ready";
+    SUPABASE_READY = true;
+
+    initStage = "hide-fatal";
+    hideFatalError();
+
+    console.log("Supabase init OK", { stage: initStage, diag: supabaseInitDiag });
+    return true;
   } catch (e) {
+    console.error("Supabase init failed", {
+      stage: initStage,
+      diag: supabaseInitDiag,
+      error: e
+    });
+
+    const detailPrefix = "stage=" + initStage + "; diag=" + JSON.stringify(supabaseInitDiag);
+    const errText = (e && (e.stack || e.message)) ? (e.stack || e.message) : String(e);
+
     showFatalError(
       "Login system failed to start",
-      "Supabase loaded but couldn’t initialize.",
-      (e && (e.stack || e.message)) ? (e.stack || e.message) : String(e)
+      "Supabase loaded but could not initialize.",
+      detailPrefix + "; error=" + errText
     );
+    return false;
   }
 }
 /* ================================
@@ -726,15 +810,22 @@ function setStoredEmail(email) {
   localStorage.setItem(LS_EMAIL_KEY, (email || "").trim());
 }
 let leagueUnlockedThisSession = false;
-// Always require league code each time the page is opened.
-// (Old versions stored this in localStorage; we clear it to avoid device-remembering.)
-try { localStorage.removeItem(LS_LEAGUE_OK_KEY); } catch (e) {}
+// Persist league unlock across refreshes (cleared on logout).
+try {
+  leagueUnlockedThisSession = localStorage.getItem(LS_LEAGUE_OK_KEY) === "1";
+} catch (e) {
+  leagueUnlockedThisSession = false;
+}
 
 function isLeagueUnlocked() {
   return !!leagueUnlockedThisSession;
 }
 function setLeagueUnlocked(v) {
   leagueUnlockedThisSession = !!v;
+  try {
+    if (leagueUnlockedThisSession) localStorage.setItem(LS_LEAGUE_OK_KEY, "1");
+    else localStorage.removeItem(LS_LEAGUE_OK_KEY);
+  } catch (e) {}
 }
 
 /* ================================
@@ -870,7 +961,7 @@ function showGate(step, msg) {
   const gate = document.getElementById("accessGate");
   gate.classList.remove("hidden");
 
-  // Hide the app UI behind the gate (prevents “old menu” showing through)
+  // Hide the app UI behind the gate (prevents old menu showing through)
   try { hideAllScreens(); } catch (e) {}
 
   document.getElementById("gateStepLogin").classList.add("hidden");
@@ -881,22 +972,25 @@ function showGate(step, msg) {
   if (msg) document.getElementById("gateMsg").innerText = msg;
 
   if (step === "login") {
-    document.getElementById("gateTitle").innerText = "🔒 Login Required";
+    document.getElementById("gateTitle").innerText = "Login Required";
     document.getElementById("gateStepLogin").classList.remove("hidden");
+    // Always show league code entry while login step is visible.
+    document.getElementById("gateStepCode").classList.remove("hidden");
     badge.innerText = "Status: Locked (not logged in)";
   } else if (step === "code") {
-    document.getElementById("gateTitle").innerText = "🔒 League Code Required";
+    document.getElementById("gateTitle").innerText = "League Code Required";
     document.getElementById("gateStepCode").classList.remove("hidden");
     badge.innerText = "Status: Locked (league code not entered)";
   } else if (step === "done") {
-    document.getElementById("gateTitle").innerText = "✅ Access Granted";
+    document.getElementById("gateTitle").innerText = "Access Granted";
     document.getElementById("gateWelcomeName").innerText = getStoredName() || "Player";
     document.getElementById("gateStepDone").classList.remove("hidden");
     badge.innerText = "Status: Unlocked";
   } else {
     // fallback
-    document.getElementById("gateTitle").innerText = "🔒 League Access Required";
+    document.getElementById("gateTitle").innerText = "League Access Required";
     document.getElementById("gateStepLogin").classList.remove("hidden");
+    document.getElementById("gateStepCode").classList.remove("hidden");
     badge.innerText = "Status: Locked";
   }
 
@@ -906,7 +1000,6 @@ function showGate(step, msg) {
   const n = getStoredName();
   if (n) document.getElementById("gateNameInput").value = n;
 }
-
 function closeGate() {
   document.getElementById("accessGate").classList.add("hidden");
   showMainMenu();
@@ -2998,7 +3091,7 @@ if (game.inning <= 2 && game.halfInningRuns>= 6) {
 	  renderScheduleUI();
 	}
 	
-	async function sendLoginLink() {
+async function sendLoginLink() {
   // main menu fallback (kept for convenience)
   const email = (document.getElementById("loginEmail")?.value || "").trim();
   if (!email) return alert("Enter an email");
@@ -3007,10 +3100,12 @@ if (game.inning <= 2 && game.halfInningRuns>= 6) {
   // store email
   setStoredEmail(email);
 
+  const emailRedirectTo = buildEmailRedirectUrl();
+
   const { error } = await supabaseClient.auth.signInWithOtp({
     email,
     options: {
-      emailRedirectTo: "https://tingbing.github.io/wiffle-ball-league/"
+      emailRedirectTo
     }
   });
 
@@ -3034,9 +3129,11 @@ async function sendLoginLinkFromGate() {
   if (name) setStoredName(name);
   setStoredEmail(email);
 
+  const emailRedirectTo = buildEmailRedirectUrl();
+
   const { error } = await supabaseClient.auth.signInWithOtp({
     email,
-    options: { emailRedirectTo: "https://tingbing.github.io/wiffle-ball-league/" }
+    options: { emailRedirectTo }
   });
 
   if (error) return alert(error.message);
@@ -3101,71 +3198,99 @@ function showLeagueCodeScreen() {
   document.getElementById("leagueCodeScreen").classList.remove("hidden");
 }
 
+function buildEmailRedirectUrl() {
+  const redirectUrl = new URL(location.pathname || "/", location.origin);
+  // Keep explicit post-login flags for boot/access logic.
+  redirectUrl.searchParams.set("postAuth", "1");
+  redirectUrl.searchParams.set("src", "email");
+  return redirectUrl.toString();
+}
+
 
 // Initialize
 // Initialize
 
 (async function init() {
-	
+
 console.log("INIT STARTED");
 window.__INIT_STARTED = true;
-	
+
   // Always start hidden until boot finishes (prevents UI flash / partial state)
   try { hideAllScreens(); } catch (e) {}
 
-  // If Supabase didn’t load, we already showed a fatal error screen.
-  if (!SUPABASE_READY || !supabaseClient) return;
+  // Ensure Supabase is initialized before any startup logic runs.
+  if (!(await initializeSupabaseClient())) return;
 
   try {
+    const safeInitStep = async (label, fn) => {
+      try {
+        await fn();
+      } catch (e) {
+        console.warn("Non-fatal init step failed:", label, e);
+      }
+    };
 
-  // Gate email typing -> show name box after email entered
-  const gateEmailEl = document.getElementById("gateLoginEmail");
-  if (gateEmailEl) {
-    gateEmailEl.addEventListener("input", (e) =>
-      maybeShowNameBox((e.target.value || "").trim())
+    // Gate email typing -> show name box after email entered
+    const gateEmailEl = document.getElementById("gateLoginEmail");
+    if (gateEmailEl) {
+      gateEmailEl.addEventListener("input", (e) =>
+        maybeShowNameBox((e.target.value || "").trim())
+      );
+    }
+
+    // Keep main menu email typing behavior too (optional)
+    const mainEmailEl = document.getElementById("loginEmail");
+    if (mainEmailEl) {
+      mainEmailEl.addEventListener("change", (e) => {
+        const email = (e.target.value || "").trim();
+        if (email) setStoredEmail(email);
+        if (email && !getStoredName()) showGate("login");
+      });
+    }
+
+    // React to login/logout automatically
+    supabaseClient.auth.onAuthStateChange(async (_event, _session) => {
+      await evaluateAccess();
+      await updateAuthUI();
+    });
+
+    await safeInitStep("load teams", async () => { await load(); });
+    await safeInitStep("load schedule", async () => { loadSchedule(); });
+    await safeInitStep("load season", async () => { loadSeason(); });
+    await safeInitStep("sync team records", async () => { syncTeamRecordsWithLeague(); });
+    await safeInitStep("save season", async () => { saveSeason(); });
+    await safeInitStep("update UI", async () => { update(); });
+
+    await safeInitStep("evaluate access", async () => { await evaluateAccess(); });
+    await safeInitStep("update auth UI", async () => { await updateAuthUI(); });
+
+    hideFatalError();
+  } catch (err) {
+    console.error("INIT CRASHED:", err);
+
+    showFatalError(
+      "Startup error",
+      "The app hit an error while starting.",
+      (err && (err.stack || err.message)) ? (err.stack || err.message) : String(err)
     );
   }
-
-  // Keep main menu email typing behavior too (optional)
-  const mainEmailEl = document.getElementById("loginEmail");
-  if (mainEmailEl) {
-    mainEmailEl.addEventListener("change", (e) => {
-      const email = (e.target.value || "").trim();
-      if (email) setStoredEmail(email);
-      if (email && !getStoredName()) showGate("login");
-    });
-  }
-
-  // React to login/logout automatically
-  supabaseClient.auth.onAuthStateChange(async (_event, _session) => {
-    await evaluateAccess();
-    await updateAuthUI();
-  });
-
-  await load(); // pulls teams from Supabase
-  loadSchedule();
-  loadSeason();
-  syncTeamRecordsWithLeague();
-  saveSeason();
-  update();
-
-  // ✅ THIS IS THE KEY: run the gate check ON PAGE LOAD (including magic-link redirects)
-  await evaluateAccess();
-  await updateAuthUI();
-
-
- } catch (err) {
-  console.error("INIT CRASHED:", err);
-
-  showFatalError(
-    "Startup error",
-    "The app hit an error while starting.",
-    (err && (err.stack || err.message)) ? (err.stack || err.message) : String(err)
-  );
-}
 })();
+
 	
 </script>
 
+
+<!--<script src="/wiffle-ball-league/vendor/supabase.js"></script>-->
+<script src="./vendor/supabase.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
+
 </body>
 </html>
+
+
+
+
+
+
+
