@@ -810,22 +810,14 @@ function setStoredEmail(email) {
   localStorage.setItem(LS_EMAIL_KEY, (email || "").trim());
 }
 let leagueUnlockedThisSession = false;
-// Persist league unlock across refreshes (cleared on logout).
-try {
-  leagueUnlockedThisSession = localStorage.getItem(LS_LEAGUE_OK_KEY) === "1";
-} catch (e) {
-  leagueUnlockedThisSession = false;
-}
 
+// ✅ Do NOT persist the league-code unlock.
+// This forces users to re-enter the league code any time the page/app is opened fresh.
 function isLeagueUnlocked() {
   return !!leagueUnlockedThisSession;
 }
 function setLeagueUnlocked(v) {
   leagueUnlockedThisSession = !!v;
-  try {
-    if (leagueUnlockedThisSession) localStorage.setItem(LS_LEAGUE_OK_KEY, "1");
-    else localStorage.removeItem(LS_LEAGUE_OK_KEY);
-  } catch (e) {}
 }
 
 /* ================================
