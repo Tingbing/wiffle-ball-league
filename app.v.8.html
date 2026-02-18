@@ -470,8 +470,29 @@
 	
 	<h2>🎮 Start a Game</h2>
 
-	<div class="card">
-		<h3>Select Teams</h3>
+	<div class="card" id="scheduledGameCard">
+		<h3>Record Scheduled Game</h3>
+
+		<p>Which day?</p>
+		<select id="scheduleDaySelect" onchange="populateScheduleGameSelect()"></select>
+
+		<p>Which game?</p>
+		<select id="scheduleGameSelect"></select>
+
+		<p id="schedulePickHint" style="color:#aaa; font-size:13px; margin-top:8px;"></p>
+
+		<button class="menu-button" id="startScheduledGameBtn" onclick="startSelectedScheduledGame()">
+			Start Selected Game
+		</button>
+	</div>
+
+	<!-- fallback if schedule isn't available -->
+	<div class="card" id="manualTeamCard">
+		<h3>Select Teams (Manual)</h3>
+		<p style="color:#aaa; font-size:13px;">
+			Schedule pick requires exactly 4 teams with players.
+		</p>
+
 		<p>Team 1:</p>
 		<select id="team1Select"></select>
 		
@@ -481,6 +502,7 @@
 		<button class="menu-button" onclick="startGame()">Start Game</button>
 	</div>
 </div>
+
 
 <!-- GAME SCREEN -->
 <div id="gameScreen" class="hidden">
@@ -1518,22 +1540,36 @@ async function submitLeagueCode() {
 	}
 
 	function updateScheduleForCompletedGame(teamA, teamB, resultObj) {
-		if (!schedule?.days?.length) return;
+	if (!schedule?.days?.length) return;
 
-		for (const day of schedule.days) {
-			for (const g of day.games) {
-				if (g.result) continue; // already played
-				const match =
-					(g.away === teamA && g.home === teamB) ||
-					(g.away === teamB && g.home === teamA);
-				if (!match) continue;
-
-				g.result = resultObj;
-				saveSchedule();
-				return;
-			}
+	// ✅ If this game started from the schedule picker, update that exact entry
+	const ref = game?._scheduleRef;
+	if (ref && Number.isInteger(ref.dayIndex) && Number.isInteger(ref.gameIndex)) {
+		const day = schedule.days[ref.dayIndex];
+		const g = day?.games?.[ref.gameIndex];
+		if (g) {
+			if (g.result) return; // already recorded
+			g.result = resultObj;
+			saveSchedule();
+			return;
 		}
 	}
+
+	// fallback (old behavior): find first unplayed matching matchup
+	for (const day of schedule.days) {
+		for (const g of day.games) {
+			if (g.result) continue; // already played
+			const match =
+				(g.away === teamA && g.home === teamB) ||
+				(g.away === teamB && g.home === teamA);
+			if (!match) continue;
+
+			g.result = resultObj;
+			saveSchedule();
+			return;
+		}
+	}
+}
 
 	function applyGameOutcomeOnce() {
 		if (!game || game._resultSaved) return;
@@ -1855,25 +1891,39 @@ container.appendChild(dayCard);
 		update();
 	}
 
-	function showGameSetup() {
-		hideAllScreens();
-		
-		if (league.teams.length < 2) {
-			alert("You need at least 2 teams! Please configure teams first.");
-			showTeamConfig();
-			return;
-		}
+function showGameSetup() {
+	hideAllScreens();
+	
+	if (league.teams.length < 2) {
+		alert("You need at least 2 teams! Please configure teams first.");
+		showTeamConfig();
+		return;
+	}
 
-		let validTeams = league.teams.filter(t => t.players.length > 0);
-		if (validTeams.length < 2) {
-			alert("You need at least 2 teams with players! Please add players first.");
-			showTeamConfig();
-			return;
-		}
+	let validTeams = league.teams.filter(t => t.players.length > 0);
+	if (validTeams.length < 2) {
+		alert("You need at least 2 teams with players! Please add players first.");
+		showTeamConfig();
+		return;
+	}
 
-		document.getElementById("gameSetupScreen").classList.remove("hidden");
+	document.getElementById("gameSetupScreen").classList.remove("hidden");
+
+	const schedCard = document.getElementById("scheduledGameCard");
+	const manualCard = document.getElementById("manualTeamCard");
+
+	const info = ensureScheduleUpToDateForSelection();
+	if (info.ok) {
+		schedCard.style.display = "block";
+		manualCard.style.display = "none";
+		populateScheduleDaySelect();
+	} else {
+		schedCard.style.display = "none";
+		manualCard.style.display = "block";
 		updateGameSetupSelects();
 	}
+}
+
 
 	function showGame() {
 		hideAllScreens();
@@ -2131,79 +2181,202 @@ async function addPlayer() {
 		}
 	}
 
-	function startGame() {
-		let validTeams = league.teams.filter(t => t.players.length > 0);
-		
-		let team1Index = parseInt(document.getElementById("team1Select").value);
-		let team2Index = parseInt(document.getElementById("team2Select").value);
-
-		if (team1Index === team2Index) {
-			alert("Please select two different teams!");
-			return;
-		}
-
-		let t1 = validTeams[team1Index];
-		let t2 = validTeams[team2Index];
-
-		t1.players.forEach(p => initPlayerStats(t1.name, p));
-		t2.players.forEach(p => initPlayerStats(t2.name, p));
-
-		let batting = Math.random() > 0.5 ? t1 : t2;
-		let fielding = batting === t1 ? t2 : t1;
-
-		game = {
-			team1: t1,
-			team2: t2,
-			team1Score: 0,
-			team2Score: 0,
-			batting: batting,
-			fielding: fielding,
-			outs: 0,
-			inning: 1,
-			halfInning: "top",
-			batterIndex: 0,
-			currentPitcher: null,
-			bases: {
-				first: null,
-				second: null,
-				third: null
-			},
-			gameStats: {},
-			currentInningPitchers: {},
-			halfInningRuns: 0
-		};
-
-		[...t1.players, ...t2.players].forEach(p => {
-			let teamName = t1.players.includes(p) ? t1.name : t2.name;
-			let key = getPlayerKey(teamName, p);
-			game.gameStats[key] = {
-				atBats: 0,
-				hits: 0,
-				singles: 0,
-				doubles: 0,
-				triples: 0,
-				homeRuns: 0,
-				walks: 0,
-				strikeouts: 0,
-				outs: 0,
-				rbis: 0,
-				pitchOuts: 0,
-				pitchStrikeouts: 0,
-				fieldingErrors: 0,
-				inningsPitched: 0,
-				runsAllowed: 0,
-				earnedRunsAllowed: 0
-			};
-		});
-
-		gameHistory = [];
-		pendingBattingResult = null;
-		document.getElementById("undoButton").disabled = true;
-
-		showGame();
-		updatePitcherSelect();
-		updateGameScreen();
+function ensureScheduleUpToDateForSelection() {
+	const validTeams = getValidTeamsForSchedule();
+	if (validTeams.length !== 4) {
+		return { ok: false, reason: "Schedule requires exactly 4 teams with players." };
 	}
+
+	// Same “needsNew” logic your schedule screen uses :contentReference[oaicite:5]{index=5}
+	const teamNames = validTeams.map(t => t.name).sort();
+	const scheduleNames = (schedule?.teamNames || []).slice().sort();
+
+	const needsNew =
+		!schedule?.days?.length ||
+		schedule.days.length !== 6 ||
+		scheduleNames.join("|") !== teamNames.join("|");
+
+	if (needsNew) {
+		schedule = generateBalancedSchedule4(validTeams);
+		saveSchedule();
+	}
+
+	return { ok: true, validTeams };
+}
+
+function populateScheduleDaySelect() {
+	const daySelect = document.getElementById("scheduleDaySelect");
+	if (!daySelect) return;
+
+	daySelect.innerHTML = "";
+
+	(schedule.days || []).forEach((dayObj, idx) => {
+		const unplayed = (dayObj.games || []).filter(g => !g.result).length;
+		const opt = document.createElement("option");
+		opt.value = String(idx);
+		opt.text = `Day ${dayObj.day}` + (unplayed === 0 ? " (all recorded)" : "");
+		daySelect.appendChild(opt);
+	});
+
+	// default to first day with an unplayed game
+	const firstOpen = (schedule.days || []).findIndex(d => (d.games || []).some(g => !g.result));
+	daySelect.value = String(firstOpen >= 0 ? firstOpen : 0);
+
+	populateScheduleGameSelect();
+}
+
+function populateScheduleGameSelect() {
+	const daySelect = document.getElementById("scheduleDaySelect");
+	const gameSelect = document.getElementById("scheduleGameSelect");
+	const hint = document.getElementById("schedulePickHint");
+	const btn = document.getElementById("startScheduledGameBtn");
+
+	if (!daySelect || !gameSelect) return;
+
+	const dayIndex = parseInt(daySelect.value, 10);
+	const dayObj = schedule?.days?.[dayIndex];
+
+	gameSelect.innerHTML = "";
+
+	if (!dayObj || !Array.isArray(dayObj.games)) {
+		if (hint) hint.innerText = "No schedule found.";
+		if (btn) btn.disabled = true;
+		gameSelect.disabled = true;
+		return;
+	}
+
+	let added = 0;
+
+	dayObj.games.forEach((g, gameIndex) => {
+		if (g.result) return; // already recorded
+		const opt = document.createElement("option");
+		opt.value = `${dayIndex}|${gameIndex}`;
+		opt.text = `Game ${g.gameNumber}: ${g.away} vs ${g.home}`;
+		gameSelect.appendChild(opt);
+		added++;
+	});
+
+	if (added === 0) {
+		const opt = document.createElement("option");
+		opt.value = "";
+		opt.text = "No available games (already recorded)";
+		gameSelect.appendChild(opt);
+		gameSelect.disabled = true;
+		if (btn) btn.disabled = true;
+		if (hint) hint.innerText = "All games for this day are already recorded.";
+	} else {
+		gameSelect.disabled = false;
+		if (btn) btn.disabled = false;
+		if (hint) hint.innerText = "";
+	}
+}
+
+function startSelectedScheduledGame() {
+	const gameSelect = document.getElementById("scheduleGameSelect");
+	if (!gameSelect || !gameSelect.value) return;
+
+	const [dayIndexStr, gameIndexStr] = gameSelect.value.split("|");
+	const dayIndex = parseInt(dayIndexStr, 10);
+	const gameIndex = parseInt(gameIndexStr, 10);
+
+	const dayObj = schedule?.days?.[dayIndex];
+	const g = dayObj?.games?.[gameIndex];
+	if (!g) return alert("Could not find that scheduled game.");
+	if (g.result) {
+		alert("That game was already recorded.");
+		populateScheduleGameSelect();
+		return;
+	}
+
+	const validTeams = league.teams.filter(t => t.players.length > 0);
+	const t1 = validTeams.find(t => t.name === g.away);
+	const t2 = validTeams.find(t => t.name === g.home);
+
+	if (!t1 || !t2) {
+		alert("Could not match schedule teams to your team list.");
+		return;
+	}
+
+	startGameWithTeams(t1, t2, { dayIndex, gameIndex });
+}
+
+function startGameWithTeams(t1, t2, scheduleRef = null) {
+	t1.players.forEach(p => initPlayerStats(t1.name, p));
+	t2.players.forEach(p => initPlayerStats(t2.name, p));
+
+	let batting = Math.random() > 0.5 ? t1 : t2;
+	let fielding = batting === t1 ? t2 : t1;
+
+	game = {
+		team1: t1,
+		team2: t2,
+		team1Score: 0,
+		team2Score: 0,
+		batting: batting,
+		fielding: fielding,
+		outs: 0,
+		inning: 1,
+		halfInning: "top",
+		batterIndex: 0,
+		currentPitcher: null,
+		bases: { first: null, second: null, third: null },
+		gameStats: {},
+		currentInningPitchers: {},
+		halfInningRuns: 0,
+
+		// ✅ this is what ties the game to the exact schedule entry
+		_scheduleRef: scheduleRef
+	};
+
+	[...t1.players, ...t2.players].forEach(p => {
+		let teamName = t1.players.includes(p) ? t1.name : t2.name;
+		let key = getPlayerKey(teamName, p);
+		game.gameStats[key] = {
+			atBats: 0,
+			hits: 0,
+			singles: 0,
+			doubles: 0,
+			triples: 0,
+			homeRuns: 0,
+			walks: 0,
+			strikeouts: 0,
+			outs: 0,
+			rbis: 0,
+			pitchOuts: 0,
+			pitchStrikeouts: 0,
+			fieldingErrors: 0,
+			inningsPitched: 0,
+			runsAllowed: 0,
+			earnedRunsAllowed: 0
+		};
+	});
+
+	gameHistory = [];
+	pendingBattingResult = null;
+	document.getElementById("undoButton").disabled = true;
+
+	showGame();
+	updatePitcherSelect();
+	updateGameScreen();
+}
+
+function startGame() {
+	let validTeams = league.teams.filter(t => t.players.length > 0);
+
+	let team1Index = parseInt(document.getElementById("team1Select").value);
+	let team2Index = parseInt(document.getElementById("team2Select").value);
+
+	if (team1Index === team2Index) {
+		alert("Please select two different teams!");
+		return;
+	}
+
+	let t1 = validTeams[team1Index];
+	let t2 = validTeams[team2Index];
+
+	startGameWithTeams(t1, t2, null);
+}
+
 
 	function endGameEarly() {
 		if (confirm("End this game early? Stats will be saved up to this point.")) {
