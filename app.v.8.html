@@ -446,7 +446,7 @@
 	<h2>⚙️ Team Configuration</h2>
 
 	<div class="card">
-		<h3>Add Team</h3>
+		<h3>Add Team (Max 4)</h3>
 		<input id="teamName" placeholder="Team Name">
 		<button onclick="addTeam()">Add Team</button>
 	</div>
@@ -793,6 +793,11 @@ const LEAGUE_CODE = "6767"; // <-- IMPORTANT: change this
 const LS_NAME_KEY = "wbl_userName";
 const LS_EMAIL_KEY = "wbl_userEmail";
 const LS_LEAGUE_OK_KEY = "wbl_leagueOk";
+
+	// ✅ Limits
+const MAX_TEAMS = 4;
+const MAX_PLAYERS_PER_TEAM = 2;
+
 
 /* ================================
    ✅ ACCESS GATE HELPERS
@@ -1903,8 +1908,16 @@ document.getElementById("activeUsersScreen").classList.add("hidden");
 async function addTeam() {
   if (!(await requireLogin())) return;
 
-  const name = document.getElementById("teamName").value.trim();
+  // ✅ Make sure we’re checking the latest team list before enforcing limit
+  try { await load(); } catch (e) {}
+
+  const name = (document.getElementById("teamName")?.value || "").trim();
   if (!name) return;
+
+  if ((league?.teams?.length || 0) >= MAX_TEAMS) {
+    alert(`⚠️ Max ${MAX_TEAMS} teams reached.\nRemove a team before adding another.`);
+    return;
+  }
 
   const { error } = await supabaseClient.from("teams").insert([{ name }]);
   if (error) return alert(error.message);
@@ -1914,22 +1927,36 @@ async function addTeam() {
   syncTeamRecordsWithLeague();
   update();
 }
-	
-	async function addPlayer() {
+
+async function addPlayer() {
   if (!(await requireLogin())) return;
 
-  const teamIndex = document.getElementById("teamSelect").value;
-  if (teamIndex === "" || teamIndex == null) return alert("Select a team");
+  const teamIndexStr = document.getElementById("teamSelect")?.value;
+  if (teamIndexStr === "" || teamIndexStr == null) return alert("Select a team");
 
-  const player = document.getElementById("playerName").value.trim();
+  const teamIndex = Number(teamIndexStr);
+
+  const player = (document.getElementById("playerName")?.value || "").trim();
   if (!player) return;
 
-  const teamName = league.teams[teamIndex].name;
+  const selectedTeamName = league?.teams?.[teamIndex]?.name;
+  if (!selectedTeamName) return alert("Select a team");
+
+  // ✅ Refresh latest teams/players before enforcing limit
+  try { await load(); } catch (e) {}
+
+  const teamObj = (league?.teams || []).find(t => t.name === selectedTeamName);
+  const currentPlayers = (teamObj?.players || []).length;
+
+  if (currentPlayers >= MAX_PLAYERS_PER_TEAM) {
+    alert(`⚠️ ${selectedTeamName} already has ${MAX_PLAYERS_PER_TEAM} players.\nRemove a player before adding another.`);
+    return;
+  }
 
   const { data: teamRow, error: tErr } = await supabaseClient
     .from("teams")
     .select("id")
-    .eq("name", teamName)
+    .eq("name", selectedTeamName)
     .single();
 
   if (tErr) return alert(tErr.message);
@@ -1946,6 +1973,8 @@ async function addTeam() {
   syncTeamRecordsWithLeague();
   update();
 }
+	
+
 
 
 	async function removeTeam(teamIndex) {
