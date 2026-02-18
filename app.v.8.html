@@ -1096,17 +1096,20 @@ async function submitLeagueCode() {
 	==================================*/
 	let schedule = { days: [], teamNames: [] };
 	
-	function saveSchedule({ skipServerSync = false } = {}) {
-	// stamp update time (used for cross-device sync)
-	try {
-		if (!schedule || typeof schedule !== "object") schedule = { days: [], teamNames: [] };
-		schedule._meta = schedule._meta || {};
-		schedule._meta.updated_at = new Date().toISOString();
-	} catch (e) {}
+function saveSchedule({ skipServerSync = false, touchMeta = true } = {}) {
+  // stamp update time (used for cross-device sync)
+  try {
+    if (!schedule || typeof schedule !== "object") schedule = { days: [], teamNames: [] };
+    if (touchMeta) {
+      schedule._meta = schedule._meta || {};
+      schedule._meta.updated_at = new Date().toISOString();
+    }
+  } catch (e) {}
 
-	localStorage.setItem("wiggleSchedule", JSON.stringify(schedule));
-	if (!skipServerSync) queueServerSync("schedule");
+  localStorage.setItem("wiggleSchedule", JSON.stringify(schedule));
+  if (!skipServerSync) queueServerSync("schedule");
 }
+
 	
 	function loadSchedule() {
 	const data = localStorage.getItem("wiggleSchedule");
@@ -1201,19 +1204,21 @@ async function submitLeagueCode() {
   }));
 }
 
+function saveSeason({ skipServerSync = false, touchMeta = true } = {}) {
+  // stamp update time (used for cross-device sync)
+  try {
+    if (!season || typeof season !== "object") season = { playerStats: {}, teamRecords: {} };
+    if (touchMeta) {
+      season._meta = season._meta || {};
+      season._meta.updated_at = new Date().toISOString();
+    }
+  } catch (e) {}
 
-	function saveSeason({ skipServerSync = false } = {}) {
-	// stamp update time (used for cross-device sync)
-	try {
-		if (!season || typeof season !== "object") season = { playerStats: {}, teamRecords: {} };
-		season._meta = season._meta || {};
-		season._meta.updated_at = new Date().toISOString();
-	} catch (e) {}
-
-	localStorage.setItem("wiggleSeason", JSON.stringify(season));
-	if (!skipServerSync) queueServerSync("season");
+  localStorage.setItem("wiggleSeason", JSON.stringify(season));
+  if (!skipServerSync) queueServerSync("season");
 }
 
+	
 	function loadSeason() {
 		let data = localStorage.getItem("wiggleSeason");
 		if (data) {
@@ -1268,6 +1273,25 @@ async function submitLeagueCode() {
 		return obj;
 	}
 
+	function snapshotHasData(seasonObj, scheduleObj) {
+  try {
+    const ps = seasonObj?.playerStats || {};
+    if (ps && Object.keys(ps).length) return true;
+  } catch (e) {}
+
+  try {
+    const days = scheduleObj?.days || [];
+    for (const d of days) {
+      for (const g of (d.games || [])) {
+        if (g && g.result) return true;
+      }
+    }
+  } catch (e) {}
+
+  return false;
+}
+
+
 	async function fetchSeasonRowFromServer({ quiet = true } = {}) {
 		try {
 			const { data, error } = await supabaseClient
@@ -1301,9 +1325,8 @@ async function submitLeagueCode() {
 			schedule._meta.updated_at = serverIso;
 		} catch (e) {}
 
-		// Save locally WITHOUT triggering another sync
-		try { saveSeason({ skipServerSync: true }); } catch (e) {}
-		try { saveSchedule({ skipServerSync: true }); } catch (e) {}
+try { saveSeason({ skipServerSync: true, touchMeta: false }); } catch (e) {}
+try { saveSchedule({ skipServerSync: true, touchMeta: false }); } catch (e) {}
 
 		suppressAutoSync = false;
 
@@ -1321,12 +1344,17 @@ async function submitLeagueCode() {
 
 		const serverMs = Date.parse(row.updated_at || "") || 0;
 		const localMs = getLocalUpdatedAtMs();
+		
+// Pull if server is newer OR server has data and local is empty
+const serverHas = snapshotHasData(row.season_json, row.schedule_json);
+const localHas = snapshotHasData(season, schedule);
 
-		// Only pull if server is meaningfully newer than local
-		if (serverMs > localMs + 1000) {
-			applyServerSeasonRow(row);
-			showNotification("⬇️ Pulled latest stats from server", 1200);
-		}
+if ((serverHas && !localHas) || (serverMs > localMs + 1000)) {
+  applyServerSeasonRow(row);
+  showNotification("⬇️ Pulled latest stats from server", 1200);
+}
+
+
 	}
 
 	function queueServerSync(reason, { immediate = false } = {}) {
@@ -1535,8 +1563,8 @@ async function submitLeagueCode() {
 	function syncTeamRecordsWithLeague() {
 		// Make sure every current team has a record row
 		(league.teams || []).forEach(t => getTeamRecord(t.name));
-		// Save locally (server sync is handled by autosync/manual Sync Data)
-		try { saveSeason({ skipServerSync: true }); } catch (e) {}
+		try { saveSeason({ skipServerSync: true, touchMeta: false }); } catch (e) {}
+
 	}
 
 	function updateScheduleForCompletedGame(teamA, teamB, resultObj) {
@@ -3452,7 +3480,9 @@ window.__INIT_STARTED = true;
     await safeInitStep("load schedule", async () => { loadSchedule(); });
     await safeInitStep("load season", async () => { loadSeason(); });
     await safeInitStep("sync team records", async () => { syncTeamRecordsWithLeague(); });
-    await safeInitStep("save season", async () => { saveSeason(); });
+await safeInitStep("save season", async () => {
+  saveSeason({ skipServerSync: true, touchMeta: false });
+});
     await safeInitStep("update UI", async () => { update(); });
 
     await safeInitStep("evaluate access", async () => { await evaluateAccess(); });
