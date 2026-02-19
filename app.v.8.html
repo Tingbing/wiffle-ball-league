@@ -474,17 +474,57 @@
 		<h3>Record Scheduled Game</h3>
 
 		<p>Which day?</p>
-		<select id="scheduleDaySelect" onchange="populateScheduleGameSelect()"></select>
+	<select id="scheduleDaySelect" onchange="populateScheduleGameSelect(); clearPendingSubs();"></select>
+
 
 		<p>Which game?</p>
-		<select id="scheduleGameSelect"></select>
+		<select id="scheduleGameSelect" onchange="clearPendingSubs()"></select>
 
 		<p id="schedulePickHint" style="color:#aaa; font-size:13px; margin-top:8px;"></p>
+
+		<button class="small-link" id="addSubsBtn" onclick="openSubsModal()">➕ Add Subs (this game only)</button>
+<div id="subsSummary" class="gate-note" style="margin-top:6px;">No subs selected.</div>
 
 		<button class="menu-button" id="startScheduledGameBtn" onclick="startSelectedScheduledGame()">
 			Start Selected Game
 		</button>
 	</div>
+
+	<!-- ✅ SUBS MODAL (one-game replacements) -->
+<div id="subsModal" class="gate hidden">
+  <div class="gate-panel">
+    <h2>➕ Add Subs (This Game Only)</h2>
+    <p class="gate-note" id="subsModalGameLabel"></p>
+
+    <div class="card" style="margin-top:10px;">
+      <p style="margin-top:0;color:#aaa;">
+        Choose a team, pick who’s out, then type the sub’s name. This does NOT change your real rosters.
+      </p>
+
+      <p style="margin:8px 0 4px;">Team</p>
+      <select id="subsTeamSelect" onchange="updateSubsOutSelect()"></select>
+
+      <p style="margin:8px 0 4px;">Replace which player?</p>
+      <select id="subsOutSelect"></select>
+
+      <p style="margin:8px 0 4px;">Sub name</p>
+      <input id="subsInName" placeholder="Sub name" />
+
+      <div class="gate-actions" style="margin-top:10px;">
+        <button class="menu-button" onclick="addSubReplacement()">Add / Update Replacement</button>
+        <button class="small-link" onclick="clearSubsForThisGame()">Clear Subs</button>
+      </div>
+
+      <div id="subsList" style="margin-top:10px;"></div>
+    </div>
+
+    <div class="gate-actions">
+      <button class="menu-button" onclick="applySubsAndClose()">Done</button>
+      <button class="small-link" onclick="closeSubsModal()">Cancel</button>
+    </div>
+  </div>
+</div>
+
 
 	<!-- fallback if schedule isn't available -->
 	<div class="card" id="manualTeamCard">
@@ -1085,7 +1125,7 @@ async function submitLeagueCode() {
 }
 
 	let league = { teams: [] };
-	let season = { playerStats: {}, teamRecords: {} };
+	let season = { playerStats: {}, teamRecords: {}, subStats: {}};
 	let game = null;
 	let gameHistory = [];
 	let lastPlay = null;
@@ -1095,6 +1135,169 @@ async function submitLeagueCode() {
 	✅ SCHEDULE DATA (persisted)
 	==================================*/
 	let schedule = { days: [], teamNames: [] };
+
+	// ================================
+// ✅ SUBS (one-game replacements)
+// ================================
+let pendingSubsKey = null; // "dayIndex|gameIndex"
+let pendingSubs = [];      // [{ teamName, outPlayer, inPlayer }] where inPlayer ends with "(SUB)"
+
+function isSubName(name) {
+  return /\(SUB\)\s*$/i.test(String(name || "").trim());
+}
+function normalizeSubName(name) {
+  let n = String(name || "").trim().replace(/\s+/g, " ");
+  if (!n) return "";
+  if (!isSubName(n)) n += " (SUB)";
+  return n;
+}
+
+function clearPendingSubs() {
+  pendingSubsKey = null;
+  pendingSubs = [];
+  renderPendingSubsSummary();
+}
+
+function renderPendingSubsSummary() {
+  const el = document.getElementById("subsSummary");
+  if (!el) return;
+
+  if (!pendingSubsKey || pendingSubs.length === 0) {
+    el.textContent = "No subs selected.";
+    return;
+  }
+  el.textContent =
+    "Subs for this game: " +
+    pendingSubs.map(s => `${s.teamName}: ${s.outPlayer} → ${s.inPlayer}`).join(" • ");
+}
+
+function openSubsModal() {
+  const gameSelect = document.getElementById("scheduleGameSelect");
+  const key = (gameSelect?.value || "").trim();
+  if (!key || !key.includes("|")) return alert("Pick a day and game first.");
+
+  const [dayIndexStr, gameIndexStr] = key.split("|");
+  const dayIndex = parseInt(dayIndexStr, 10);
+  const gameIndex = parseInt(gameIndexStr, 10);
+
+  const g = schedule?.days?.[dayIndex]?.games?.[gameIndex];
+  if (!g) return alert("Pick a valid game first.");
+  if (g.result) return alert("That game is already recorded.");
+
+  // Tie pending subs to THIS selected game
+  if (pendingSubsKey && pendingSubsKey !== key) {
+    // switching games = clear old subs
+    pendingSubs = [];
+  }
+  pendingSubsKey = key;
+
+  const label = document.getElementById("subsModalGameLabel");
+  if (label) {
+    label.textContent = `Day ${schedule.days[dayIndex].day} • Game ${g.gameNumber}: ${g.away} vs ${g.home}`;
+  }
+
+  const teamSel = document.getElementById("subsTeamSelect");
+  if (teamSel) {
+    teamSel.innerHTML = "";
+    [g.away, g.home].forEach(tn => {
+      const opt = document.createElement("option");
+      opt.value = tn;
+      opt.textContent = tn;
+      teamSel.appendChild(opt);
+    });
+    teamSel.value = g.away;
+  }
+
+  updateSubsOutSelect();
+  renderSubsList();
+
+  const nameIn = document.getElementById("subsInName");
+  if (nameIn) nameIn.value = "";
+
+  document.getElementById("subsModal").classList.remove("hidden");
+}
+
+function closeSubsModal() {
+  document.getElementById("subsModal").classList.add("hidden");
+}
+
+function updateSubsOutSelect() {
+  const teamName = document.getElementById("subsTeamSelect")?.value;
+  const outSel = document.getElementById("subsOutSelect");
+  if (!outSel) return;
+
+  outSel.innerHTML = "";
+  const team = (league.teams || []).find(t => t.name === teamName);
+  const players = team?.players || [];
+
+  players.forEach(p => {
+    const opt = document.createElement("option");
+    opt.value = p;
+    opt.textContent = p;
+    outSel.appendChild(opt);
+  });
+}
+
+function addSubReplacement() {
+  const teamName = document.getElementById("subsTeamSelect")?.value;
+  const outPlayer = document.getElementById("subsOutSelect")?.value;
+  const rawIn = document.getElementById("subsInName")?.value;
+
+  const inPlayer = normalizeSubName(rawIn);
+  if (!teamName || !outPlayer) return alert("Pick a team and the player to replace.");
+  if (!inPlayer) return alert("Type the sub’s name.");
+
+  if (inPlayer === outPlayer) return alert("Sub name can’t be the same as the player you’re replacing.");
+
+  // Replace existing entry for same team+outPlayer
+  pendingSubs = (pendingSubs || []).filter(s => !(s.teamName === teamName && s.outPlayer === outPlayer));
+  pendingSubs.push({ teamName, outPlayer, inPlayer });
+
+  renderSubsList();
+  renderPendingSubsSummary();
+  const nameIn = document.getElementById("subsInName");
+  if (nameIn) nameIn.value = "";
+}
+
+function removeSubAt(idx) {
+  pendingSubs.splice(idx, 1);
+  renderSubsList();
+  renderPendingSubsSummary();
+}
+
+function clearSubsForThisGame() {
+  pendingSubs = [];
+  renderSubsList();
+  renderPendingSubsSummary();
+}
+
+function renderSubsList() {
+  const box = document.getElementById("subsList");
+  if (!box) return;
+
+  if (!pendingSubs || pendingSubs.length === 0) {
+    box.innerHTML = `<p style="color:#aaa;margin:0;">No subs added yet.</p>`;
+    return;
+  }
+
+  box.innerHTML = pendingSubs
+    .map((s, i) => `
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;
+                  border:1px solid #333;border-radius:10px;padding:8px;margin:8px 0;">
+        <div style="color:#ddd;">
+          <strong>${s.teamName}</strong>: ${s.outPlayer} → ${s.inPlayer}
+        </div>
+        <button class="small-link" onclick="removeSubAt(${i})">Remove</button>
+      </div>
+    `)
+    .join("");
+}
+
+function applySubsAndClose() {
+  renderPendingSubsSummary();
+  closeSubsModal();
+}
+
 	
 function saveSchedule({ skipServerSync = false, touchMeta = true } = {}) {
   // stamp update time (used for cross-device sync)
@@ -1224,6 +1427,7 @@ function saveSeason({ skipServerSync = false, touchMeta = true } = {}) {
 		if (data) {
 			season = JSON.parse(data);
 		}
+		season = ensureSeasonShape(season);
 		// ✅ ensure new fields exist (older saves won't have them)
 		if (!season || typeof season !== "object") season = { playerStats: {}, teamRecords: {} };
 		if (!season.playerStats) season.playerStats = {};
@@ -1259,12 +1463,27 @@ function saveSeason({ skipServerSync = false, touchMeta = true } = {}) {
 		return Math.max(s, sch);
 	}
 
-	function ensureSeasonShape(obj) {
-		if (!obj || typeof obj !== "object") return { playerStats: {}, teamRecords: {} };
-		if (!obj.playerStats) obj.playerStats = {};
-		if (!obj.teamRecords) obj.teamRecords = {};
-		return obj;
-	}
+	function ensureSeasonShape(seasonObj) {
+  if (!seasonObj || typeof seasonObj !== "object") seasonObj = {};
+  if (!seasonObj.playerStats) seasonObj.playerStats = {};
+  if (!seasonObj.teamRecords) seasonObj.teamRecords = {};
+  if (!seasonObj.subStats) seasonObj.subStats = {};
+
+  // Backfill subStats from playerStats if needed
+  if (Object.keys(seasonObj.subStats).length === 0) {
+    Object.keys(seasonObj.playerStats).forEach(k => {
+      const row = seasonObj.playerStats[k];
+      if (row && isSubName(row.playerName)) {
+        seasonObj.subStats[k] = initPlayerStats(row.teamName, row.playerName);
+        // copy totals
+        Object.assign(seasonObj.subStats[k], row);
+      }
+    });
+  }
+
+  return seasonObj;
+}
+
 
 	function ensureScheduleShape(obj) {
 		if (!obj || typeof obj !== "object") return { days: [], teamNames: [] };
@@ -2300,93 +2519,103 @@ function populateScheduleGameSelect() {
 }
 
 function startSelectedScheduledGame() {
-	const gameSelect = document.getElementById("scheduleGameSelect");
-	if (!gameSelect || !gameSelect.value) return;
+  const daySelect = document.getElementById("scheduleDaySelect");
+  const gameSelect = document.getElementById("scheduleGameSelect");
 
-	const [dayIndexStr, gameIndexStr] = gameSelect.value.split("|");
-	const dayIndex = parseInt(dayIndexStr, 10);
-	const gameIndex = parseInt(gameIndexStr, 10);
+  const dayIndex = parseInt(daySelect.value, 10);
+  const [dStr, gStr] = (gameSelect.value || "").split("|");
+  const gameIndex = parseInt(gStr, 10);
 
-	const dayObj = schedule?.days?.[dayIndex];
-	const g = dayObj?.games?.[gameIndex];
-	if (!g) return alert("Could not find that scheduled game.");
-	if (g.result) {
-		alert("That game was already recorded.");
-		populateScheduleGameSelect();
-		return;
-	}
+  const g = schedule?.days?.[dayIndex]?.games?.[gameIndex];
+  if (!g) return alert("Pick a valid scheduled game.");
 
-	const validTeams = league.teams.filter(t => t.players.length > 0);
-	const t1 = validTeams.find(t => t.name === g.away);
-	const t2 = validTeams.find(t => t.name === g.home);
+  const t1 = league.teams.find(t => t.name === g.away);
+  const t2 = league.teams.find(t => t.name === g.home);
+  if (!t1 || !t2) return alert("Teams not found for that scheduled game.");
 
-	if (!t1 || !t2) {
-		alert("Could not match schedule teams to your team list.");
-		return;
-	}
+  const scheduleRef = { dayIndex, gameIndex };
 
-	startGameWithTeams(t1, t2, { dayIndex, gameIndex });
+  // Only apply subs if they were set for THIS exact picked game
+  let subsForThisGame = [];
+  if (pendingSubsKey === (gameSelect.value || "") && Array.isArray(pendingSubs) && pendingSubs.length) {
+    subsForThisGame = pendingSubs.map(s => ({ ...s }));
+  }
+
+  // Clear so they don't accidentally apply to another game
+  clearPendingSubs();
+
+  startGameWithTeams(t1, t2, scheduleRef, subsForThisGame);
 }
 
-function startGameWithTeams(t1, t2, scheduleRef = null) {
-	t1.players.forEach(p => initPlayerStats(t1.name, p));
-	t2.players.forEach(p => initPlayerStats(t2.name, p));
+function startGameWithTeams(t1, t2, scheduleRef = null, subsForThisGame = []) {
+  // Clone teams so real rosters never change
+  const gameT1 = { name: t1.name, players: [...(t1.players || [])] };
+  const gameT2 = { name: t2.name, players: [...(t2.players || [])] };
 
-	let batting = Math.random() > 0.5 ? t1 : t2;
-	let fielding = batting === t1 ? t2 : t1;
+  // Apply subs (one-game replacements only)
+  const appliedSubs = [];
+  (subsForThisGame || []).forEach(s => {
+    if (!s || !s.teamName || !s.outPlayer || !s.inPlayer) return;
+    const inName = normalizeSubName(s.inPlayer);
 
-	game = {
-		team1: t1,
-		team2: t2,
-		team1Score: 0,
-		team2Score: 0,
-		batting: batting,
-		fielding: fielding,
-		outs: 0,
-		inning: 1,
-		halfInning: "top",
-		batterIndex: 0,
-		currentPitcher: null,
-		bases: { first: null, second: null, third: null },
-		gameStats: {},
-		currentInningPitchers: {},
-		halfInningRuns: 0,
+    const target = (s.teamName === gameT1.name) ? gameT1 : (s.teamName === gameT2.name) ? gameT2 : null;
+    if (!target) return;
 
-		// ✅ this is what ties the game to the exact schedule entry
-		_scheduleRef: scheduleRef
-	};
+    const idx = target.players.indexOf(s.outPlayer);
+    if (idx === -1) return;
 
-	[...t1.players, ...t2.players].forEach(p => {
-		let teamName = t1.players.includes(p) ? t1.name : t2.name;
-		let key = getPlayerKey(teamName, p);
-		game.gameStats[key] = {
-			atBats: 0,
-			hits: 0,
-			singles: 0,
-			doubles: 0,
-			triples: 0,
-			homeRuns: 0,
-			walks: 0,
-			strikeouts: 0,
-			outs: 0,
-			rbis: 0,
-			pitchOuts: 0,
-			pitchStrikeouts: 0,
-			fieldingErrors: 0,
-			inningsPitched: 0,
-			runsAllowed: 0,
-			earnedRunsAllowed: 0
-		};
-	});
+    target.players[idx] = inName;
+    appliedSubs.push({ teamName: target.name, outPlayer: s.outPlayer, inPlayer: inName });
+  });
 
-	gameHistory = [];
-	pendingBattingResult = null;
-	document.getElementById("undoButton").disabled = true;
+  game = {
+    team1: gameT1,
+    team2: gameT2,
+    team1Score: 0,
+    team2Score: 0,
+    inning: 1,
+    outs: 0,
+    batterIndex: 0,
+    batting: gameT1,
+    fielding: gameT2,
+    bases: { first: null, second: null, third: null },
+    gameStats: {},
+    _scheduleRef: scheduleRef,
+    _subsApplied: appliedSubs
+  };
 
-	showGame();
-	updatePitcherSelect();
-	updateGameScreen();
+  // Ensure season stats exist for all players used in THIS game (including subs)
+  gameT1.players.forEach(p => {
+    const key = getPlayerKey(gameT1.name, p);
+    if (!season.playerStats[key]) season.playerStats[key] = initPlayerStats(gameT1.name, p);
+  });
+  gameT2.players.forEach(p => {
+    const key = getPlayerKey(gameT2.name, p);
+    if (!season.playerStats[key]) season.playerStats[key] = initPlayerStats(gameT2.name, p);
+  });
+
+  // Initialize game stats (IMPORTANT: do NOT use includes() — duplicates can break team assignment)
+  gameT1.players.forEach(p => {
+    const key = getPlayerKey(gameT1.name, p);
+    game.gameStats[key] = initPlayerStats(gameT1.name, p);
+  });
+  gameT2.players.forEach(p => {
+    const key = getPlayerKey(gameT2.name, p);
+    game.gameStats[key] = initPlayerStats(gameT2.name, p);
+  });
+
+  // Your existing ghostie checks (extra args are fine if your function only accepts 1)
+  checkAndConvertToGhostie(gameT1, gameT1.players[0]);
+  checkAndConvertToGhostie(gameT2, gameT2.players[0]);
+
+  showGame();
+  updatePitcherSelect();
+  updatePitcherDisplay();
+  updateGameScreen();
+  renderBases();
+  saveSeason();
 }
+
 
 function startGame() {
 	let validTeams = league.teams.filter(t => t.players.length > 0);
@@ -3065,33 +3294,70 @@ if (game.inning <= 2 && game.halfInningRuns>= 6) {
 	document.getElementById("pitchingSection").classList.add("disabled");
 	updateGameScreen();
 	}
+
 	function saveGameStats() {
-		for (let key in game.gameStats) {
-			let gameStats = game.gameStats[key];
-			let seasonStats = season.playerStats[key];
+  if (!season.subStats || typeof season.subStats !== "object") season.subStats = {};
 
-			seasonStats.atBats += gameStats.atBats;
-			seasonStats.hits += gameStats.hits;
-			seasonStats.singles += gameStats.singles;
-			seasonStats.doubles += gameStats.doubles;
-			seasonStats.triples += gameStats.triples;
-			seasonStats.homeRuns += gameStats.homeRuns;
-			seasonStats.walks += gameStats.walks;
-			seasonStats.strikeouts += gameStats.strikeouts;
-			seasonStats.outs += gameStats.outs;
-			seasonStats.rbis += gameStats.rbis;
-			seasonStats.pitchOuts += gameStats.pitchOuts;
-			seasonStats.pitchStrikeouts += gameStats.pitchStrikeouts;
-			seasonStats.fieldingErrors += gameStats.fieldingErrors;
-			seasonStats.inningsPitched += gameStats.inningsPitched;
-			seasonStats.runsAllowed += gameStats.runsAllowed;
-			seasonStats.earnedRunsAllowed += gameStats.earnedRunsAllowed;
-		}
+  Object.keys(game.gameStats).forEach(key => {
+    const gameStats = game.gameStats[key];
 
-		applyGameOutcomeOnce();
-		saveSeason();
-		queueServerSync("game", { immediate: true });
-	}
+    if (!season.playerStats[key]) {
+      season.playerStats[key] = initPlayerStats(gameStats.teamName, gameStats.playerName);
+    }
+
+    const seasonStats = season.playerStats[key];
+
+    // Merge into normal season stats
+    seasonStats.atBats += gameStats.atBats;
+    seasonStats.hits += gameStats.hits;
+    seasonStats.singles += gameStats.singles;
+    seasonStats.doubles += gameStats.doubles;
+    seasonStats.triples += gameStats.triples;
+    seasonStats.homeRuns += gameStats.homeRuns;
+    seasonStats.walks += gameStats.walks;
+    seasonStats.strikeouts += gameStats.strikeouts;
+    seasonStats.outs += gameStats.outs;
+    seasonStats.rbis += gameStats.rbis;
+
+    seasonStats.pitchOuts += gameStats.pitchOuts;
+    seasonStats.pitchStrikeouts += gameStats.pitchStrikeouts;
+    seasonStats.fieldingErrors += gameStats.fieldingErrors;
+    seasonStats.inningsPitched += gameStats.inningsPitched;
+    seasonStats.runsAllowed += gameStats.runsAllowed;
+    seasonStats.earnedRunsAllowed += gameStats.earnedRunsAllowed;
+
+    // If this player is a SUB, ALSO merge into season.subStats
+    if (isSubName(seasonStats.playerName)) {
+      if (!season.subStats[key]) {
+        season.subStats[key] = initPlayerStats(seasonStats.teamName, seasonStats.playerName);
+      }
+      const sub = season.subStats[key];
+
+      sub.atBats += gameStats.atBats;
+      sub.hits += gameStats.hits;
+      sub.singles += gameStats.singles;
+      sub.doubles += gameStats.doubles;
+      sub.triples += gameStats.triples;
+      sub.homeRuns += gameStats.homeRuns;
+      sub.walks += gameStats.walks;
+      sub.strikeouts += gameStats.strikeouts;
+      sub.outs += gameStats.outs;
+      sub.rbis += gameStats.rbis;
+
+      sub.pitchOuts += gameStats.pitchOuts;
+      sub.pitchStrikeouts += gameStats.pitchStrikeouts;
+      sub.fieldingErrors += gameStats.fieldingErrors;
+      sub.inningsPitched += gameStats.inningsPitched;
+      sub.runsAllowed += gameStats.runsAllowed;
+      sub.earnedRunsAllowed += gameStats.earnedRunsAllowed;
+    }
+  });
+
+  applyGameOutcomeOnce();
+  saveSeason();
+  queueServerSync("game", { immediate: true });
+}
+
 
 	function displayGameOver() {
 		showGameOver();
