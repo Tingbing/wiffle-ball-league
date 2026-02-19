@@ -1,0 +1,278 @@
+	body {
+		font-family: Arial;
+		background: #111;
+		color: white;
+		padding: 15px;
+	}
+
+	button {
+		padding: 10px;
+		margin: 5px;
+		font-size: 15px;
+		cursor: pointer;
+	}
+
+	.card {
+		background: #222;
+		padding: 15px;
+		margin-top: 10px;
+		border-radius: 10px;
+	}
+
+	.card.disabled {
+		opacity: 0.4;
+		pointer-events: none;
+	}
+
+	input, select {
+		padding: 8px;
+		margin: 5px;
+	}
+
+	.hidden {
+		display: none;
+	}
+
+	.menu-button {
+		width: 100%;
+		padding: 20px;
+		font-size: 18px;
+		margin: 10px 0;
+		background: #333;
+		color: white;
+		border: 2px solid #555;
+		border-radius: 10px;
+		cursor: pointer;
+	}
+
+	.menu-button:hover {
+		background: #444;
+		border-color: #777;
+	}
+
+	.back-button {
+		background: #555;
+		margin-bottom: 15px;
+	}
+
+	.end-game-button {
+		background: #a44;
+		color: white;
+	}
+
+	.undo-button {
+		background: #aa6;
+		color: white;
+		font-weight: bold;
+		width: 100%;
+		padding: 15px;
+		margin: 10px 0;
+	}
+
+	.scoreboard {
+		display: flex;
+		justify-content: space-around;
+		font-size: 18px;
+		margin: 10px 0;
+	}
+
+	.scoreboard div {
+		text-align: center;
+	}
+
+	.diamond {
+		display: grid;
+		grid-template-columns: 1fr 1fr 1fr;
+		grid-template-rows: 1fr 1fr 1fr;
+		gap: 5px;
+		max-width: 200px;
+		margin: 0 auto;
+	}
+
+	.diamond .base {
+		width: 50px;
+		height: 50px;
+		background: #444;
+		border: 2px solid #666;
+		border-radius: 8px;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		font-size: 11px;
+		text-align: center;
+	}
+
+	.base.occupied {
+		background: #4a4;
+		border-color: #6c6;
+	}
+
+	.base.ghostie {
+		background: #66a;
+		border-color: #88c;
+	}
+
+	.diamond .second {
+		grid-column: 2;
+		grid-row: 1;
+	}
+
+	.diamond .third {
+		grid-column: 1;
+		grid-row: 2;
+	}
+
+	.diamond .first {
+		grid-column: 3;
+		grid-row: 2;
+	}
+
+	.diamond .home {
+		grid-column: 2;
+		grid-row: 3;
+		background: #664;
+		border-color: #886;
+	}
+
+	.stats-table {
+		width: 100%;
+		border-collapse: collapse;
+		margin-top: 10px;
+	}
+
+	.stats-table th, .stats-table td {
+		padding: 8px;
+		text-align: left;
+		border-bottom: 1px solid #444;
+	}
+
+	.stats-table th {
+		background: #333;
+	}
+
+	.winner-banner {
+		background: #4a4;
+		padding: 20px;
+		text-align: center;
+		border-radius: 10px;
+		font-size: 24px;
+		margin-bottom: 15px;
+	}
+
+	.section-header {
+		background: #333;
+		padding: 10px;
+		border-radius: 8px;
+		margin-bottom: 10px;
+		font-weight: bold;
+		font-size: 18px;
+	}
+
+	.notification {
+		background: #444;
+		padding: 10px;
+		border-radius: 5px;
+		margin: 10px 0;
+		text-align: center;
+		color: #6c6;
+	}
+
+	/* ================================
+	   ✅ ACCESS GATE (login + league code)
+	==================================*/
+	.gate {
+		position: fixed;
+		top: 0; left: 0; right: 0; bottom: 0;
+		background: rgba(0,0,0,0.88);
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		z-index: 9999;
+		padding: 15px;
+	}
+	.gate.hidden { display: none; }
+	.gate-panel {
+		width: min(520px, 100%);
+		background: #1c1c1c;
+		border: 1px solid #333;
+		border-radius: 14px;
+		padding: 16px;
+		box-shadow: 0 10px 40px rgba(0,0,0,0.55);
+	}
+	.gate-panel h2 { margin: 6px 0 10px 0; }
+	.gate-note { color:#aaa; font-size: 13px; line-height: 1.35; }
+	.gate-row { margin-top: 10px; }
+	.gate-row input { width: 100%; box-sizing: border-box; }
+	.gate-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+	.gate-actions button { flex: 1; }
+	.small-link { background: transparent; border: 1px solid #555; color: #ddd; }
+  .icon-btn { width:auto; padding:10px 12px; font-size:18px; line-height:1; }
+
+  .sync-tag {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    color: #bbb;
+    font-size: 14px;
+    padding: 6px 10px;
+    border: 1px solid #444;
+    border-radius: 999px;
+    background: #1b1b1b;
+  }
+
+  /* Mobile-friendly stats tables (prevents cutoff on small screens) */
+  @media (max-width: 720px) {
+    .stats-table.responsive thead { display: none; }
+    .stats-table.responsive, .stats-table.responsive tbody, .stats-table.responsive tr, .stats-table.responsive td {
+      display: block;
+      width: 100%;
+    }
+    .stats-table.responsive tr {
+      background: #1a1a1a;
+      border: 1px solid #333;
+      border-radius: 10px;
+      padding: 10px;
+      margin: 10px 0;
+    }
+    .stats-table.responsive td {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      border-bottom: 1px solid #333;
+      padding: 6px 0;
+      text-align: right;
+      white-space: normal;
+    }
+    .stats-table.responsive td:last-child { border-bottom: none; }
+    .stats-table.responsive td::before {
+      content: attr(data-label);
+      font-weight: bold;
+      color: #bbb;
+      text-align: left;
+    }
+  }
+	.locked-badge {
+		display: inline-block;
+		padding: 6px 10px;
+		border-radius: 999px;
+		background: #333;
+		border: 1px solid #555;
+		font-size: 12px;
+		color: #ddd;
+		margin-top: 8px;
+	}
+
+
+.fatal-screen {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.88);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9000;
+  padding: 20px;
+}
+.fatal-screen.hidden {
+  display: none;
+}

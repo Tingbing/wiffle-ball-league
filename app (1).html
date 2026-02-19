@@ -1,0 +1,406 @@
+<!doctype html>
+<html>
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1.0">
+	<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+	<meta http-equiv="Pragma" content="no-cache" />
+	<meta http-equiv="Expires" content="0" />
+	<title>Wiggle Ball League</title>
+  
+<link rel="stylesheet" href="app.css">
+
+</head>
+
+<body>
+
+
+<!-- ✅ FATAL ERROR: shown if Supabase doesn’t load -->
+<div id="fatalScreen" class="fatal-screen hidden">
+  <div class="boot-panel">
+    <div class="boot-title" id="fatalTitle">Error</div>
+    <div class="boot-sub" id="fatalMsg">Supabase failed to load.</div>
+    <button type="button" onclick="window.location.reload()">Reload</button>
+    <div class="boot-small" id="fatalDetails"></div>
+  </div>
+</div>
+
+<!-- ✅ ACCESS GATE: blocks app until login + league code -->
+<div id="accessGate" class="gate">
+	<div class="gate-panel">
+		<h2 id="gateTitle">🔒 League Access Required</h2>
+		<p class="gate-note" id="gateMsg">
+			To use this app, you must log in and enter the league code.
+		</p>
+
+		<div class="card" style="margin-top:10px;">
+			<div id="gateStepLogin">
+				<h3 style="margin-top:0;">1) Log in</h3>
+				<div class="gate-row">
+					<input id="gateLoginEmail" placeholder="Email for login" />
+				</div>
+
+				<div class="gate-row hidden" id="gateNameRow">
+					<input id="gateNameInput" placeholder="Your name (required)" />
+				</div>
+
+				<div class="gate-actions">
+					<button class="menu-button" onclick="sendLoginLinkFromGate()">📧 Send Login Link</button>
+				</div>
+				<p class="gate-note" style="margin:8px 0 0 0;">
+					After you click the email link, you’ll return here automatically.
+				</p>
+			</div>
+
+			<div id="gateStepCode" class="hidden">
+				<h3 style="margin-top:0;">2) Enter League Code</h3>
+				<div class="gate-row">
+					<input id="gateLeagueCode" placeholder="League code" />
+				</div>
+				<div class="gate-actions">
+					<button class="menu-button" onclick="submitLeagueCode()">✅ Unlock App</button>
+					<button class="small-link" onclick="logout()">Log Out</button>
+				</div>
+				<p class="gate-note" style="margin:8px 0 0 0;">
+					This code is required to protect your league.
+				</p>
+			</div>
+
+			<div id="gateStepDone" class="hidden">
+				<h3 style="margin-top:0;">✅ You’re in!</h3>
+				<p class="gate-note">Welcome, <span id="gateWelcomeName"></span>.</p>
+				<div class="gate-actions">
+					<button class="menu-button" onclick="closeGate()">Continue</button>
+				</div>
+			</div>
+		</div>
+
+		<div class="locked-badge" id="gateStatusBadge">Status: Locked</div>
+	</div>
+</div>
+
+
+
+<!-- MAIN MENU -->
+<div id="mainMenu" class="hidden">
+	<h1>⚽ Wiffle Ball League</h1>
+	<div style="display:flex;justify-content:flex-end;align-items:center;gap:8px;flex-wrap:wrap;margin:6px 0 0 0;">
+		<button id="resaveStatsBtn" class="small-link icon-btn hidden" title="Sync data (pull latest / push your changes)" aria-label="Sync Data" onclick="manualResaveAllStats()">↻</button>
+		<span id="syncDataTag" class="sync-tag hidden">Sync Data</span>
+	</div>
+	
+	<div class="card">
+		<h3>Welcome to Wiffle Ball!</h3>
+		<p>Manage your league teams and play games</p>
+		
+		<button class="menu-button" onclick="showTeamConfig()">
+			⚙️ Configure Teams
+		</button>
+		
+		<button class="menu-button" onclick="showGameSetup()">
+			🎮 Start a Game
+		</button>
+
+
+
+		<button class="menu-button" onclick="showSeasonStats()">
+			📊 Season Stats
+		</button>
+
+		<button class="menu-button" onclick="showSchedule()">
+  📅 Schedule
+</button>
+		
+
+<div id="mainLoginBlock">
+  <input id="loginEmail" placeholder="Email for login" />
+  <button id="mainSendLinkBtn" class="menu-button" onclick="sendLoginLink()">📧 Send Login Link</button>
+</div>
+
+<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-top:8px;">
+  <button id="showActiveUsersBtn" class="small-link hidden" onclick="showActiveUsers()">👥 Logged In</button>
+  <button id="mainLogoutBtn" class="menu-button hidden" onclick="logout()">Log Out</button>
+</div>
+
+</div>
+</div>
+
+<!-- ✅ ADD THIS BUTTON on the MAIN MENU (inside the mainMenu card with the other menu buttons) -->
+
+
+
+<!-- ✅ ADD THIS NEW SCREEN anywhere with the other screens (recommended: below Season Stats Screen) -->
+<div id="scheduleScreen" class="hidden">
+	<button class="back-button" onclick="showMainMenu()">← Back to Main Menu</button>
+
+	<h2>📅 Season Schedule</h2>
+
+	<div class="card">
+		<p style="color:#aaa; margin-top:0;">
+			6 game days • 4 teams • everyone plays each other twice
+		</p>
+	</div>
+
+	<div id="scheduleContainer"></div>
+</div>
+
+
+<!-- ACTIVE USERS SCREEN -->
+<div id="activeUsersScreen" class="hidden">
+  <button class="back-button" onclick="showMainMenu()">← Back to Main Menu</button>
+  <h2>👥 Currently Logged In</h2>
+  <div class="card">
+    <p style="color:#aaa; margin-top:0;">
+      Shows players who opened the app recently (last 5 minutes).
+    </p>
+    <div id="activeUsersContainer" style="margin-top:10px;"></div>
+  </div>
+</div>
+
+</div>
+
+<!-- TEAM CONFIGURATION SCREEN -->
+<div id="teamConfigScreen" class="hidden">
+	<button class="back-button" onclick="showMainMenu()">← Back to Main Menu</button>
+	
+	<h2>⚙️ Team Configuration</h2>
+
+	<div class="card">
+		<h3>Add Team (Max 4)</h3>
+		<input id="teamName" placeholder="Team Name">
+		<button onclick="addTeam()">Add Team</button>
+	</div>
+
+	<div class="card">
+		<h3>Add Player (Max 2 Per Team)</h3>
+		<select id="teamSelect"></select>
+		<input id="playerName" placeholder="Player Name">
+		<button onclick="addPlayer()">Add Player</button>
+	</div>
+
+	<div class="card">
+		<h3>League Teams</h3>
+		<div id="teamList"></div>
+	</div>
+</div>
+
+<!-- GAME SETUP SCREEN -->
+<div id="gameSetupScreen" class="hidden">
+	<button class="back-button" onclick="showMainMenu()">← Back to Main Menu</button>
+	
+	<h2>🎮 Start a Game</h2>
+
+	<div class="card" id="scheduledGameCard">
+		<h3>Record Scheduled Game</h3>
+
+		<p>Which day?</p>
+		<select id="scheduleDaySelect" onchange="populateScheduleGameSelect()"></select>
+
+		<p>Which game?</p>
+		<select id="scheduleGameSelect"></select>
+
+		<p id="schedulePickHint" style="color:#aaa; font-size:13px; margin-top:8px;"></p>
+
+		<button class="menu-button" id="startScheduledGameBtn" onclick="startSelectedScheduledGame()">
+			Start Selected Game
+		</button>
+	</div>
+
+	<!-- fallback if schedule isn't available -->
+	<div class="card" id="manualTeamCard">
+		<h3>Select Teams (Manual)</h3>
+		<p style="color:#aaa; font-size:13px;">
+			Schedule pick requires exactly 4 teams with players.
+		</p>
+
+		<p>Team 1:</p>
+		<select id="team1Select"></select>
+		
+		<p>Team 2:</p>
+		<select id="team2Select"></select>
+		
+		<button class="menu-button" onclick="startGame()">Start Game</button>
+	</div>
+</div>
+
+
+<!-- GAME SCREEN -->
+<div id="gameScreen" class="hidden">
+	<button class="back-button" onclick="showMainMenu()">← Back to Main Menu</button>
+	<button class="end-game-button" onclick="endGameEarly()">End Game Early</button>
+
+	<div class="card">
+		<div class="scoreboard">
+			<div>
+				<strong id="team1Name"></strong><br>
+				<span id="team1Score" style="font-size: 24px;">0</span>
+			</div>
+			<div>
+				<strong id="team2Name"></strong><br>
+				<span id="team2Score" style="font-size: 24px;">0</span>
+			</div>
+		</div>
+	</div>
+
+	<div id="notification" class="notification hidden"></div>
+
+	<div class="card">
+		<button class="undo-button" id="undoButton" onclick="undoLastAction()" disabled>↶ Undo Last Action</button>
+	</div>
+
+	<!-- BATTING SECTION -->
+	<div id="battingSection">
+		<div class="section-header">⚾ BATTING</div>
+
+		<div class="card">
+			<h3 id="inningText"></h3>
+			<p id="outsText"></p>
+			<h2 id="batterText"></h2>
+		</div>
+
+		<div class="card">
+			<h3>Bases</h3>
+			<div class="diamond">
+				<div class="base second" id="base2">2nd</div>
+				<div class="base third" id="base3">3rd</div>
+				<div class="base first" id="base1">1st</div>
+				<div class="base home">Home</div>
+			</div>
+		</div>
+
+		<div class="card">
+			<h3>Record Batting Result</h3>
+			<button onclick="recordBattingResult('single')">Single</button>
+			<button onclick="recordBattingResult('double')">Double</button>
+			<button onclick="recordBattingResult('triple')">Triple</button>
+			<button onclick="recordBattingResult('HR')">Home Run</button>
+			<button onclick="recordBattingResult('walk')">Walk</button>
+			<button onclick="recordBattingResult('K')">Strikeout</button>
+			<button onclick="recordBattingResult('out')">Out</button>
+			<button onclick="recordBattingResult('doublePlay')">Double Play</button>
+		</div>
+	</div>
+
+	<div class="card">
+		<h3>Manual Base Controls</h3>
+		<p style="font-size: 13px; color:#aaa;">
+			Use for steals, pickoffs, or corrections. Does not change hit/AB stats.
+		</p>
+	
+		<div>
+			<button onclick="manualMove('first','second')">1st → 2nd</button>
+			<button onclick="manualMove('second','third')">2nd → 3rd</button>
+			<button onclick="manualScoreFromThird()">3rd → Home (Score)</button>
+		</div>
+	
+		<div>
+			<button onclick="manualMove('second','first')">2nd → 1st</button>
+			<button onclick="manualMove('third','second')">3rd → 2nd</button>
+		</div>
+	
+		<div style="margin-top:8px;">
+			<button onclick="clearBases()" style="background:#555;color:white;">Clear Bases</button>
+		</div>
+	</div>
+
+	<div style="margin-top:10px;">
+		<button onclick="showOutPicker()" style="background:#a66;color:white;">
+	    Runner Thrown Out
+	  </button>
+	
+		<div id="outPicker" class="hidden" style="margin-top:10px;">
+			<p style="margin:6px 0;">Which runner got thrown out?</p>
+			<select id="outBaseSelect">
+	      <option value="first">Runner on 1st</option>
+	      <option value="second">Runner on 2nd</option>
+	      <option value="third">Runner on 3rd</option>
+	    </select>
+	
+			<button onclick="confirmRunnerOut()">Confirm Out</button>
+			<button onclick="cancelRunnerOut()">Cancel</button>
+		</div>
+	</div>
+
+	<!-- PITCHING SECTION -->
+	<div id="pitchingSection" class="disabled">
+		<div class="section-header">🥎 PITCHING</div>
+
+		<div class="card">
+			<h3>Select Pitcher</h3>
+			<select id="pitcherSelect" onchange="updatePitcherDisplay()"></select>
+			<p id="pitcherText"></p>
+		</div>
+
+		<div class="card">
+			<h3>Record Pitching Result</h3>
+			<p style="font-size: 14px; color: #aaa;">Batting result recorded. Was there a fielding error?</p>
+
+	<button onclick="showErrorPicker()">Error (Last Play)</button>
+		
+		<div id="errorPicker" class="hidden" style="margin-top:10px;">
+			<p style="margin:6px 0;">Who made the error?</p>
+			<select id="errorPlayerSelect"></select>
+			<button onclick="confirmError()">Confirm Error</button>
+			<button onclick="cancelError()">Cancel</button>
+		</div>
+		</div>
+	</div>
+
+</div>
+
+<!-- GAME OVER SCREEN -->
+<div id="gameOverScreen" class="hidden">
+	<button class="back-button" onclick="showMainMenu()">← Back to Main Menu</button>
+	
+	<div id="winnerBanner" class="winner-banner"></div>
+
+	<div class="card">
+		<h3>Final Score</h3>
+		<div class="scoreboard">
+			<div>
+				<strong id="finalTeam1Name"></strong><br>
+				<span id="finalTeam1Score" style="font-size: 24px;">0</span>
+			</div>
+			<div>
+				<strong id="finalTeam2Name"></strong><br>
+				<span id="finalTeam2Score" style="font-size: 24px;">0</span>
+			</div>
+		</div>
+	</div>
+
+	<div id="statsContainer"></div>
+</div>
+
+<!-- SEASON STATS SCREEN -->
+<div id="seasonStatsScreen" class="hidden">
+	<button class="back-button" onclick="showMainMenu()">← Back to Main Menu</button>
+	
+	<h2>📊 Season Statistics</h2>
+
+	<div id="seasonStatsContainer"></div>
+
+	<div class="card">
+		<button onclick="resetSeason()" style="background: #a44; color: white;">Reset Season Data</button>
+	</div>
+</div>
+<!-- SCHEDULE SCREEN -->
+
+
+<script src="app.js"></script>
+<script src="app.auth.js"></script>
+
+
+<!--<script src="/wiffle-ball-league/vendor/supabase.js"></script>-->
+<script src="./vendor/supabase.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
+
+</body>
+</html>
+
+
+
+
+
+
+
