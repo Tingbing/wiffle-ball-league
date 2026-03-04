@@ -397,7 +397,6 @@ async function evaluateAccess() {
   // 4) All good -> unlock app
   document.getElementById("accessGate").classList.add("hidden");
   await updateAuthUI();
-  showMainMenu();
 }
 	
 async function submitLeagueCode() {
