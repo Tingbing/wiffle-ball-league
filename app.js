@@ -4,6 +4,7 @@
 	let gameHistory = [];
 	let lastPlay = null;
 	let pendingBattingResult = null;
+    let playInputLock = false;
 
 	/* ================================
 	✅ SCHEDULE DATA (persisted)
@@ -1658,35 +1659,39 @@ return { runs, earnedRuns, rbis };
 	}
 
 function recordBattingResult(result) {
-if (!game) return;
-// Double play only allowed when 2+ runners are on base
-if (result === 'doublePlay' && countBaseRunners() < 2) {
-  showNotification('Need 2+ runners on base for a double play', 1500);
-  return;
+  if (!game || playInputLock) return;
+
+  if (result === "doublePlay" && countBaseRunners() < 2) {
+    showNotification("Need 2+ runners on base for a double play", 1500);
+    return;
+  }
+
+  playInputLock = true;
+  try {
+    let currentBatter = game.batting.players[game.batterIndex];
+    let batterKey = getPlayerKey(game.batting.name, currentBatter);
+
+    pendingBattingResult = {
+      result: result,
+      batter: currentBatter,
+      batterKey: batterKey
+    };
+
+    lastPlay = {
+      battingTeamName: game.batting.name,
+      fieldingTeamName: game.fielding.name,
+      pitcherIndex: parseInt(document.getElementById("pitcherSelect").value),
+      batterKey: batterKey,
+      batterName: currentBatter,
+      result: result
+    };
+
+    recordPitchingResult("clean");
+  } finally {
+    setTimeout(() => { playInputLock = false; }, 180);
+  }
 }
 
-let currentBatter = game.batting.players[game.batterIndex];
-let batterKey = getPlayerKey(game.batting.name, currentBatter);
-
-pendingBattingResult = {
-result: result,
-batter: currentBatter,
-batterKey: batterKey
-};
-
-// Save "who was fielding" at the moment of contact (important if inning flips)
-lastPlay = {
-battingTeamName: game.batting.name,
-fieldingTeamName: game.fielding.name,
-pitcherIndex: parseInt(document.getElementById("pitcherSelect").value),
-batterKey: batterKey,
-batterName: currentBatter,
-result: result
-};
-
-// Automatically process as NO ERROR
-recordPitchingResult("clean");
-}
 function showErrorPicker() {
 if (!lastPlay) {
 alert("No play to assign an error to yet.");
