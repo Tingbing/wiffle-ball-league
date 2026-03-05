@@ -907,6 +907,17 @@ async function addTeam() {
   const name = (document.getElementById("teamName")?.value || "").trim();
   if (!name) return;
 
+	const normalizedTeamName = name.toLowerCase();
+
+const duplicateTeamExists = (league?.teams || []).some(team =>
+  String(team.name).trim().toLowerCase() === normalizedTeamName
+);
+
+if (duplicateTeamExists) {
+  alert("⚠️ That team name already exists.\nEach team must have a different name.");
+  return;
+}
+
   if ((league?.teams?.length || 0) >= MAX_TEAMS) {
     alert(`⚠️ Max ${MAX_TEAMS} teams reached.\nRemove a team before adding another.`);
     return;
