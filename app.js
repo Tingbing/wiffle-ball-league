@@ -1294,9 +1294,14 @@ function startGameWithTeams(t1, t2, scheduleRef = null) {
 		};
 	});
 
-	gameHistory = [];
-	pendingBattingResult = null;
-	document.getElementById("undoButton").disabled = true;
+gameHistory = [];
+pendingBattingResult = null;
+lastPlay = null;
+playInputLock = false;
+
+document.getElementById("battingSection").classList.remove("disabled");
+document.getElementById("pitchingSection").classList.add("disabled");
+document.getElementById("undoButton").disabled = true;
 
 	showGame();
 	updatePitcherSelect();
@@ -1370,28 +1375,25 @@ function startGame() {
 		pendingBattingResult = state.pendingBattingResult;
 	}
 
-	function undoLastAction() {
-		if (gameHistory.length > 0) {
-			let previousState = gameHistory.pop();
-			restoreGameState(previousState);
-			
-			if (pendingBattingResult) {
-				document.getElementById("battingSection").classList.add("disabled");
-				document.getElementById("pitchingSection").classList.remove("disabled");
-			} else {
-				document.getElementById("battingSection").classList.remove("disabled");
-				document.getElementById("pitchingSection").classList.add("disabled");
-			}
-			
-			updatePitcherSelect();
-			updateGameScreen();
-			
-			if (gameHistory.length === 0) {
-				document.getElementById("undoButton").disabled = true;
-			}
-		}
-	}
+function undoLastAction() {
+  if (gameHistory.length > 0) {
+    let previousState = gameHistory.pop();
+    restoreGameState(previousState);
 
+    // Keep undo simple with the new auto-clean batting flow
+    pendingBattingResult = null;
+
+    document.getElementById("battingSection").classList.remove("disabled");
+    document.getElementById("pitchingSection").classList.add("disabled");
+
+    updatePitcherSelect();
+    updateGameScreen();
+
+    if (gameHistory.length === 0) {
+      document.getElementById("undoButton").disabled = true;
+    }
+  }
+}
 	function updatePitcherSelect() {
 		let select = document.getElementById("pitcherSelect");
 		select.innerHTML = "";
