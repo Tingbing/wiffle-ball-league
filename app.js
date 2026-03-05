@@ -932,8 +932,7 @@ if (duplicateTeamExists) {
   update();
 }
 
-	
-async function addPlayer() {
+	async function addPlayer() {
   if (!(await requireLogin())) return;
 
   const teamIndexStr = document.getElementById("teamSelect")?.value;
@@ -941,43 +940,40 @@ async function addPlayer() {
 
   const teamIndex = Number(teamIndexStr);
 
- const playerInput = (document.getElementById("playerName")?.value || "");
-const player = playerInput.replace(/\u00A0/g, " ").replace(/\s+/g, " ").trim(); // collapses weird spaces
-if (!player) return;
+  const playerInput = (document.getElementById("playerName")?.value || "");
+  const player = playerInput
+    .replace(/\u00A0/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 
-const normalizedPlayer = player.toLowerCase();
+  if (!player) return;
 
+  const normalizedPlayer = player.toLowerCase();
+
+  // Keep the exact team the user selected before refreshing
   const selectedTeamName = league?.teams?.[teamIndex]?.name;
   if (!selectedTeamName) return alert("Select a team");
 
-  // Refresh latest teams/players before enforcing rules
+  // Refresh latest teams/players first
   try { await load(); } catch (e) {}
 
-// ✅ Stronger duplicate check: ask Supabase directly before insert
-const { data: matchingPlayers, error: dupErr } = await supabaseClient
-  .from("players")
-  .select("id, name")
-.ilike("name", `%${player}%`);
+  // ✅ Check the ENTIRE loaded league, not a separate Supabase query
+  const duplicateExists = (league?.teams || []).some(team =>
+    (team.players || []).some(existingName => {
+      const existingNorm = String(existingName || "")
+        .replace(/\u00A0/g, " ")
+        .replace(/\s+/g, " ")
+        .trim()
+        .toLowerCase();
 
-if (dupErr) {
-  console.log("Duplicate player check failed:", dupErr);
-  alert("Could not verify player name. Please try again.");
-  return;
-}
+      return existingNorm === normalizedPlayer;
+    })
+  );
 
-const duplicateExists = (matchingPlayers || []).some(row => {
-  const rowNorm = String(row.name || "")
-    .replace(/\u00A0/g, " ")
-    .replace(/\s+/g, " ")
-    .trim()
-    .toLowerCase();
-  return rowNorm === normalizedPlayer;
-});
-
-if (duplicateExists) {
-  alert("⚠️ That player name is already in this league.\nEach player must have a different name.");
-  return;
-}
+  if (duplicateExists) {
+    alert("⚠️ That player name is already in this league.\nEach player must have a different name.");
+    return;
+  }
 
   const teamObj = (league?.teams || []).find(t => t.name === selectedTeamName);
   const currentPlayers = (teamObj?.players || []).length;
@@ -1007,6 +1003,7 @@ if (duplicateExists) {
   syncTeamRecordsWithLeague();
   update();
 }
+
 
 
 	async function removeTeam(teamIndex) {
