@@ -921,6 +921,7 @@ async function addTeam() {
   update();
 }
 
+	
 async function addPlayer() {
   if (!(await requireLogin())) return;
 
@@ -932,11 +933,25 @@ async function addPlayer() {
   const player = (document.getElementById("playerName")?.value || "").trim();
   if (!player) return;
 
+  const normalizedPlayer = player.toLowerCase();
+
   const selectedTeamName = league?.teams?.[teamIndex]?.name;
   if (!selectedTeamName) return alert("Select a team");
 
-  // ✅ Refresh latest teams/players before enforcing limit
+  // Refresh latest teams/players before enforcing rules
   try { await load(); } catch (e) {}
+
+  // ✅ NEW: block duplicate player names anywhere in the league
+  const duplicateExists = (league?.teams || []).some(team =>
+    (team.players || []).some(existingName =>
+      String(existingName).trim().toLowerCase() === normalizedPlayer
+    )
+  );
+
+  if (duplicateExists) {
+    alert("⚠️ That player name is already in this league.\nEach player must have a different name.");
+    return;
+  }
 
   const teamObj = (league?.teams || []).find(t => t.name === selectedTeamName);
   const currentPlayers = (teamObj?.players || []).length;
@@ -966,8 +981,6 @@ async function addPlayer() {
   syncTeamRecordsWithLeague();
   update();
 }
-	
-
 
 
 	async function removeTeam(teamIndex) {
