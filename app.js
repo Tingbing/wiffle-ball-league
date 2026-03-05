@@ -566,8 +566,8 @@ if ((serverHas && !localHas) || (serverMs > localMs + 1000)) {
 
   try {
     // 1) Clear local season + schedule
-    try { localStorage.removeItem("wbl_season"); } catch (e) {}
-    try { localStorage.removeItem("wbl_schedule"); } catch (e) {}
+    try { localStorage.removeItem("wiggleSeason"); } catch (e) {}
+    try { localStorage.removeItem("wiggleSchedule"); } catch (e) {}
     try { localStorage.removeItem("wbl_lastSchedule"); } catch (e) {}
     try { localStorage.removeItem("wbl_lastScheduleKey"); } catch (e) {}
 
@@ -952,17 +952,26 @@ async function addPlayer() {
   // Refresh latest teams/players before enforcing rules
   try { await load(); } catch (e) {}
 
-  // ✅ NEW: block duplicate player names anywhere in the league
-  const duplicateExists = (league?.teams || []).some(team =>
-    (team.players || []).some(existingName =>
-      String(existingName).trim().toLowerCase() === normalizedPlayer
-    )
-  );
+// ✅ Stronger duplicate check: ask Supabase directly before insert
+const { data: matchingPlayers, error: dupErr } = await supabaseClient
+  .from("players")
+  .select("id, name")
+  .ilike("name", player);
 
-  if (duplicateExists) {
-    alert("⚠️ That player name is already in this league.\nEach player must have a different name.");
-    return;
-  }
+if (dupErr) {
+  console.log("Duplicate player check failed:", dupErr);
+  alert("Could not verify player name. Please try again.");
+  return;
+}
+
+const duplicateExists = (matchingPlayers || []).some(row =>
+  String(row.name).trim().toLowerCase() === normalizedPlayer
+);
+
+if (duplicateExists) {
+  alert("⚠️ That player name is already in this league.\nEach player must have a different name.");
+  return;
+}
 
   const teamObj = (league?.teams || []).find(t => t.name === selectedTeamName);
   const currentPlayers = (teamObj?.players || []).length;
