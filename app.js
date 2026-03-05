@@ -954,7 +954,7 @@ if (duplicateTeamExists) {
   const selectedTeamName = league?.teams?.[teamIndex]?.name;
   if (!selectedTeamName) return alert("Select a team");
 
-// ✅ Check the real players table directly (source of truth)
+// ✅ Check the real Supabase players table directly
 const { data: allPlayers, error: dupErr } = await supabaseClient
   .from("players")
   .select("name");
@@ -980,7 +980,7 @@ if (duplicateExists) {
   return;
 }
 
-// Refresh latest teams after duplicate check so player counts stay current
+// Refresh latest teams after duplicate check
 try { await load(); } catch (e) {}
 
   const teamObj = (league?.teams || []).find(t => t.name === selectedTeamName);
@@ -1315,28 +1315,49 @@ function startGameWithTeams(t1, t2, scheduleRef = null) {
 		_scheduleRef: scheduleRef
 	};
 
-	[...t1.players, ...t2.players].forEach(p => {
-		let teamName = t1.players.includes(p) ? t1.name : t2.name;
-		let key = getPlayerKey(teamName, p);
-		game.gameStats[key] = {
-			atBats: 0,
-			hits: 0,
-			singles: 0,
-			doubles: 0,
-			triples: 0,
-			homeRuns: 0,
-			walks: 0,
-			strikeouts: 0,
-			outs: 0,
-			rbis: 0,
-			pitchOuts: 0,
-			pitchStrikeouts: 0,
-			fieldingErrors: 0,
-			inningsPitched: 0,
-			runsAllowed: 0,
-			earnedRunsAllowed: 0
-		};
-	});
+t1.players.forEach(p => {
+  const key = getPlayerKey(t1.name, p);
+  game.gameStats[key] = {
+    atBats: 0,
+    hits: 0,
+    singles: 0,
+    doubles: 0,
+    triples: 0,
+    homeRuns: 0,
+    walks: 0,
+    strikeouts: 0,
+    outs: 0,
+    rbis: 0,
+    pitchOuts: 0,
+    pitchStrikeouts: 0,
+    fieldingErrors: 0,
+    inningsPitched: 0,
+    runsAllowed: 0,
+    earnedRunsAllowed: 0
+  };
+});
+
+t2.players.forEach(p => {
+  const key = getPlayerKey(t2.name, p);
+  game.gameStats[key] = {
+    atBats: 0,
+    hits: 0,
+    singles: 0,
+    doubles: 0,
+    triples: 0,
+    homeRuns: 0,
+    walks: 0,
+    strikeouts: 0,
+    outs: 0,
+    rbis: 0,
+    pitchOuts: 0,
+    pitchStrikeouts: 0,
+    fieldingErrors: 0,
+    inningsPitched: 0,
+    runsAllowed: 0,
+    earnedRunsAllowed: 0
+  };
+});
 
 gameHistory = [];
 pendingBattingResult = null;
