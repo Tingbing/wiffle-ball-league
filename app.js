@@ -954,26 +954,34 @@ if (duplicateTeamExists) {
   const selectedTeamName = league?.teams?.[teamIndex]?.name;
   if (!selectedTeamName) return alert("Select a team");
 
-  // Refresh latest teams/players first
-  try { await load(); } catch (e) {}
+// ✅ Check the real players table directly (source of truth)
+const { data: allPlayers, error: dupErr } = await supabaseClient
+  .from("players")
+  .select("name");
 
-  // ✅ Check the ENTIRE loaded league, not a separate Supabase query
-  const duplicateExists = (league?.teams || []).some(team =>
-    (team.players || []).some(existingName => {
-      const existingNorm = String(existingName || "")
-        .replace(/\u00A0/g, " ")
-        .replace(/\s+/g, " ")
-        .trim()
-        .toLowerCase();
+if (dupErr) {
+  console.log("Duplicate player check failed:", dupErr);
+  alert("Could not check existing players. Please try again.");
+  return;
+}
 
-      return existingNorm === normalizedPlayer;
-    })
-  );
+const duplicateExists = (allPlayers || []).some(row => {
+  const existingNorm = String(row.name || "")
+    .replace(/\u00A0/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
 
-  if (duplicateExists) {
-    alert("⚠️ That player name is already in this league.\nEach player must have a different name.");
-    return;
-  }
+  return existingNorm === normalizedPlayer;
+});
+
+if (duplicateExists) {
+  alert("⚠️ That player name is already in this league.\nEach player must have a different name.");
+  return;
+}
+
+// Refresh latest teams after duplicate check so player counts stay current
+try { await load(); } catch (e) {}
 
   const teamObj = (league?.teams || []).find(t => t.name === selectedTeamName);
   const currentPlayers = (teamObj?.players || []).length;
