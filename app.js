@@ -941,10 +941,11 @@ async function addPlayer() {
 
   const teamIndex = Number(teamIndexStr);
 
-  const player = (document.getElementById("playerName")?.value || "").trim();
-  if (!player) return;
+ const playerInput = (document.getElementById("playerName")?.value || "");
+const player = playerInput.replace(/\u00A0/g, " ").replace(/\s+/g, " ").trim(); // collapses weird spaces
+if (!player) return;
 
-  const normalizedPlayer = player.toLowerCase();
+const normalizedPlayer = player.toLowerCase();
 
   const selectedTeamName = league?.teams?.[teamIndex]?.name;
   if (!selectedTeamName) return alert("Select a team");
@@ -956,7 +957,7 @@ async function addPlayer() {
 const { data: matchingPlayers, error: dupErr } = await supabaseClient
   .from("players")
   .select("id, name")
-  .ilike("name", player);
+.ilike("name", `%${player}%`);
 
 if (dupErr) {
   console.log("Duplicate player check failed:", dupErr);
@@ -964,9 +965,14 @@ if (dupErr) {
   return;
 }
 
-const duplicateExists = (matchingPlayers || []).some(row =>
-  String(row.name).trim().toLowerCase() === normalizedPlayer
-);
+const duplicateExists = (matchingPlayers || []).some(row => {
+  const rowNorm = String(row.name || "")
+    .replace(/\u00A0/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
+  return rowNorm === normalizedPlayer;
+});
 
 if (duplicateExists) {
   alert("⚠️ That player name is already in this league.\nEach player must have a different name.");
