@@ -83,9 +83,12 @@
 
 <!-- MAIN MENU -->
 <div id="mainMenu" class="hidden">
-<button id="mainLogoBtn" class="logo-button" type="button" onclick="handleLogoClick()">
-  ⚽ Wiffle Ball League
-</button>
+<div class="main-header-bar">
+  <button id="mainLogoBtn" class="logo-button" type="button" title="Go to Main Menu">
+    ⚽ Wiffle Ball League
+  </button>
+  <div class="logo-hint">Tap logo to go home</div>
+</div>
 	<div style="display:flex;justify-content:flex-end;align-items:center;gap:8px;flex-wrap:wrap;margin:6px 0 0 0;">
 		<button id="resaveStatsBtn" class="small-link icon-btn hidden" title="Sync data (pull latest / push your changes)" aria-label="Sync Data" onclick="manualResaveAllStats()">↻</button>
 		<span id="syncDataTag" class="sync-tag hidden">Sync Data</span>
@@ -121,7 +124,7 @@
 
 <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-top:8px;">
   <button id="showActiveUsersBtn" class="small-link hidden" onclick="showActiveUsers()">👥 Logged In</button>
-  <button id="mainLogoutBtn" class="menu-button hidden" onclick="logout()">Log Out</button>
+<button id="mainLogoutBtn" class="menu-button hidden" type="button">Log Out</button>
 </div>
 
 </div>
