@@ -822,6 +822,13 @@ container.appendChild(dayCard);
 }
 
 	// NAVIGATION FUNCTIONS
+
+function handleLogoClick() {
+  try { window.scrollTo({ top: 0, behavior: "smooth" }); } catch (e) {}
+  try { update(); } catch (e) {}
+  showMainMenu();
+}
+
 	function showMainMenu() {
 		hideAllScreens();
 		document.getElementById("mainMenu").classList.remove("hidden");
