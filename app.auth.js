@@ -307,47 +307,68 @@ async function loadActiveUsers() {
   box.innerHTML = names.map(n => `<div style="padding:8px;border-bottom:1px solid #333;">${n}</div>`).join("");
 }
 
-
 function showGate(step, msg) {
   const gate = document.getElementById("accessGate");
+  const gateTitle = document.getElementById("gateTitle");
+  const gateMsg = document.getElementById("gateMsg");
+  const badge = document.getElementById("gateStatusBadge");
+
+  const loginStep = document.getElementById("gateStepLogin");
+  const codeStep = document.getElementById("gateStepCode");
+  const doneStep = document.getElementById("gateStepDone");
+  const nameRow = document.getElementById("gateNameRow");
+
   gate.classList.remove("hidden");
 
-  // Hide the app UI behind the gate (prevents old menu showing through)
+  // Hide app behind the gate
   try { hideAllScreens(); } catch (e) {}
 
-  document.getElementById("gateStepLogin").classList.add("hidden");
-  document.getElementById("gateStepCode").classList.add("hidden");
-  document.getElementById("gateStepDone").classList.add("hidden");
+  // HARD RESET: hide every step first
+  if (loginStep) loginStep.classList.add("hidden");
+  if (codeStep) codeStep.classList.add("hidden");
+  if (doneStep) doneStep.classList.add("hidden");
+  if (nameRow) nameRow.classList.add("hidden");
 
-	// ✅ Never show the name row anymore
-const nameRow = document.getElementById("gateNameRow");
-if (nameRow) nameRow.classList.add("hidden");
+  if (gateMsg) {
+    gateMsg.innerText = msg || "To use this app, you must log in and enter the league code.";
+  }
 
-  const badge = document.getElementById("gateStatusBadge");
-  if (msg) document.getElementById("gateMsg").innerText = msg;
+  // Default to login if anything unexpected happens
+  if (step !== "login" && step !== "code" && step !== "done") {
+    step = "login";
+  }
 
   if (step === "login") {
-    document.getElementById("gateTitle").innerText = "Login Required";
-    document.getElementById("gateStepLogin").classList.remove("hidden");
-    // Always show league code entry while login step is visible.
-    badge.innerText = "Status: Locked (not logged in)";
-  } else if (step === "code") {
-    document.getElementById("gateTitle").innerText = "League Code Required";
-    document.getElementById("gateStepCode").classList.remove("hidden");
-    badge.innerText = "Status: Locked (league code not entered)";
-  } else if (step === "done") {
-    document.getElementById("gateTitle").innerText = "Access Granted";
+    if (gateTitle) gateTitle.innerText = "Login Required";
+    if (badge) badge.innerText = "Status: Locked (not logged in)";
+    if (loginStep) loginStep.classList.remove("hidden");
+
+    const emailBox = document.getElementById("gateLoginEmail");
+    if (emailBox) emailBox.focus();
+    return;
+  }
+
+  if (step === "code") {
+    if (gateTitle) gateTitle.innerText = "League Code Required";
+    if (badge) badge.innerText = "Status: Locked (league code not entered)";
+    if (codeStep) codeStep.classList.remove("hidden");
+
+    const codeBox = document.getElementById("gateLeagueCode");
+    if (codeBox) {
+      codeBox.value = "";
+      codeBox.focus();
+    }
+    return;
+  }
+
+  if (step === "done") {
+    if (gateTitle) gateTitle.innerText = "Access Granted";
+    if (badge) badge.innerText = "Status: Unlocked";
     document.getElementById("gateWelcomeName").innerText = (CURRENT_EMAIL || "Player");
-    document.getElementById("gateStepDone").classList.remove("hidden");
-    badge.innerText = "Status: Unlocked";
-  } else {
-    // fallback
-    document.getElementById("gateTitle").innerText = "League Access Required";
-    document.getElementById("gateStepLogin").classList.remove("hidden");
-    document.getElementById("gateStepCode").classList.remove("hidden");
-    badge.innerText = "Status: Locked";
+    if (doneStep) doneStep.classList.remove("hidden");
   }
 }
+
 function closeGate() {
   document.getElementById("accessGate").classList.add("hidden");
   showMainMenu();
@@ -363,27 +384,27 @@ function maybeShowNameBox(_email) {
   return;
 }
 
-// ===== AUTH GATE (FIXED) =====
 async function evaluateAccess() {
   const { data } = await supabaseClient.auth.getSession();
   const session = data?.session;
-	CURRENT_EMAIL = (session?.user?.email || "").trim();
 
-  // 1) Not logged in -> show email gate
+  CURRENT_EMAIL = (session?.user?.email || "").trim();
+
+  // Step 1: not logged in yet
   if (!session) {
     showGate("login", "Enter your email to get a login link.");
     await updateAuthUI();
     return;
   }
 
-  // 3) Logged in + name, but league code not unlocked -> show code gate
+  // Step 2: logged in, now require league code
   if (!isLeagueUnlocked()) {
     showGate("code", "Logged in. Now enter the league code.");
     await updateAuthUI();
     return;
   }
 
-  // 4) All good -> unlock app
+  // Fully unlocked
   document.getElementById("accessGate").classList.add("hidden");
   await updateAuthUI();
 }
