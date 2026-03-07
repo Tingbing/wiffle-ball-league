@@ -464,14 +464,21 @@ async function logout() {
   try { await stopPresence(); } catch (e) {}
   try { stopRealtime(); } catch (e) {}
 
-  const signOutResult = await supabaseClient.auth.signOut();
-  if (signOutResult?.error) {
-    alert(signOutResult.error.message || "Could not log out.");
+  try {
+    await supabaseClient.auth.signOut();
+  } catch (e) {
+    alert("Could not log out.");
     return;
   }
 
   setLeagueUnlocked(false);
   CURRENT_EMAIL = "";
+
+  try {
+    localStorage.removeItem("wbl_userName");
+    localStorage.removeItem("wbl_userEmail");
+    localStorage.removeItem("wbl_leagueOk");
+  } catch (e) {}
 
   try {
     const gateEmail = document.getElementById("gateLoginEmail");
@@ -491,6 +498,8 @@ async function logout() {
   showGate("login", "Enter your email to get a login link.");
   await updateAuthUI();
 }
+
+window.logout = logout;
 
 	async function supabaseConnectionTest() {
   console.log("Supabase URL:", SUPABASE_URL);
@@ -573,6 +582,17 @@ try {
     };
 
     // Keep main menu email typing behavior too (optional)
+	  const mainLogoBtn = document.getElementById("mainLogoBtn");
+if (mainLogoBtn && !mainLogoBtn.dataset.wired) {
+  mainLogoBtn.dataset.wired = "1";
+  mainLogoBtn.addEventListener("click", handleLogoClick);
+}
+
+const mainLogoutBtn = document.getElementById("mainLogoutBtn");
+if (mainLogoutBtn && !mainLogoutBtn.dataset.wired) {
+  mainLogoutBtn.dataset.wired = "1";
+  mainLogoutBtn.addEventListener("click", logout);
+}
     const mainEmailEl = document.getElementById("loginEmail");
     if (mainEmailEl) {
       mainEmailEl.addEventListener("change", (e) => {
