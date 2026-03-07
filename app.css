@@ -59,37 +59,6 @@
   margin: 0 0 12px 0;
 }
 
-.logo-button {
-  display: block;
-  width: 100%;
-  max-width: 520px;
-  background: #1c1c1c;
-  border: 2px solid #555;
-  border-radius: 14px;
-  padding: 16px 18px;
-  margin: 0;
-  color: white;
-  font-size: 2em;
-  font-weight: 700;
-  text-align: center;
-  cursor: pointer;
-}
-
-.logo-button:hover {
-  background: #2a2a2a;
-  border-color: #777;
-}
-
-.logo-button:focus {
-  outline: none;
-}
-
-.logo-hint {
-  margin-top: 6px;
-  font-size: 12px;
-  color: #aaa;
-}
-
 	.back-button {
 		background: #555;
 		margin-bottom: 15px;
