@@ -45,6 +45,29 @@
 		cursor: pointer;
 	}
 
+.logo-button {
+  display: block;
+  width: 100%;
+  background: transparent;
+  border: none;
+  padding: 0;
+  margin: 0 0 12px 0;
+  color: inherit;
+  font: inherit;
+  font-size: 2em;
+  font-weight: 700;
+  text-align: center;
+  cursor: pointer;
+}
+
+.logo-button:hover {
+  opacity: 0.9;
+}
+
+.logo-button:focus {
+  outline: none;
+}
+
 	.menu-button:hover {
 		background: #444;
 		border-color: #777;
