@@ -824,10 +824,17 @@ container.appendChild(dayCard);
 	// NAVIGATION FUNCTIONS
 
 function handleLogoClick() {
-  try { window.scrollTo({ top: 0, behavior: "smooth" }); } catch (e) {}
+  hideAllScreens();
+  document.getElementById("mainMenu").classList.remove("hidden");
+
+  try { window.scrollTo({ top: 0, behavior: "smooth" }); }
+  catch (e) { try { window.scrollTo(0, 0); } catch (_) {} }
+
   try { update(); } catch (e) {}
-  showMainMenu();
 }
+
+window.handleLogoClick = handleLogoClick;
+window.showMainMenu = showMainMenu;
 
 	function showMainMenu() {
 		hideAllScreens();
