@@ -209,16 +209,16 @@ CURRENT_EMAIL = email;
 
   // heartbeat every 60s
   if (presenceInterval) clearInterval(presenceInterval);
-  presenceInterval = setInterval(async () => {
-    if (!presenceUserId) return;
-    try {
-      await supabaseClient.from("active_users").upsert({
-        user_id: presenceUserId,
-        name,
-        last_seen: new Date().toISOString()
-      });
-    } catch (e) {}
-  }, 60000);
+presenceInterval = setInterval(async () => {
+  if (!presenceUserId) return;
+  try {
+    await supabaseClient.from("active_users").upsert({
+      user_id: presenceUserId,
+      name: CURRENT_EMAIL || email,
+      last_seen: new Date().toISOString()
+    });
+  } catch (e) {}
+}, 60000);
 
   // best-effort cleanup
   window.addEventListener("beforeunload", () => {
@@ -358,11 +358,9 @@ function validateEmailBasic(email) {
   return /.+@.+\..+/.test(email);
 }
 
-function maybeShowNameBox(email) {
-  const row = document.getElementById("gateNameRow");
-  // show name input after email is entered (your request)
-  if (validateEmailBasic(email) && !getStoredName()) row.classList.remove("hidden");
-  if (getStoredName()) row.classList.add("hidden");
+function maybeShowNameBox(_email) {
+  // Name entry disabled (email-only login)
+  return;
 }
 
 // ===== AUTH GATE (FIXED) =====
@@ -531,14 +529,6 @@ try {
         console.warn("Non-fatal init step failed:", label, e);
       }
     };
-
-    // Gate email typing -> show name box after email entered
-    const gateEmailEl = document.getElementById("gateLoginEmail");
-    if (gateEmailEl) {
-      gateEmailEl.addEventListener("input", (e) =>
-        maybeShowNameBox((e.target.value || "").trim())
-      );
-    }
 
     // Keep main menu email typing behavior too (optional)
     const mainEmailEl = document.getElementById("loginEmail");
