@@ -212,11 +212,11 @@ CURRENT_EMAIL = email;
 presenceInterval = setInterval(async () => {
   if (!presenceUserId) return;
   try {
-    await supabaseClient.from("active_users").upsert({
-      user_id: presenceUserId,
-      name: CURRENT_EMAIL || email,
-      last_seen: new Date().toISOString()
-    });
+   await supabaseClient.from("active_users").upsert({
+  user_id: presenceUserId,
+  name: CURRENT_EMAIL || email,
+  last_seen: new Date().toISOString()
+}, { onConflict: "user_id" });
   } catch (e) {}
 }, 60000);
 
