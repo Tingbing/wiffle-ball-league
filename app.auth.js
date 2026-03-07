@@ -103,8 +103,8 @@ async function initializeSupabaseClient() {
     supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
       auth: {
         detectSessionInUrl: true,
-        persistSession: true,
-        autoRefreshToken: true,
+       persistSession: false,
+       autoRefreshToken: true,
         // Avoid browser LockManager abort issues seen in some localhost/browser states.
         lock: async (_name, _acquireTimeout, fn) => await fn()
       }
@@ -136,36 +136,35 @@ async function initializeSupabaseClient() {
     return false;
   }
 }
+
+const MAX_TEAMS = 4;
+const MAX_PLAYERS_PER_TEAM = 2;
+
 /* ================================
    ✅ LEAGUE ACCESS SETTINGS
    - Change LEAGUE_CODE to your secret
 ==================================*/
 const LEAGUE_CODE = "6767"; // <-- IMPORTANT: change this
 
-const LS_NAME_KEY = "wbl_userName";
-const LS_EMAIL_KEY = "wbl_userEmail";
-const LS_LEAGUE_OK_KEY = "wbl_leagueOk";
+// ✅ No device memory (no localStorage for name/email)
+let CURRENT_EMAIL = "";
 
-	// ✅ Limits
-const MAX_TEAMS = 4;
-const MAX_PLAYERS_PER_TEAM = 2;
-
-
-/* ================================
-   ✅ ACCESS GATE HELPERS
-==================================*/
 function getStoredName() {
-  return (localStorage.getItem(LS_NAME_KEY) || "").trim();
+  // Keep this function name because other code calls it,
+  // but now it returns the CURRENT session email (not stored on device).
+  return (CURRENT_EMAIL || "").trim();
 }
-function setStoredName(name) {
-  localStorage.setItem(LS_NAME_KEY, (name || "").trim());
+function setStoredName(_name) {
+  // no-op
 }
 function getStoredEmail() {
-  return (localStorage.getItem(LS_EMAIL_KEY) || "").trim();
+  // no prefill, no storage
+  return "";
 }
-function setStoredEmail(email) {
-  localStorage.setItem(LS_EMAIL_KEY, (email || "").trim());
+function setStoredEmail(_email) {
+  // no-op
 }
+
 let leagueUnlockedThisSession = false;
 
 // ✅ Do NOT persist the league-code unlock.
@@ -191,7 +190,9 @@ async function startPresence() {
   if (!session) return;
 
   const userId = session.user.id;
-  const name = (getStoredName() || "Player").trim();
+	
+const email = (session.user.email || "unknown@email").trim();
+CURRENT_EMAIL = email;
 
   presenceUserId = userId;
 
@@ -199,7 +200,7 @@ async function startPresence() {
   try {
     await supabaseClient.from("active_users").upsert({
       user_id: userId,
-      name,
+    name: email,
       last_seen: new Date().toISOString()
     });
   } catch (e) {
@@ -240,8 +241,9 @@ async function stopPresence() {
 
 async function updateAuthUI() {
   const { data } = await supabaseClient.auth.getSession();
-  const loggedIn = !!data?.session;
-  const unlocked = loggedIn && isLeagueUnlocked() && !!getStoredName();
+ const loggedIn = !!data?.session;
+CURRENT_EMAIL = (data?.session?.user?.email || "").trim();
+const unlocked = loggedIn && isLeagueUnlocked();
 
   const mainLoginBlock = document.getElementById("mainLoginBlock");
   const logoutBtn = document.getElementById("mainLogoutBtn");
@@ -317,6 +319,10 @@ function showGate(step, msg) {
   document.getElementById("gateStepCode").classList.add("hidden");
   document.getElementById("gateStepDone").classList.add("hidden");
 
+	// ✅ Never show the name row anymore
+const nameRow = document.getElementById("gateNameRow");
+if (nameRow) nameRow.classList.add("hidden");
+
   const badge = document.getElementById("gateStatusBadge");
   if (msg) document.getElementById("gateMsg").innerText = msg;
 
@@ -324,7 +330,6 @@ function showGate(step, msg) {
     document.getElementById("gateTitle").innerText = "Login Required";
     document.getElementById("gateStepLogin").classList.remove("hidden");
     // Always show league code entry while login step is visible.
-    document.getElementById("gateStepCode").classList.remove("hidden");
     badge.innerText = "Status: Locked (not logged in)";
   } else if (step === "code") {
     document.getElementById("gateTitle").innerText = "League Code Required";
@@ -332,7 +337,7 @@ function showGate(step, msg) {
     badge.innerText = "Status: Locked (league code not entered)";
   } else if (step === "done") {
     document.getElementById("gateTitle").innerText = "Access Granted";
-    document.getElementById("gateWelcomeName").innerText = getStoredName() || "Player";
+    document.getElementById("gateWelcomeName").innerText = (CURRENT_EMAIL || "Player");
     document.getElementById("gateStepDone").classList.remove("hidden");
     badge.innerText = "Status: Unlocked";
   } else {
@@ -342,12 +347,6 @@ function showGate(step, msg) {
     document.getElementById("gateStepCode").classList.remove("hidden");
     badge.innerText = "Status: Locked";
   }
-
-  // Prefill gate email/name from localStorage
-  const e = getStoredEmail();
-  if (e) document.getElementById("gateLoginEmail").value = e;
-  const n = getStoredName();
-  if (n) document.getElementById("gateNameInput").value = n;
 }
 function closeGate() {
   document.getElementById("accessGate").classList.add("hidden");
@@ -370,19 +369,11 @@ function maybeShowNameBox(email) {
 async function evaluateAccess() {
   const { data } = await supabaseClient.auth.getSession();
   const session = data?.session;
+	CURRENT_EMAIL = (session?.user?.email || "").trim();
 
   // 1) Not logged in -> show email gate
   if (!session) {
     showGate("login", "Enter your email to get a login link.");
-    await updateAuthUI();
-    return;
-  }
-
-  // 2) Logged in but no name saved yet -> keep them on login gate + show name box
-  if (!getStoredName()) {
-    showGate("login", "You’re logged in — enter your name once to continue.");
-    const row = document.getElementById("gateNameRow");
-    if (row) row.classList.remove("hidden");
     await updateAuthUI();
     return;
   }
@@ -420,9 +411,6 @@ async function sendLoginLink() {
   if (!email) return alert("Enter an email");
   if (!validateEmailBasic(email)) return alert("Enter a valid email");
 
-  // store email
-  setStoredEmail(email);
-
   const emailRedirectTo = buildEmailRedirectUrl();
 
   const { error } = await supabaseClient.auth.signInWithOtp({
@@ -438,19 +426,9 @@ async function sendLoginLink() {
 
 async function sendLoginLinkFromGate() {
   const email = (document.getElementById("gateLoginEmail")?.value || "").trim();
-  const name = (document.getElementById("gateNameInput")?.value || "").trim();
-
+	
   if (!email) return alert("Enter an email");
   if (!validateEmailBasic(email)) return alert("Enter a valid email");
-
-  // After user enters their email, require name (your request)
-  if (!getStoredName() && !name) {
-    document.getElementById("gateNameRow").classList.remove("hidden");
-    return alert("Please enter your name.");
-  }
-
-  if (name) setStoredName(name);
-  setStoredEmail(email);
 
   const emailRedirectTo = buildEmailRedirectUrl();
 
@@ -497,12 +475,7 @@ async function logout() {
     showGate("login");
     return false;
   }
-  if (!getStoredName()) {
-    alert("Please enter your name to continue.");
-    showGate("login");
-    document.getElementById("gateNameRow").classList.remove("hidden");
-    return false;
-  }
+ 
   if (!isLeagueUnlocked()) {
     alert("League code required to use the app.");
     showGate("code");
@@ -543,6 +516,12 @@ window.__INIT_STARTED = true;
 
   // Ensure Supabase is initialized before any startup logic runs.
   if (!(await initializeSupabaseClient())) return;
+	// ✅ wipe any old remembered fields from older versions
+try {
+  localStorage.removeItem("wbl_userName");
+  localStorage.removeItem("wbl_userEmail");
+  localStorage.removeItem("wbl_leagueOk");
+} catch (e) {}
 
   try {
     const safeInitStep = async (label, fn) => {
