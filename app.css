@@ -45,15 +45,30 @@
 		cursor: pointer;
 	}
 
+
+
+	.menu-button:hover {
+		background: #444;
+		border-color: #777;
+	}
+
+.main-header-bar {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  margin: 0 0 12px 0;
+}
+
 .logo-button {
   display: block;
   width: 100%;
-  background: transparent;
-  border: none;
-  padding: 0;
-  margin: 0 0 12px 0;
-  color: inherit;
-  font: inherit;
+  max-width: 520px;
+  background: #1c1c1c;
+  border: 2px solid #555;
+  border-radius: 14px;
+  padding: 16px 18px;
+  margin: 0;
+  color: white;
   font-size: 2em;
   font-weight: 700;
   text-align: center;
@@ -61,17 +76,19 @@
 }
 
 .logo-button:hover {
-  opacity: 0.9;
+  background: #2a2a2a;
+  border-color: #777;
 }
 
 .logo-button:focus {
   outline: none;
 }
 
-	.menu-button:hover {
-		background: #444;
-		border-color: #777;
-	}
+.logo-hint {
+  margin-top: 6px;
+  font-size: 12px;
+  color: #aaa;
+}
 
 	.back-button {
 		background: #555;
