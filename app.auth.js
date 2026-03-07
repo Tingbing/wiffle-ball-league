@@ -460,15 +460,36 @@ async function sendLoginLinkFromGate() {
   alert("Check your email for the login link!");
 }
 
-
-
 async function logout() {
-  await stopPresence();
-  await supabaseClient.auth.signOut();
+  try { await stopPresence(); } catch (e) {}
+  try { stopRealtime(); } catch (e) {}
+
+  const signOutResult = await supabaseClient.auth.signOut();
+  if (signOutResult?.error) {
+    alert(signOutResult.error.message || "Could not log out.");
+    return;
+  }
+
   setLeagueUnlocked(false);
-  alert("Logged out");
-  // lock back down
-  await evaluateAccess();
+  CURRENT_EMAIL = "";
+
+  try {
+    const gateEmail = document.getElementById("gateLoginEmail");
+    const gateCode = document.getElementById("gateLeagueCode");
+    const mainEmail = document.getElementById("loginEmail");
+
+    if (gateEmail) gateEmail.value = "";
+    if (gateCode) gateCode.value = "";
+    if (mainEmail) mainEmail.value = "";
+  } catch (e) {}
+
+  try {
+    history.replaceState({}, document.title, location.pathname);
+  } catch (e) {}
+
+  hideAllScreens();
+  showGate("login", "Enter your email to get a login link.");
+  await updateAuthUI();
 }
 
 	async function supabaseConnectionTest() {
