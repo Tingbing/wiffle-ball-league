@@ -186,21 +186,24 @@
 	
 	<h2>🎮 Start a Game</h2>
 
-	<div class="card" id="scheduledGameCard">
-		<h3>Record Scheduled Game</h3>
+<div class="card" id="scheduledGameCard">
+	<h3>Record Scheduled Game</h3>
 
-		<p>Which day?</p>
-		<select id="scheduleDaySelect" onchange="populateScheduleGameSelect()"></select>
+	<p>Which day?</p>
+	<select id="scheduleDaySelect" onchange="populateScheduleSeriesSelect()"></select>
 
-		<p>Which game?</p>
-		<select id="scheduleGameSelect"></select>
+	<p>Which series?</p>
+	<select id="scheduleSeriesSelect" onchange="populateScheduleGameSelect()"></select>
 
-		<p id="schedulePickHint" style="color:#aaa; font-size:13px; margin-top:8px;"></p>
+	<p>Which game number?</p>
+	<select id="scheduleGameSelect"></select>
 
-		<button class="menu-button" id="startScheduledGameBtn" onclick="startSelectedScheduledGame()">
-			Start Selected Game
-		</button>
-	</div>
+	<p id="schedulePickHint" style="color:#aaa; font-size:13px; margin-top:8px;"></p>
+
+	<button class="menu-button" id="startScheduledGameBtn" onclick="startSelectedScheduledGame()">
+		Start Selected Game
+	</button>
+</div>
 
 	<!-- fallback if schedule isn't available -->
 	<div class="card" id="manualTeamCard">
