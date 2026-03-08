@@ -2404,46 +2404,26 @@ function recordBattingResult(result) {
 }
 
 function showErrorPicker() {
-if (!lastPlay) {
-alert("No play to assign an error to yet.");
-return;
-}
+  if (!lastPlay) {
+    alert("No play to assign an error to yet.");
+    return;
+  }
 
-let sel = document.getElementById("errorPlayerSelect");
-sel.innerHTML = "";
+  let sel = document.getElementById("errorPlayerSelect");
+  sel.innerHTML = "";
 
-(game.fielding?.players || []).forEach((p, i) => {
-let opt = document.createElement("option");
-opt.value = i;
-opt.text = p;
-sel.appendChild(opt);
-});
+  (game.fielding?.players || []).forEach((p, i) => {
+    let opt = document.createElement("option");
+    opt.value = i;
+    opt.text = p;
+    sel.appendChild(opt);
+  });
 
-document.getElementById("errorPicker").classList.remove("hidden");
-}
-
-// Find the fielding team from the last play
-let fieldingTeam = league.teams.find(t => t.name === lastPlay.fieldingTeamName);
-if (!fieldingTeam) {
-alert("Could not find the fielding team for the last play.");
-return;
-}
-
-let sel = document.getElementById("errorPlayerSelect");
-sel.innerHTML = "";
-
-fieldingTeam.players.forEach((p, i) => {
-let opt = document.createElement("option");
-opt.value = i;
-opt.text = p;
-sel.appendChild(opt);
-});
-
-document.getElementById("errorPicker").classList.remove("hidden");
+  document.getElementById("errorPicker").classList.remove("hidden");
 }
 
 function cancelError() {
-document.getElementById("errorPicker").classList.add("hidden");
+  document.getElementById("errorPicker").classList.add("hidden");
 }
   
 function confirmError() {
