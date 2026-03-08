@@ -25,15 +25,12 @@ function saveSchedule({ skipServerSync = false, touchMeta = true } = {}) {
   if (!skipServerSync) queueServerSync("schedule");
 }
 
-	
 	function loadSchedule() {
 	const data = localStorage.getItem("wiggleSchedule");
 	if (data) schedule = JSON.parse(data);
-	if (!schedule || typeof schedule !== "object") schedule = { days: [], teamNames: [] };
-	if (!Array.isArray(schedule.days)) schedule.days = [];
-	if (!Array.isArray(schedule.teamNames)) schedule.teamNames = [];
+	schedule = ensureScheduleShape(schedule);
 }
-	
+
 	/* ==========================================
 	✅ TEAM SOURCE: pulls from Configure Teams
 	- uses only teams that have players
@@ -53,46 +50,130 @@ function saveSchedule({ skipServerSync = false, touchMeta = true } = {}) {
 	return arr;
 	}
 	
-	/* ==========================================================
-	✅ BALANCED RANDOM SCHEDULE (4 teams, 6 days, 2 games/day)
-	- Each pair plays exactly 2 times (double round robin)
-	==========================================================*/
-	function generateBalancedSchedule4(teams) {
-	const names = teams.map(t => t.name);
-	
-	// randomize initial order (changes matchups)
-	shuffleArray(names);
-	
-	let a = names[0], b = names[1], c = names[2], d = names[3];
-	
-	// 3 rounds (circle method)
-	const rounds = [
-	[[a, d], [b, c]],
-	[[a, c], [d, b]],
-	[[a, b], [c, d]]
-	];
-	
-	// duplicate (play each other twice)
-	const doubleRounds = [
-	...rounds,
-	...rounds.map(r => r.map(g => [g[1], g[0]])) // reverse home/away
-	];
-	
-	// shuffle day order
-	shuffleArray(doubleRounds);
-	
+/* ==========================================================
+	✅ BALANCED RANDOM SCHEDULE (4 teams, 6 days, 2 series/day)
+	- Each pair plays exactly 2 best-of-3 series
+==========================================================*/
+function createSeriesGameSlot(gameNumber, result = null) {
+	return { gameNumber, result };
+}
+
+function createSeriesEntry(away, home, seriesNumber) {
 	return {
-	teamNames: teams.map(t => t.name),
-	days: doubleRounds.map((games, i) => ({
-	day: i + 1,
-	games: games.map((g, idx) => ({
-	gameNumber: idx + 1,
-	away: g[0],
-	home: g[1]
-	}))
-	}))
+		gameNumber: seriesNumber, // keeps the schedule screen looking the same
+		away,
+		home,
+		gamesInSeries: [
+			createSeriesGameSlot(1),
+			createSeriesGameSlot(2),
+			createSeriesGameSlot(3)
+		],
+		result: null // final series result only
 	};
+}
+
+function countCompletedSeriesGames(seriesEntry) {
+	return (seriesEntry?.gamesInSeries || []).filter(g => g?.result).length;
+}
+
+function computeSeriesResult(seriesEntry) {
+	if (!seriesEntry || !Array.isArray(seriesEntry.gamesInSeries)) return null;
+
+	const playedGames = seriesEntry.gamesInSeries.filter(g => g && g.result);
+	if (playedGames.length < 3) return null;
+
+	let awayWins = 0;
+	let homeWins = 0;
+	let tieGames = 0;
+
+	playedGames.forEach(g => {
+		const r = g.result;
+		if (!r) return;
+
+		if (r.type === "tie") {
+			tieGames += 1;
+			return;
+		}
+
+		if (r.winner === seriesEntry.away) awayWins += 1;
+		if (r.winner === seriesEntry.home) homeWins += 1;
+	});
+
+	if (awayWins === homeWins) {
+		return {
+			type: "tie",
+			away: seriesEntry.away,
+			home: seriesEntry.home,
+			awayWins,
+			homeWins,
+			tieGames,
+			playedAt: Date.now()
+		};
 	}
+
+	const winner = awayWins > homeWins ? seriesEntry.away : seriesEntry.home;
+	const loser = winner === seriesEntry.away ? seriesEntry.home : seriesEntry.away;
+
+	return {
+		type: "win",
+		winner,
+		loser,
+		winnerGames: Math.max(awayWins, homeWins),
+		loserGames: Math.min(awayWins, homeWins),
+		tieGames,
+		playedAt: Date.now()
+	};
+}
+
+function isScheduleCurrentFormat(scheduleObj, teamNames) {
+	if (!scheduleObj?.days?.length) return false;
+	if (scheduleObj.days.length !== 6) return false;
+
+	const scheduleNames = (scheduleObj?.teamNames || []).slice().sort();
+	if (scheduleNames.join("|") !== teamNames.join("|")) return false;
+
+	return scheduleObj.days.every(dayObj =>
+		Array.isArray(dayObj.games) &&
+		dayObj.games.length === 2 &&
+		dayObj.games.every(seriesEntry =>
+			Array.isArray(seriesEntry.gamesInSeries) &&
+			seriesEntry.gamesInSeries.length === 3
+		)
+	);
+}
+
+function generateBalancedSchedule4(teams) {
+	const names = teams.map(t => t.name);
+
+	// randomize initial order
+	shuffleArray(names);
+
+	let a = names[0], b = names[1], c = names[2], d = names[3];
+
+	const rounds = [
+		[[a, d], [b, c]],
+		[[a, c], [d, b]],
+		[[a, b], [c, d]]
+	];
+
+	// each pair gets a second series with flipped home/away
+	const doubleRounds = [
+		...rounds,
+		...rounds.map(r => r.map(g => [g[1], g[0]]))
+	];
+
+	shuffleArray(doubleRounds);
+
+	return ensureScheduleShape({
+		teamNames: teams.map(t => t.name),
+		days: doubleRounds.map((seriesList, i) => ({
+			day: i + 1,
+			games: seriesList.map((seriesTeams, idx) =>
+				createSeriesEntry(seriesTeams[0], seriesTeams[1], idx + 1)
+			)
+		}))
+	});
+}
 
 	function save() {
 		localStorage.setItem("wiggleLeague", JSON.stringify(league));
@@ -181,14 +262,65 @@ function saveSeason({ skipServerSync = false, touchMeta = true } = {}) {
 		return obj;
 	}
 
-	function ensureScheduleShape(obj) {
-		if (!obj || typeof obj !== "object") return { days: [], teamNames: [] };
-		if (!Array.isArray(obj.days)) obj.days = [];
-		if (!Array.isArray(obj.teamNames)) obj.teamNames = [];
-		return obj;
-	}
+function ensureScheduleShape(obj) {
+	if (!obj || typeof obj !== "object") obj = { days: [], teamNames: [] };
+	if (!Array.isArray(obj.days)) obj.days = [];
+	if (!Array.isArray(obj.teamNames)) obj.teamNames = [];
 
-	function snapshotHasData(seasonObj, scheduleObj) {
+	obj.days = obj.days.map((dayObj, dayIndex) => {
+		const nextDay = { ...dayObj, day: Number(dayObj?.day || (dayIndex + 1)) };
+		const rawGames = Array.isArray(dayObj?.games) ? dayObj.games : [];
+
+		nextDay.games = rawGames.map((entry, entryIndex) => {
+			const seriesNumber = Number(entry?.gameNumber || (entryIndex + 1));
+			const away = entry?.away || "";
+			const home = entry?.home || "";
+
+			// already in new series format
+			if (Array.isArray(entry?.gamesInSeries)) {
+				const gamesInSeries = entry.gamesInSeries.slice(0, 3).map((slot, slotIndex) => ({
+					gameNumber: Number(slot?.gameNumber || (slotIndex + 1)),
+					result: slot?.result || null
+				}));
+
+				while (gamesInSeries.length < 3) {
+					gamesInSeries.push(createSeriesGameSlot(gamesInSeries.length + 1));
+				}
+
+				const normalized = {
+					...entry,
+					gameNumber: seriesNumber,
+					away,
+					home,
+					gamesInSeries,
+					result: entry?.result || null
+				};
+
+				if (!normalized.result) {
+					normalized.result = computeSeriesResult(normalized);
+				}
+
+				return normalized;
+			}
+
+			// old format -> convert single game row into new series row
+			const migrated = createSeriesEntry(away, home, seriesNumber);
+
+			if (entry?.result) {
+				migrated.gamesInSeries[0].result = entry.result;
+			}
+
+			migrated.result = computeSeriesResult(migrated);
+			return migrated;
+		});
+
+		return nextDay;
+	});
+
+	return obj;
+}
+
+function snapshotHasData(seasonObj, scheduleObj) {
   try {
     const ps = seasonObj?.playerStats || {};
     if (ps && Object.keys(ps).length) return true;
@@ -197,15 +329,18 @@ function saveSeason({ skipServerSync = false, touchMeta = true } = {}) {
   try {
     const days = scheduleObj?.days || [];
     for (const d of days) {
-      for (const g of (d.games || [])) {
-        if (g && g.result) return true;
+      for (const seriesEntry of (d.games || [])) {
+        if (seriesEntry && seriesEntry.result) return true;
+
+        for (const sg of (seriesEntry?.gamesInSeries || [])) {
+          if (sg && sg.result) return true;
+        }
       }
     }
   } catch (e) {}
 
   return false;
 }
-
 
 	async function fetchSeasonRowFromServer({ quiet = true } = {}) {
 		try {
@@ -737,88 +872,82 @@ renderScheduleUI();
 }
 
 function renderScheduleUI() {
-const container = document.getElementById("scheduleContainer");
-container.innerHTML = "";
+	const container = document.getElementById("scheduleContainer");
+	container.innerHTML = "";
 
-const validTeams = getValidTeamsForSchedule();
+	const validTeams = getValidTeamsForSchedule();
 
-// This schedule feature is for exactly 4 teams
-if (validTeams.length !== 4) {
-container.innerHTML = `
-<div class="card">
-	<h3>Need 4 teams to build a season schedule</h3>
-	<p style="color:#aaa;">
-		You currently have <b>${validTeams.length}</b> team(s) with players.
-		Go to Configure Teams and make sure you have exactly 4 teams, each with at least 1 player.
-	</p>
-</div>
-`;
-return;
-}
-
-const teamNames = validTeams.map(t => t.name).sort();
-const scheduleNames = (schedule?.teamNames || []).slice().sort();
-
-const needsNew =
-!schedule?.days?.length ||
-schedule.days.length !== 6 ||
-scheduleNames.join("|") !== teamNames.join("|");
-
-if (needsNew) {
-schedule = generateBalancedSchedule4(validTeams);
-saveSchedule();
-}
-
-schedule.days.forEach(dayObj => {
-const dayCard = document.createElement("div");
-dayCard.className = "card";
-
-const rows = dayObj.games.map(g => {
-	const awayRec = formatTeamRecord(g.away);
-	const homeRec = formatTeamRecord(g.home);
-
-	let awayTag = "";
-	let homeTag = "";
-	let scoreTag = "";
-
-	if (g.result) {
-		if (g.result.type === "tie") {
-			awayTag = " 🤝 T";
-			homeTag = " 🤝 T";
-			scoreTag = ` — ${g.result.score1}-${g.result.score2}`;
-		} else {
-			awayTag = (g.result.winner === g.away) ? " ✅ W" : " ❌ L";
-			homeTag = (g.result.winner === g.home) ? " ✅ W" : " ❌ L";
-			scoreTag = ` — ${g.result.winnerScore}-${g.result.loserScore}`;
-		}
+	if (validTeams.length !== 4) {
+		container.innerHTML = `
+		<div class="card">
+			<h3>Need 4 teams to build a season schedule</h3>
+			<p style="color:#aaa;">
+				You currently have <b>${validTeams.length}</b> team(s) with players.
+				Go to Configure Teams and make sure you have exactly 4 teams, each with at least 1 player.
+			</p>
+		</div>
+		`;
+		return;
 	}
 
-	return `
-<tr>
-	<td>Game ${g.gameNumber}</td>
-	<td>
-		<b>${g.away}</b> <span style="color:#aaa;">(${awayRec})</span>${awayTag}
-		&nbsp;vs&nbsp;
-		<b>${g.home}</b> <span style="color:#aaa;">(${homeRec})</span>${homeTag}
-		<span style="color:#aaa;">${scoreTag}</span>
-	</td>
-</tr>
-`;
-}).join("");
+	const teamNames = validTeams.map(t => t.name).sort();
 
-dayCard.innerHTML = `
-<div class="section-header">Day ${dayObj.day}</div>
-<table class="stats-table">
-	<tr>
-		<th>Game</th>
-		<th>Matchup</th>
-	</tr>
-	${rows}
-</table>
-`;
+	if (!isScheduleCurrentFormat(schedule, teamNames)) {
+		schedule = generateBalancedSchedule4(validTeams);
+		saveSchedule();
+	}
 
-container.appendChild(dayCard);
-});
+	schedule.days.forEach(dayObj => {
+		const dayCard = document.createElement("div");
+		dayCard.className = "card";
+
+		const rows = dayObj.games.map(seriesEntry => {
+			const awayRec = formatTeamRecord(seriesEntry.away);
+			const homeRec = formatTeamRecord(seriesEntry.home);
+
+			let awayTag = "";
+			let homeTag = "";
+			let scoreTag = "";
+
+			if (seriesEntry.result) {
+				if (seriesEntry.result.type === "tie") {
+					awayTag = " 🤝 T";
+					homeTag = " 🤝 T";
+					const tieText = `${seriesEntry.result.awayWins}-${seriesEntry.result.homeWins}`;
+					scoreTag = ` — Series tied (${tieText})`;
+				} else {
+					awayTag = (seriesEntry.result.winner === seriesEntry.away) ? " ✅ W" : " ❌ L";
+					homeTag = (seriesEntry.result.winner === seriesEntry.home) ? " ✅ W" : " ❌ L";
+					scoreTag = ` — Series ${seriesEntry.result.winnerGames}-${seriesEntry.result.loserGames}`;
+				}
+			}
+
+			return `
+			<tr>
+				<td>Game ${seriesEntry.gameNumber}</td>
+				<td>
+					<b>${seriesEntry.away}</b> <span style="color:#aaa;">(${awayRec})</span>${awayTag}
+					&nbsp;vs&nbsp;
+					<b>${seriesEntry.home}</b> <span style="color:#aaa;">(${homeRec})</span>${homeTag}
+					<span style="color:#aaa;">${scoreTag}</span>
+				</td>
+			</tr>
+			`;
+		}).join("");
+
+		dayCard.innerHTML = `
+		<div class="section-header">Day ${dayObj.day}</div>
+		<table class="stats-table">
+			<tr>
+				<th>Game</th>
+				<th>Matchup</th>
+			</tr>
+			${rows}
+		</table>
+		`;
+
+		container.appendChild(dayCard);
+	});
 }
 
 	// NAVIGATION FUNCTIONS
