@@ -617,75 +617,124 @@ if ((serverHas && !localHas) || (serverMs > localMs + 1000)) {
 
 	}
 
-	function updateScheduleForCompletedGame(teamA, teamB, resultObj) {
+function updateScheduleForCompletedGame(teamA, teamB, resultObj) {
 	if (!schedule?.days?.length) return;
 
-	// ✅ If this game started from the schedule picker, update that exact entry
+	const applySeriesWinLoss = (seriesEntry) => {
+		if (!seriesEntry || seriesEntry._seriesStandingsApplied || !seriesEntry.result) return;
+
+		if (seriesEntry.result.type === "win") {
+			getTeamRecord(seriesEntry.result.winner).wins += 1;
+			getTeamRecord(seriesEntry.result.loser).losses += 1;
+		}
+
+		seriesEntry._seriesStandingsApplied = true;
+	};
+
+	// exact scheduled slot
 	const ref = game?._scheduleRef;
-	if (ref && Number.isInteger(ref.dayIndex) && Number.isInteger(ref.gameIndex)) {
+	if (ref && Number.isInteger(ref.dayIndex) && Number.isInteger(ref.seriesIndex) && Number.isInteger(ref.seriesGameIndex)) {
 		const day = schedule.days[ref.dayIndex];
-		const g = day?.games?.[ref.gameIndex];
-		if (g) {
-			if (g.result) return; // already recorded
-			g.result = resultObj;
+		const seriesEntry = day?.games?.[ref.seriesIndex];
+		const seriesGame = seriesEntry?.gamesInSeries?.[ref.seriesGameIndex];
+
+		if (seriesEntry && seriesGame) {
+			if (seriesGame.result) return; // already recorded
+
+			seriesGame.result = resultObj;
+
+			if (!seriesEntry.result) {
+				seriesEntry.result = computeSeriesResult(seriesEntry);
+				applySeriesWinLoss(seriesEntry);
+			}
+
 			saveSchedule();
 			return;
 		}
 	}
 
-	// fallback (old behavior): find first unplayed matching matchup
+	// fallback
 	for (const day of schedule.days) {
-		for (const g of day.games) {
-			if (g.result) continue; // already played
+		for (const seriesEntry of (day.games || [])) {
 			const match =
-				(g.away === teamA && g.home === teamB) ||
-				(g.away === teamB && g.home === teamA);
+				(seriesEntry.away === teamA && seriesEntry.home === teamB) ||
+				(seriesEntry.away === teamB && seriesEntry.home === teamA);
+
 			if (!match) continue;
 
-			g.result = resultObj;
+			const openGame = (seriesEntry.gamesInSeries || []).find(seriesGame => !seriesGame.result);
+			if (!openGame) continue;
+
+			openGame.result = resultObj;
+
+			if (!seriesEntry.result) {
+				seriesEntry.result = computeSeriesResult(seriesEntry);
+				applySeriesWinLoss(seriesEntry);
+			}
+
 			saveSchedule();
 			return;
 		}
 	}
 }
 
-	function applyGameOutcomeOnce() {
-		if (!game || game._resultSaved) return;
-		game._resultSaved = true;
+function applyGameOutcomeOnce() {
+	if (!game || game._resultSaved) return;
+	game._resultSaved = true;
 
-		const t1 = game.team1?.name;
-		const t2 = game.team2?.name;
-		if (!t1 || !t2) return;
+	const t1 = game.team1?.name;
+	const t2 = game.team2?.name;
+	if (!t1 || !t2) return;
 
-		const s1 = Number(game.team1Score || 0);
-		const s2 = Number(game.team2Score || 0);
+	const s1 = Number(game.team1Score || 0);
+	const s2 = Number(game.team2Score || 0);
 
-		// Create records if missing
-		getTeamRecord(t1);
-		getTeamRecord(t2);
+	// make sure record objects exist
+	getTeamRecord(t1);
+	getTeamRecord(t2);
 
-		let resultObj;
-		if (s1 === s2) {
-			// tie: don't change W/L, but still mark schedule
-			resultObj = { type: "tie", team1: t1, team2: t2, score1: s1, score2: s2, playedAt: Date.now() };
-		} else {
-			const winner = s1 > s2 ? t1 : t2;
-			const loser = s1 > s2 ? t2 : t1;
-			getTeamRecord(winner).wins += 1;
-			getTeamRecord(loser).losses += 1;
-			resultObj = {
-				type: "win",
-				winner,
-				loser,
-				winnerScore: Math.max(s1, s2),
-				loserScore: Math.min(s1, s2),
-				playedAt: Date.now()
-			};
-		}
+	let resultObj;
 
-		saveSeason();
+	if (s1 === s2) {
+		resultObj = {
+			type: "tie",
+			team1: t1,
+			team2: t2,
+			score1: s1,
+			score2: s2,
+			playedAt: Date.now()
+		};
+	} else {
+		const winner = s1 > s2 ? t1 : t2;
+		const loser = s1 > s2 ? t2 : t1;
+
+		resultObj = {
+			type: "win",
+			winner,
+			loser,
+			winnerScore: Math.max(s1, s2),
+			loserScore: Math.min(s1, s2),
+			playedAt: Date.now()
+		};
+	}
+
+	// scheduled series game -> store game result, series result happens after all 3
+	if (game?._scheduleRef &&
+		Number.isInteger(game._scheduleRef.dayIndex) &&
+		Number.isInteger(game._scheduleRef.seriesIndex)
+	) {
 		updateScheduleForCompletedGame(t1, t2, resultObj);
 	}
+	// manual game -> old single-game win/loss behavior
+	else if (s1 !== s2) {
+		const winner = s1 > s2 ? t1 : t2;
+		const loser = s1 > s2 ? t2 : t1;
+		getTeamRecord(winner).wins += 1;
+		getTeamRecord(loser).losses += 1;
+	}
+
+	saveSeason();
+}
 
 	async function resetSeason() {
   const msg =
@@ -1304,16 +1353,9 @@ function ensureScheduleUpToDateForSelection() {
 		return { ok: false, reason: "Schedule requires exactly 4 teams with players." };
 	}
 
-	// Same “needsNew” logic your schedule screen uses :contentReference[oaicite:5]{index=5}
 	const teamNames = validTeams.map(t => t.name).sort();
-	const scheduleNames = (schedule?.teamNames || []).slice().sort();
 
-	const needsNew =
-		!schedule?.days?.length ||
-		schedule.days.length !== 6 ||
-		scheduleNames.join("|") !== teamNames.join("|");
-
-	if (needsNew) {
+	if (!isScheduleCurrentFormat(schedule, teamNames)) {
 		schedule = generateBalancedSchedule4(validTeams);
 		saveSchedule();
 	}
@@ -1328,35 +1370,96 @@ function populateScheduleDaySelect() {
 	daySelect.innerHTML = "";
 
 	(schedule.days || []).forEach((dayObj, idx) => {
-		const unplayed = (dayObj.games || []).filter(g => !g.result).length;
+		const openGames = (dayObj.games || []).reduce((count, seriesEntry) => {
+			return count + (seriesEntry.gamesInSeries || []).filter(g => !g.result).length;
+		}, 0);
+
 		const opt = document.createElement("option");
 		opt.value = String(idx);
-		opt.text = `Day ${dayObj.day}` + (unplayed === 0 ? " (all recorded)" : "");
+		opt.text = `Day ${dayObj.day}` + (openGames === 0 ? " (all recorded)" : "");
 		daySelect.appendChild(opt);
 	});
 
-	// default to first day with an unplayed game
-	const firstOpen = (schedule.days || []).findIndex(d => (d.games || []).some(g => !g.result));
+	const firstOpen = (schedule.days || []).findIndex(dayObj =>
+		(dayObj.games || []).some(seriesEntry =>
+			(seriesEntry.gamesInSeries || []).some(g => !g.result)
+		)
+	);
+
 	daySelect.value = String(firstOpen >= 0 ? firstOpen : 0);
+
+	populateScheduleSeriesSelect();
+}
+
+function populateScheduleSeriesSelect() {
+	const daySelect = document.getElementById("scheduleDaySelect");
+	const seriesSelect = document.getElementById("scheduleSeriesSelect");
+	if (!daySelect || !seriesSelect) return;
+
+	const dayIndex = parseInt(daySelect.value, 10);
+	const dayObj = schedule?.days?.[dayIndex];
+
+	seriesSelect.innerHTML = "";
+
+	if (!dayObj || !Array.isArray(dayObj.games)) {
+		populateScheduleGameSelect();
+		return;
+	}
+
+	let added = 0;
+
+	dayObj.games.forEach((seriesEntry, seriesIndex) => {
+		const openGames = (seriesEntry.gamesInSeries || []).filter(g => !g.result).length;
+		if (openGames === 0) return;
+
+		const opt = document.createElement("option");
+		opt.value = `${dayIndex}|${seriesIndex}`;
+		opt.text = `Series ${seriesEntry.gameNumber}: ${seriesEntry.away} vs ${seriesEntry.home}`;
+		seriesSelect.appendChild(opt);
+		added += 1;
+	});
+
+	if (added === 0) {
+		const opt = document.createElement("option");
+		opt.value = "";
+		opt.text = "No available series (already recorded)";
+		seriesSelect.appendChild(opt);
+		seriesSelect.disabled = true;
+	} else {
+		seriesSelect.disabled = false;
+	}
 
 	populateScheduleGameSelect();
 }
 
 function populateScheduleGameSelect() {
-	const daySelect = document.getElementById("scheduleDaySelect");
+	const seriesSelect = document.getElementById("scheduleSeriesSelect");
 	const gameSelect = document.getElementById("scheduleGameSelect");
 	const hint = document.getElementById("schedulePickHint");
 	const btn = document.getElementById("startScheduledGameBtn");
 
-	if (!daySelect || !gameSelect) return;
-
-	const dayIndex = parseInt(daySelect.value, 10);
-	const dayObj = schedule?.days?.[dayIndex];
+	if (!seriesSelect || !gameSelect) return;
 
 	gameSelect.innerHTML = "";
 
-	if (!dayObj || !Array.isArray(dayObj.games)) {
-		if (hint) hint.innerText = "No schedule found.";
+	if (!seriesSelect.value) {
+		const opt = document.createElement("option");
+		opt.value = "";
+		opt.text = "No available games (already recorded)";
+		gameSelect.appendChild(opt);
+		gameSelect.disabled = true;
+		if (btn) btn.disabled = true;
+		if (hint) hint.innerText = "All series for this day are already recorded.";
+		return;
+	}
+
+	const [dayIndexStr, seriesIndexStr] = seriesSelect.value.split("|");
+	const dayIndex = parseInt(dayIndexStr, 10);
+	const seriesIndex = parseInt(seriesIndexStr, 10);
+	const seriesEntry = schedule?.days?.[dayIndex]?.games?.[seriesIndex];
+
+	if (!seriesEntry || !Array.isArray(seriesEntry.gamesInSeries)) {
+		if (hint) hint.innerText = "No series found.";
 		if (btn) btn.disabled = true;
 		gameSelect.disabled = true;
 		return;
@@ -1364,13 +1467,14 @@ function populateScheduleGameSelect() {
 
 	let added = 0;
 
-	dayObj.games.forEach((g, gameIndex) => {
-		if (g.result) return; // already recorded
+	seriesEntry.gamesInSeries.forEach((seriesGame, seriesGameIndex) => {
+		if (seriesGame.result) return;
+
 		const opt = document.createElement("option");
-		opt.value = `${dayIndex}|${gameIndex}`;
-		opt.text = `Game ${g.gameNumber}: ${g.away} vs ${g.home}`;
+		opt.value = `${dayIndex}|${seriesIndex}|${seriesGameIndex}`;
+		opt.text = `Game ${seriesGame.gameNumber}`;
 		gameSelect.appendChild(opt);
-		added++;
+		added += 1;
 	});
 
 	if (added === 0) {
@@ -1380,11 +1484,17 @@ function populateScheduleGameSelect() {
 		gameSelect.appendChild(opt);
 		gameSelect.disabled = true;
 		if (btn) btn.disabled = true;
-		if (hint) hint.innerText = "All games for this day are already recorded.";
+		if (hint) hint.innerText = "All 3 games in that series are already recorded.";
 	} else {
 		gameSelect.disabled = false;
 		if (btn) btn.disabled = false;
-		if (hint) hint.innerText = "";
+
+		const completedCount = countCompletedSeriesGames(seriesEntry);
+		if (hint) {
+			hint.innerText = completedCount > 0
+				? `${completedCount} of 3 games already recorded for this series.`
+				: "";
+		}
 	}
 }
 
@@ -1392,29 +1502,33 @@ function startSelectedScheduledGame() {
 	const gameSelect = document.getElementById("scheduleGameSelect");
 	if (!gameSelect || !gameSelect.value) return;
 
-	const [dayIndexStr, gameIndexStr] = gameSelect.value.split("|");
+	const [dayIndexStr, seriesIndexStr, seriesGameIndexStr] = gameSelect.value.split("|");
 	const dayIndex = parseInt(dayIndexStr, 10);
-	const gameIndex = parseInt(gameIndexStr, 10);
+	const seriesIndex = parseInt(seriesIndexStr, 10);
+	const seriesGameIndex = parseInt(seriesGameIndexStr, 10);
 
 	const dayObj = schedule?.days?.[dayIndex];
-	const g = dayObj?.games?.[gameIndex];
-	if (!g) return alert("Could not find that scheduled game.");
-	if (g.result) {
+	const seriesEntry = dayObj?.games?.[seriesIndex];
+	const seriesGame = seriesEntry?.gamesInSeries?.[seriesGameIndex];
+
+	if (!seriesEntry || !seriesGame) return alert("Could not find that scheduled series game.");
+
+	if (seriesGame.result) {
 		alert("That game was already recorded.");
 		populateScheduleGameSelect();
 		return;
 	}
 
 	const validTeams = league.teams.filter(t => t.players.length > 0);
-	const t1 = validTeams.find(t => t.name === g.away);
-	const t2 = validTeams.find(t => t.name === g.home);
+	const t1 = validTeams.find(t => t.name === seriesEntry.away);
+	const t2 = validTeams.find(t => t.name === seriesEntry.home);
 
 	if (!t1 || !t2) {
 		alert("Could not match schedule teams to your team list.");
 		return;
 	}
 
-	startGameWithTeams(t1, t2, { dayIndex, gameIndex });
+	startGameWithTeams(t1, t2, { dayIndex, seriesIndex, seriesGameIndex });
 }
 
 function startGameWithTeams(t1, t2, scheduleRef = null) {
