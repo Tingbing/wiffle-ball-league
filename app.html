@@ -174,10 +174,22 @@
 		<button onclick="addPlayer()">Add Player</button>
 	</div>
 
-	<div class="card">
-		<h3>League Teams</h3>
-		<div id="teamList"></div>
-	</div>
+<div class="card">
+	<h3>League Teams</h3>
+	<div id="teamList"></div>
+</div>
+
+<div class="card">
+	<h3>Season Subs</h3>
+	<p style="color:#aaa; margin-top:0;">
+		Add substitute players for the season. They are not permanent members of any team,
+		and their stats will go into Sub Stats.
+	</p>
+	<input id="seasonSubName" placeholder="Substitute Name">
+	<button onclick="addSeasonSub()">Add Season Sub</button>
+	<div id="seasonSubsList" style="margin-top:10px;"></div>
+</div>
+	
 </div>
 
 <!-- GAME SETUP SCREEN -->
@@ -200,9 +212,41 @@
 
 	<p id="schedulePickHint" style="color:#aaa; font-size:13px; margin-top:8px;"></p>
 
+	<div style="display:flex; gap:10px; flex-wrap:wrap; margin-top:8px;">
+		<button class="small-link" type="button" onclick="toggleSubAssignCard(true)">➕ Add Sub</button>
+	</div>
+
+	<div id="subAssignmentSummary" style="margin-top:10px;"></div>
+
 	<button class="menu-button" id="startScheduledGameBtn" onclick="startSelectedScheduledGame()">
 		Start Selected Game
 	</button>
+</div>
+
+<div class="card hidden" id="subAssignCard">
+	<h3>Assign Substitute</h3>
+
+	<p>Apply substitute to:</p>
+	<select id="subScopeSelect" onchange="populateSubTeamSelect()">
+		<option value="series">Entire selected series</option>
+		<option value="game">Selected game only</option>
+	</select>
+
+	<p>Which team?</p>
+	<select id="subTeamSelect" onchange="populateSubReplacePlayerSelect()"></select>
+
+	<p>Which roster player is being replaced?</p>
+	<select id="subReplacePlayerSelect"></select>
+
+	<p>Which Season Sub should replace them?</p>
+	<select id="seasonSubSelect"></select>
+
+	<p id="subAssignHint" style="color:#aaa; font-size:13px; margin-top:8px;"></p>
+
+	<div style="display:flex; gap:10px; flex-wrap:wrap; margin-top:10px;">
+		<button class="menu-button" type="button" onclick="confirmSubAssignment()">Save Sub Assignment</button>
+		<button class="small-link" type="button" onclick="toggleSubAssignCard(false)">Close</button>
+	</div>
 </div>
 
 	<!-- fallback if schedule isn't available -->
