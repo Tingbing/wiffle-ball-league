@@ -198,6 +198,8 @@
 	
 	<h2>🎮 Start a Game</h2>
 
+	<p id="gameSetupLockNotice" class="hidden" style="color:#ffb3b3; font-size:14px; margin-top:6px;"></p>
+
 <div class="card" id="scheduledGameCard">
 	<h3>Record Scheduled Game</h3>
 
@@ -213,7 +215,7 @@
 	<p id="schedulePickHint" style="color:#aaa; font-size:13px; margin-top:8px;"></p>
 
 	<div style="display:flex; gap:10px; flex-wrap:wrap; margin-top:8px;">
-		<button class="small-link" type="button" onclick="toggleSubAssignCard(true)">➕ Add Sub</button>
+		<button class="small-link" id="openSubAssignBtn" type="button" onclick="toggleSubAssignCard(true)">➕ Add Sub</button>
 	</div>
 
 	<div id="subAssignmentSummary" style="margin-top:10px;"></div>
@@ -262,14 +264,12 @@
 		<p>Team 2:</p>
 		<select id="team2Select"></select>
 		
-		<button class="menu-button" onclick="startGame()">Start Game</button>
+		<button class="menu-button" id="manualStartGameBtn" onclick="startGame()">Start Game</button>
 	</div>
 </div>
-
-
 <!-- GAME SCREEN -->
 <div id="gameScreen" class="hidden">
-	<button class="back-button" onclick="showMainMenu()">← Back to Main Menu</button>
+	<p style="color:#aaa; font-size:13px; margin-bottom:10px;">Finish the game normally or use End Game Early to discard it.</p>
 	<button class="end-game-button" onclick="endGameEarly()">End Game Early</button>
 
 	<div class="card">
