@@ -80,7 +80,26 @@
 </div>
 
 
+<div id="publicMenu" class="hidden">
+	<div class="card">
+		<h3>🏟️ Wiffle Ball League</h3>
+		<p>View the current season stats and schedule without signing in.</p>
 
+		<button class="menu-button" onclick="showSeasonStats()">
+			📊 Season Stats
+		</button>
+
+		<button class="menu-button" onclick="showSchedule()">
+			📅 Season Schedule
+		</button>
+
+		<button class="small-link" onclick="showGate('login', 'Sign in with your email for full league access.')">
+			🔒 Sign In for Full Access
+		</button>
+	</div>
+</div>
+
+	
 <!-- MAIN MENU -->
 <div id="mainMenu" class="hidden">
 	<div style="display:flex;justify-content:flex-end;align-items:center;gap:8px;flex-wrap:wrap;margin:6px 0 0 0;">
@@ -422,9 +441,10 @@
 
 	<div id="seasonStatsContainer"></div>
 
-	<div class="card">
-		<button onclick="resetSeason()" style="background: #a44; color: white;">Reset Season Data</button>
-	</div>
+<div class="card" id="seasonStatsAdminCard">
+	<button onclick="resetSeason()" style="background: #a44; color: white;">Reset Season Data</button>
+</div>
+	
 </div>
 <!-- SCHEDULE SCREEN -->
 
