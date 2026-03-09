@@ -1130,6 +1130,31 @@ function createSubPitchingStatsTable(subEntries) {
 	return table;
 }
 
+function getSeasonTeamsForDisplay() {
+	if (Array.isArray(league?.teams) && league.teams.length) {
+		return league.teams;
+	}
+
+	const grouped = new Map();
+	Object.values(season.playerStats || {}).forEach(stats => {
+		const teamName = String(stats?.teamName || "").trim();
+		const playerName = String(stats?.playerName || "").trim();
+		if (!teamName || !playerName) return;
+		if (!grouped.has(teamName)) grouped.set(teamName, new Set());
+		grouped.get(teamName).add(playerName);
+	});
+
+	const orderedNames = (Array.isArray(schedule?.teamNames) && schedule.teamNames.length
+		? schedule.teamNames.slice()
+		: Array.from(grouped.keys()).sort((a, b) => a.localeCompare(b))
+	).filter(name => grouped.has(name));
+
+	return orderedNames.map(teamName => ({
+		name: teamName,
+		players: Array.from(grouped.get(teamName) || []).sort((a, b) => a.localeCompare(b))
+	}));
+}
+
 function displaySeasonStats() {
 	let container = document.getElementById("seasonStatsContainer");
 	container.innerHTML = "";
@@ -1138,38 +1163,30 @@ function displaySeasonStats() {
 	const hasSubStats = Object.keys(season.subStats || {}).length > 0;
 
 	if (!hasRegularStats && !hasSubStats) {
-		container.innerHTML = "<div class='card'><p>No season statistics yet. Play some games!</p></div>";
+		container.innerHTML = "<div class='card'><p>No season statistics published yet.</p></div>";
 		return;
 	}
 
-	let teamGroups = {};
-	league.teams.forEach(team => {
-		teamGroups[team.name] = [];
-		team.players.forEach(player => {
-			let key = getPlayerKey(team.name, player);
-			if (season.playerStats[key]) {
-				teamGroups[team.name].push(player);
-			}
-		});
-	});
+	const teamsForDisplay = getSeasonTeamsForDisplay();
 
-	for (let teamName in teamGroups) {
-		if (teamGroups[teamName].length === 0) continue;
+	teamsForDisplay.forEach(team => {
+		const playersWithStats = (team.players || []).filter(player => season.playerStats[getPlayerKey(team.name, player)]);
+		if (!playersWithStats.length) return;
 
-		let team = league.teams.find(t => t.name === teamName);
+		const statsTeam = { ...team, players: playersWithStats };
 
 		let battingCard = document.createElement("div");
 		battingCard.className = "card";
-		battingCard.innerHTML = `<h3>${teamName} (${formatTeamRecord(teamName)}) - Season Batting Statistics</h3>`;
-		battingCard.appendChild(createBattingStatsTable(team, true));
+		battingCard.innerHTML = `<h3>${team.name} (${formatTeamRecord(team.name)}) - Season Batting Statistics</h3>`;
+		battingCard.appendChild(createBattingStatsTable(statsTeam, true));
 		container.appendChild(battingCard);
 
 		let pitchingCard = document.createElement("div");
 		pitchingCard.className = "card";
-		pitchingCard.innerHTML = `<h3>${teamName} (${formatTeamRecord(teamName)}) - Season Pitching Statistics</h3>`;
-		pitchingCard.appendChild(createPitchingStatsTable(team, true));
+		pitchingCard.innerHTML = `<h3>${team.name} (${formatTeamRecord(team.name)}) - Season Pitching Statistics</h3>`;
+		pitchingCard.appendChild(createPitchingStatsTable(statsTeam, true));
 		container.appendChild(pitchingCard);
-	}
+	});
 
 	const subEntries = Object.values(season.subStats || {}).sort((a, b) =>
 		String(a.playerName).localeCompare(String(b.playerName))
