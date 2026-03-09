@@ -390,21 +390,23 @@ async function evaluateAccess() {
 
   CURRENT_EMAIL = (session?.user?.email || "").trim();
 
-  // Step 1: not logged in yet
   if (!session) {
-    showGate("login", "Enter your email to get a login link.");
+    setPublicViewOnlyMode(true);
+    document.getElementById("accessGate").classList.add("hidden");
+    try { await refreshPublicViewData({ quiet: true }); } catch (e) {}
+    showPublicMenu();
     await updateAuthUI();
     return;
   }
 
-  // Step 2: logged in, now require league code
+  setPublicViewOnlyMode(false);
+
   if (!isLeagueUnlocked()) {
     showGate("code", "Logged in. Now enter the league code.");
     await updateAuthUI();
     return;
   }
 
-  // Fully unlocked
   document.getElementById("accessGate").classList.add("hidden");
   await updateAuthUI();
 }
@@ -495,7 +497,10 @@ async function logout() {
   } catch (e) {}
 
   hideAllScreens();
-  showGate("login", "Enter your email to get a login link.");
+  document.getElementById("accessGate").classList.add("hidden");
+  setPublicViewOnlyMode(true);
+  try { await refreshPublicViewData({ quiet: true }); } catch (e) {}
+  showPublicMenu();
   await updateAuthUI();
 }
 
