@@ -8,6 +8,14 @@
 	let lastPlay = null;
 	let pendingBattingResult = null;
     let playInputLock = false;
+let activeGameLock = null;
+const ACTIVE_GAME_LOCK_KEY = "wiggleActiveGameLock";
+
+try {
+	activeGameLock = JSON.parse(localStorage.getItem(ACTIVE_GAME_LOCK_KEY) || "null");
+} catch (e) {
+	activeGameLock = null;
+}
 
 	/* ================================
 	✅ SCHEDULE DATA (persisted)
@@ -357,49 +365,212 @@ function snapshotHasData(seasonObj, scheduleObj) {
   return false;
 }
 
-	async function fetchSeasonRowFromServer({ quiet = true } = {}) {
-		try {
-			const { data, error } = await supabaseClient
-				.from("season_data")
-				.select("season_json,schedule_json,updated_at")
-				.eq("league_code", String(LEAGUE_CODE))
-				.maybeSingle();
+function persistActiveGameLock(lockObj) {
+	activeGameLock = lockObj || null;
+	try {
+		if (activeGameLock) localStorage.setItem(ACTIVE_GAME_LOCK_KEY, JSON.stringify(activeGameLock));
+		else localStorage.removeItem(ACTIVE_GAME_LOCK_KEY);
+	} catch (e) {}
+	try { refreshGameLockUI(); } catch (e) {}
+}
 
-			if (error) throw error;
-			return data || null;
-		} catch (e) {
-			if (!quiet) console.log("fetch season_data failed:", e);
-			return null;
+function getActiveGameLockLabel(lockObj = activeGameLock) {
+	if (!lockObj) return "";
+	if (lockObj.type === "scheduled") {
+		const parts = [];
+		if (Number.isInteger(lockObj.dayNumber)) parts.push(`Day ${lockObj.dayNumber}`);
+		if (Number.isInteger(lockObj.seriesNumber)) parts.push(`Series ${lockObj.seriesNumber}`);
+		if (Number.isInteger(lockObj.seriesGameNumber)) parts.push(`Game ${lockObj.seriesGameNumber}`);
+		const slot = parts.join(" • ");
+		const matchup = (lockObj.team1 && lockObj.team2) ? `${lockObj.team1} vs ${lockObj.team2}` : "Scheduled game";
+		return slot ? `${slot} — ${matchup}` : matchup;
+	}
+	return (lockObj.team1 && lockObj.team2)
+		? `Manual game — ${lockObj.team1} vs ${lockObj.team2}`
+		: "Manual game in progress";
+}
+
+function refreshGameLockUI() {
+	const notice = document.getElementById("gameSetupLockNotice");
+	const manualBtn = document.getElementById("manualStartGameBtn");
+	const scheduledBtn = document.getElementById("startScheduledGameBtn");
+	const addSubBtn = document.getElementById("openSubAssignBtn");
+	const lockedByAnotherGame = !!activeGameLock && (!game?._lockId || game._lockId !== activeGameLock.lockId);
+
+	if (notice) {
+		if (lockedByAnotherGame) {
+			const startedBy = activeGameLock.startedByName ? ` by ${activeGameLock.startedByName}` : "";
+			notice.innerText = `🔒 Game recording is locked${startedBy}. ${getActiveGameLockLabel(activeGameLock)} is currently in progress.`;
+			notice.classList.remove("hidden");
+		} else {
+			notice.innerText = "";
+			notice.classList.add("hidden");
 		}
 	}
 
-	function applyServerSeasonRow(row) {
-		if (!row) return;
+	if (manualBtn) manualBtn.disabled = lockedByAnotherGame;
+	if (scheduledBtn) scheduledBtn.disabled = lockedByAnotherGame || !!scheduledBtn.disabled;
+	if (addSubBtn) addSubBtn.disabled = lockedByAnotherGame;
+}
 
-		suppressAutoSync = true;
+async function ensureSeasonRowExistsForLocking() {
+	const { data } = await supabaseClient.auth.getSession();
+	const userId = data?.session?.user?.id || null;
+	const payload = {
+		league_code: String(LEAGUE_CODE),
+		season_json: season,
+		schedule_json: schedule,
+		updated_at: new Date().toISOString(),
+		updated_by: userId,
+		active_game_lock: null,
+		active_game_lock_id: null
+	};
+	const { error } = await supabaseClient
+		.from("season_data")
+		.upsert(payload, { onConflict: "league_code", ignoreDuplicates: true });
+	if (error) throw error;
+}
 
-		season = ensureSeasonShape(row.season_json);
-		schedule = ensureScheduleShape(row.schedule_json);
+async function acquireGameLock(lockDetails) {
+	if (!(await requireLogin())) return { ok: false, reason: "login" };
 
-		// carry server updated_at into local meta
-		try {
-			const serverIso = row.updated_at || new Date().toISOString();
-			season._meta = season._meta || {};
-			schedule._meta = schedule._meta || {};
-			season._meta.updated_at = serverIso;
-			schedule._meta.updated_at = serverIso;
-		} catch (e) {}
-
-try { saveSeason({ skipServerSync: true, touchMeta: false }); } catch (e) {}
-try { saveSchedule({ skipServerSync: true, touchMeta: false }); } catch (e) {}
-
-		suppressAutoSync = false;
-
-		// Refresh screens if visible
-		try { update(); } catch (e) {}
-		try { if (!document.getElementById("seasonStatsScreen").classList.contains("hidden")) displaySeasonStats(); } catch (e) {}
-		try { if (!document.getElementById("scheduleScreen").classList.contains("hidden")) renderScheduleUI(); } catch (e) {}
+	if (activeGameLock && (!game?._lockId || game._lockId !== activeGameLock.lockId)) {
+		return { ok: false, reason: "locked", lock: activeGameLock };
 	}
+
+	const { data } = await supabaseClient.auth.getSession();
+	const user = data?.session?.user || null;
+	const lockId = `lock_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+	const lockPayload = {
+		...lockDetails,
+		lockId,
+		startedAt: new Date().toISOString(),
+		startedByName: getStoredName() || user?.email || "Unknown user",
+		startedByUserId: user?.id || null
+	};
+
+	let row = null;
+	for (let attempt = 0; attempt < 2; attempt++) {
+		const { data: updatedRow, error } = await supabaseClient
+			.from("season_data")
+			.update({
+				active_game_lock: lockPayload,
+				active_game_lock_id: lockId,
+				updated_at: new Date().toISOString(),
+				updated_by: user?.id || null
+			})
+			.eq("league_code", String(LEAGUE_CODE))
+			.is("active_game_lock_id", null)
+			.select("season_json,schedule_json,updated_at,active_game_lock,active_game_lock_id")
+			.maybeSingle();
+
+		if (error) throw error;
+		if (updatedRow) {
+			row = updatedRow;
+			break;
+		}
+
+		const latestRow = await fetchSeasonRowFromServer({ quiet: true });
+		if (latestRow) {
+			applyServerSeasonRow(latestRow);
+			if (latestRow.active_game_lock) {
+				return { ok: false, reason: "locked", lock: latestRow.active_game_lock, row: latestRow };
+			}
+		}
+
+		await ensureSeasonRowExistsForLocking();
+	}
+
+	if (!row) {
+		const latestRow = await fetchSeasonRowFromServer({ quiet: true });
+		if (latestRow) applyServerSeasonRow(latestRow);
+		return { ok: false, reason: "locked", lock: latestRow?.active_game_lock || activeGameLock, row: latestRow || null };
+	}
+
+	applyServerSeasonRow(row);
+	return { ok: true, lock: row.active_game_lock || lockPayload, lockId, row };
+}
+
+async function releaseGameLock(lockId, { quiet = false } = {}) {
+	if (!lockId) {
+		persistActiveGameLock(null);
+		return true;
+	}
+
+	if (!(await requireLogin())) return false;
+
+	const { data } = await supabaseClient.auth.getSession();
+	const userId = data?.session?.user?.id || null;
+	const { error } = await supabaseClient
+		.from("season_data")
+		.update({
+			active_game_lock: null,
+			active_game_lock_id: null,
+			updated_at: new Date().toISOString(),
+			updated_by: userId
+		})
+		.eq("league_code", String(LEAGUE_CODE))
+		.eq("active_game_lock_id", lockId);
+
+	if (error) {
+		if (!quiet) console.log("release game lock failed:", error);
+		return false;
+	}
+
+	persistActiveGameLock(null);
+	return true;
+}
+
+async function fetchSeasonRowFromServer({ quiet = true } = {}) {
+	try {
+		const { data, error } = await supabaseClient
+			.from("season_data")
+			.select("season_json,schedule_json,updated_at,active_game_lock,active_game_lock_id")
+			.eq("league_code", String(LEAGUE_CODE))
+			.maybeSingle();
+
+		if (error) throw error;
+		return data || null;
+	} catch (e) {
+		if (!quiet) console.log("fetch season_data failed:", e);
+		return null;
+	}
+}
+
+function applyServerSeasonRow(row) {
+	if (!row) return;
+
+	suppressAutoSync = true;
+
+	season = ensureSeasonShape(row.season_json);
+	schedule = ensureScheduleShape(row.schedule_json);
+	persistActiveGameLock(row.active_game_lock || null);
+
+	try {
+		const serverIso = row.updated_at || new Date().toISOString();
+		season._meta = season._meta || {};
+		schedule._meta = schedule._meta || {};
+		season._meta.updated_at = serverIso;
+		schedule._meta.updated_at = serverIso;
+	} catch (e) {}
+
+	try { saveSeason({ skipServerSync: true, touchMeta: false }); } catch (e) {}
+	try { saveSchedule({ skipServerSync: true, touchMeta: false }); } catch (e) {}
+
+	suppressAutoSync = false;
+
+	try { update(); } catch (e) {}
+	try { if (!document.getElementById("seasonStatsScreen").classList.contains("hidden")) displaySeasonStats(); } catch (e) {}
+	try { if (!document.getElementById("scheduleScreen").classList.contains("hidden")) renderScheduleUI(); } catch (e) {}
+	try {
+		if (!document.getElementById("gameSetupScreen").classList.contains("hidden")) {
+			const info = ensureScheduleUpToDateForSelection();
+			if (info.ok) populateScheduleDaySelect();
+			else updateGameSetupSelects();
+			refreshGameLockUI();
+		}
+	} catch (e) {}
+}
 
 	async function hydrateFromServerIfNewer() {
 		if (!(await requireLogin())) return;
@@ -495,8 +666,9 @@ if ((serverHas && !localHas) || (serverMs > localMs + 1000)) {
 				// If deleted, clear locally too
 				if (payload.eventType === "DELETE") {
 					suppressAutoSync = true;
-					season = { playerStats: {}, teamRecords: {}, seasonSubs: [], subStats: {} };
-					schedule = { days: [], teamNames: [] };
+				season = { playerStats: {}, teamRecords: {}, seasonSubs: [], subStats: {} };
+schedule = { days: [], teamNames: [] };
+persistActiveGameLock(null);
 					try { localStorage.removeItem("wiggleSeason"); } catch (e) {}
 					try { localStorage.removeItem("wiggleSchedule"); } catch (e) {}
 					suppressAutoSync = false;
@@ -1149,8 +1321,9 @@ function showGameSetup() {
 		manualCard.style.display = "block";
 		updateGameSetupSelects();
 	}
-}
 
+	refreshGameLockUI();
+}
 
 	function showGame() {
 		hideAllScreens();
@@ -1674,31 +1847,34 @@ function confirmSubAssignment() {
 }
 
 	// GAME SETUP FUNCTIONS
-	function updateGameSetupSelects() {
-		let validTeams = league.teams.filter(t => t.players.length > 0);
-		
-		let team1Select = document.getElementById("team1Select");
-		let team2Select = document.getElementById("team2Select");
-		
-		team1Select.innerHTML = "";
-		team2Select.innerHTML = "";
 
-		validTeams.forEach((t, i) => {
-			let opt1 = document.createElement("option");
-			opt1.value = i;
-			opt1.text = t.name;
-			team1Select.appendChild(opt1);
+function updateGameSetupSelects() {
+	let validTeams = league.teams.filter(t => t.players.length > 0);
+	
+	let team1Select = document.getElementById("team1Select");
+	let team2Select = document.getElementById("team2Select");
+	
+	team1Select.innerHTML = "";
+	team2Select.innerHTML = "";
 
-			let opt2 = document.createElement("option");
-			opt2.value = i;
-			opt2.text = t.name;
-			team2Select.appendChild(opt2);
-		});
+	validTeams.forEach((t, i) => {
+		let opt1 = document.createElement("option");
+		opt1.value = i;
+		opt1.text = t.name;
+		team1Select.appendChild(opt1);
 
-		if (validTeams.length > 1) {
-			team2Select.selectedIndex = 1;
-		}
+		let opt2 = document.createElement("option");
+		opt2.value = i;
+		opt2.text = t.name;
+		team2Select.appendChild(opt2);
+	});
+
+	if (validTeams.length > 1) {
+		team2Select.selectedIndex = 1;
 	}
+
+	refreshGameLockUI();
+}
 
 function ensureScheduleUpToDateForSelection() {
 	const validTeams = getValidTeamsForSchedule();
@@ -1854,9 +2030,10 @@ function populateScheduleGameSelect() {
 	}
 
 	renderSubAssignmentSummary();
+refreshGameLockUI();
 }
 
-function startSelectedScheduledGame() {
+async function startSelectedScheduledGame() {
 	const gameSelect = document.getElementById("scheduleGameSelect");
 	if (!gameSelect || !gameSelect.value) return;
 
@@ -1886,9 +2063,13 @@ function startSelectedScheduledGame() {
 		return;
 	}
 
-	startGameWithTeams(t1, t2, { dayIndex, seriesIndex, seriesGameIndex });
+	await beginLockedGame(t1, t2, { dayIndex, seriesIndex, seriesGameIndex }, {
+		type: "scheduled",
+		dayNumber: Number(dayObj?.day || (dayIndex + 1)),
+		seriesNumber: Number(seriesEntry?.gameNumber || (seriesIndex + 1)),
+		seriesGameNumber: Number(seriesGame?.gameNumber || (seriesGameIndex + 1))
+	});
 }
-
 
 	function showSchedule() {
 	  hideAllScreens();
