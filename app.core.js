@@ -17,6 +17,32 @@ try {
 	activeGameLock = null;
 }
 
+let publicViewOnlyMode = false;
+
+function setPublicViewOnlyMode(v) {
+	publicViewOnlyMode = !!v;
+	try { updatePublicAccessUI(); } catch (e) {}
+}
+
+function isPublicViewOnlyMode() {
+	return !!publicViewOnlyMode;
+}
+
+function hasFullAppAccess() {
+	return !publicViewOnlyMode;
+}
+
+function updatePublicAccessUI() {
+	const adminCard = document.getElementById("seasonStatsAdminCard");
+	if (adminCard) adminCard.classList.toggle("hidden", publicViewOnlyMode);
+}
+
+async function refreshPublicViewData({ quiet = true } = {}) {
+	const row = await fetchSeasonRowFromServer({ quiet, publicView: true });
+	if (row) applyServerSeasonRow(row);
+	return row;
+}
+
 	/* ================================
 	✅ SCHEDULE DATA (persisted)
 	==================================*/
@@ -521,18 +547,23 @@ async function releaseGameLock(lockId, { quiet = false } = {}) {
 	return true;
 }
 
-async function fetchSeasonRowFromServer({ quiet = true } = {}) {
+async function fetchSeasonRowFromServer({ quiet = true, publicView = false } = {}) {
 	try {
+		const tableName = publicView ? "season_data_public" : "season_data";
+		const selectCols = publicView
+			? "season_json,schedule_json,updated_at"
+			: "season_json,schedule_json,updated_at,active_game_lock,active_game_lock_id";
+
 		const { data, error } = await supabaseClient
-			.from("season_data")
-			.select("season_json,schedule_json,updated_at,active_game_lock,active_game_lock_id")
+			.from(tableName)
+			.select(selectCols)
 			.eq("league_code", String(LEAGUE_CODE))
 			.maybeSingle();
 
 		if (error) throw error;
 		return data || null;
 	} catch (e) {
-		if (!quiet) console.log("fetch season_data failed:", e);
+		if (!quiet) console.log(`fetch ${publicView ? "season_data_public" : "season_data"} failed:`, e);
 		return null;
 	}
 }
@@ -924,6 +955,7 @@ function applyGameOutcomeOnce() {
 }
 
 	async function resetSeason() {
+		if (!(await requireLogin())) return;
   const msg =
     "⚠️ Reset Season?\n\n" +
     "This will permanently delete:\n" +
@@ -1202,32 +1234,37 @@ function renderScheduleUI() {
 	container.innerHTML = "";
 
 	const validTeams = getValidTeamsForSchedule();
+	const hasLiveTeamConfig = validTeams.length === 4;
+	const snapshotTeamNames = Array.isArray(schedule?.teamNames) ? schedule.teamNames.filter(Boolean) : [];
+	const canRenderSnapshot = Array.isArray(schedule?.days) && schedule.days.length > 0 && snapshotTeamNames.length > 0;
 
-	if (validTeams.length !== 4) {
-		container.innerHTML = `
-		<div class="card">
-			<h3>Need 4 teams to build a season schedule</h3>
-			<p style="color:#aaa;">
-				You currently have <b>${validTeams.length}</b> team(s) with players.
-				Go to Configure Teams and make sure you have exactly 4 teams, each with at least 1 player.
-			</p>
-		</div>
-		`;
-		return;
-	}
-
-	const teamNames = validTeams.map(t => t.name).sort();
-
-	if (!isScheduleCurrentFormat(schedule, teamNames)) {
+	if (!canRenderSnapshot && hasLiveTeamConfig && !isScheduleCurrentFormat(schedule, validTeams.map(t => t.name).sort())) {
 		schedule = generateBalancedSchedule4(validTeams);
 		saveSchedule();
+	}
+
+	if (!Array.isArray(schedule?.days) || schedule.days.length === 0) {
+		container.innerHTML = hasLiveTeamConfig
+			? `
+			<div class="card">
+				<h3>No schedule yet</h3>
+				<p style="color:#aaa;">Generate or sync a season schedule first.</p>
+			</div>
+			`
+			: `
+			<div class="card">
+				<h3>No public schedule available yet</h3>
+				<p style="color:#aaa;">The season schedule has not been published yet.</p>
+			</div>
+			`;
+		return;
 	}
 
 	schedule.days.forEach(dayObj => {
 		const dayCard = document.createElement("div");
 		dayCard.className = "card";
 
-		const rows = dayObj.games.map(seriesEntry => {
+		const rows = (dayObj.games || []).map(seriesEntry => {
 			const awayRec = formatTeamRecord(seriesEntry.away);
 			const homeRec = formatTeamRecord(seriesEntry.home);
 
@@ -1278,19 +1315,40 @@ function renderScheduleUI() {
 
 	// NAVIGATION FUNCTIONS
 
-	function showMainMenu() {
-		hideAllScreens();
-		document.getElementById("mainMenu").classList.remove("hidden");
-		// ✅ ADD THIS to hideAllScreens()
-	}
+function showPublicMenu() {
+	hideAllScreens();
+	try { document.getElementById("accessGate").classList.add("hidden"); } catch (e) {}
+	document.getElementById("publicMenu").classList.remove("hidden");
+	updatePublicAccessUI();
+}
 
-	function showTeamConfig() {
-		hideAllScreens();
-		document.getElementById("teamConfigScreen").classList.remove("hidden");
-		update();
+function showMainMenu() {
+	if (isPublicViewOnlyMode()) {
+		showPublicMenu();
+		return;
 	}
+	hideAllScreens();
+	document.getElementById("mainMenu").classList.remove("hidden");
+	updatePublicAccessUI();
+}
 
-function showGameSetup() {
+function showTeamConfig() {
+	if (isPublicViewOnlyMode()) {
+		alert("Sign in and enter the league code to configure teams.");
+		showPublicMenu();
+		return;
+	}
+	hideAllScreens();
+	document.getElementById("teamConfigScreen").classList.remove("hidden");
+	update();
+}
+
+async function showGameSetup() {
+	if (isPublicViewOnlyMode()) {
+		alert("Sign in and enter the league code to record games.");
+		showPublicMenu();
+		return;
+	}
 	hideAllScreens();
 	
 	if (league.teams.length < 2) {
@@ -1325,6 +1383,28 @@ function showGameSetup() {
 	refreshGameLockUI();
 }
 
+async function showSeasonStats() {
+	hideAllScreens();
+	if (isPublicViewOnlyMode()) {
+		try { await refreshPublicViewData({ quiet: true }); } catch (e) {}
+	}
+	document.getElementById("seasonStatsScreen").classList.remove("hidden");
+	updatePublicAccessUI();
+	displaySeasonStats();
+}
+
+function hideAllScreens() {
+	document.getElementById("publicMenu").classList.add("hidden");
+	document.getElementById("mainMenu").classList.add("hidden");
+	document.getElementById("teamConfigScreen").classList.add("hidden");
+	document.getElementById("gameSetupScreen").classList.add("hidden");
+	document.getElementById("gameScreen").classList.add("hidden");
+	document.getElementById("gameOverScreen").classList.add("hidden");
+	document.getElementById("seasonStatsScreen").classList.add("hidden");
+	document.getElementById("scheduleScreen").classList.add("hidden");
+	document.getElementById("activeUsersScreen").classList.add("hidden");
+}
+
 	function showGame() {
 		hideAllScreens();
 		document.getElementById("gameScreen").classList.remove("hidden");
@@ -1334,25 +1414,6 @@ function showGameSetup() {
 		hideAllScreens();
 		document.getElementById("gameOverScreen").classList.remove("hidden");
 	}
-
-	function showSeasonStats() {
-		hideAllScreens();
-		document.getElementById("seasonStatsScreen").classList.remove("hidden");
-		displaySeasonStats();
-	}
-
-	function hideAllScreens() {
-		document.getElementById("mainMenu").classList.add("hidden");
-		document.getElementById("teamConfigScreen").classList.add("hidden");
-		document.getElementById("gameSetupScreen").classList.add("hidden");
-		document.getElementById("gameScreen").classList.add("hidden");
-		document.getElementById("gameOverScreen").classList.add("hidden");
-		document.getElementById("seasonStatsScreen").classList.add("hidden");
-document.getElementById("scheduleScreen").classList.add("hidden");
-
-	
-document.getElementById("activeUsersScreen").classList.add("hidden");
-}
 
 	// TEAM MANAGEMENT FUNCTIONS
 async function addTeam() {
@@ -2071,8 +2132,11 @@ async function startSelectedScheduledGame() {
 	});
 }
 
-	function showSchedule() {
-	  hideAllScreens();
-	  document.getElementById("scheduleScreen").classList.remove("hidden");
-	  renderScheduleUI();
-	}
+async function showSchedule() {
+  hideAllScreens();
+  if (isPublicViewOnlyMode()) {
+	  try { await refreshPublicViewData({ quiet: true }); } catch (e) {}
+  }
+  document.getElementById("scheduleScreen").classList.remove("hidden");
+  renderScheduleUI();
+}
