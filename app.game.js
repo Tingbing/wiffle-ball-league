@@ -73,7 +73,7 @@ updateGameScreen();
 
 // LIVE GAME ENGINE
 
-function startGameWithTeams(t1, t2, scheduleRef = null) {
+function startGameWithTeams(t1, t2, scheduleRef = null, lockInfo = null) {
 	const activeTeam1 = buildActiveTeamForGame(t1, scheduleRef);
 	const activeTeam2 = buildActiveTeamForGame(t2, scheduleRef);
 
@@ -107,8 +107,10 @@ function startGameWithTeams(t1, t2, scheduleRef = null) {
 		bases: { first: null, second: null, third: null },
 		gameStats: {},
 		currentInningPitchers: {},
-		halfInningRuns: 0,
-		_scheduleRef: scheduleRef
+	halfInningRuns: 0,
+_scheduleRef: scheduleRef,
+_lockId: lockInfo?.lockId || null,
+_lockInfo: lockInfo || null
 	};
 
 	[activeTeam1, activeTeam2].forEach(teamObj => {
@@ -137,7 +139,39 @@ function startGameWithTeams(t1, t2, scheduleRef = null) {
 	updateGameScreen();
 }
 
-function startGame() {
+async function beginLockedGame(t1, t2, scheduleRef = null, extraLockDetails = {}) {
+	const attempt = await acquireGameLock({
+		type: scheduleRef ? "scheduled" : "manual",
+		team1: t1?.name || "",
+		team2: t2?.name || "",
+		...extraLockDetails
+	});
+
+	if (!attempt.ok) {
+		refreshGameLockUI();
+		const lockLabel = getActiveGameLockLabel(attempt.lock || activeGameLock);
+		alert(lockLabel
+			? `Another game is already being recorded.\n\n${lockLabel}\n\nWait until that game is finished or ended early.`
+			: "Another game is already being recorded. Wait until it is finished or ended early.");
+		return false;
+	}
+
+	if (scheduleRef && attempt.row) {
+		const serverSchedule = ensureScheduleShape(attempt.row.schedule_json);
+		const freshSeriesGame = serverSchedule?.days?.[scheduleRef.dayIndex]?.games?.[scheduleRef.seriesIndex]?.gamesInSeries?.[scheduleRef.seriesGameIndex];
+		if (freshSeriesGame?.result) {
+			await releaseGameLock(attempt.lockId, { quiet: true });
+			applyServerSeasonRow(attempt.row);
+			alert("That game was already recorded on another device.");
+			return false;
+		}
+	}
+
+	startGameWithTeams(t1, t2, scheduleRef, attempt.lock);
+	return true;
+}
+
+async function startGame() {
 	let validTeams = league.teams.filter(t => t.players.length > 0);
 
 	let team1Index = parseInt(document.getElementById("team1Select").value);
@@ -151,16 +185,31 @@ function startGame() {
 	let t1 = validTeams[team1Index];
 	let t2 = validTeams[team2Index];
 
-	startGameWithTeams(t1, t2, null);
+	await beginLockedGame(t1, t2, null, { type: "manual" });
 }
 
+async function endGameEarly() {
+	if (!game) return;
+	if (!confirm("End this game early? All progress for this game will be discarded.")) return;
 
-	function endGameEarly() {
-		if (confirm("End this game early? Stats will be saved up to this point.")) {
-			saveGameStats();
-			displayGameOver();
-		}
+	const released = await releaseGameLock(game._lockId || activeGameLock?.lockId || null, { quiet: true });
+	if (!released) {
+		alert("Could not clear the live-game lock yet. Stay in the game and try End Game Early again.");
+		return;
 	}
+
+	game = null;
+	gameHistory = [];
+	lastPlay = null;
+	pendingBattingResult = null;
+	playInputLock = false;
+
+	document.getElementById("errorPicker")?.classList.add("hidden");
+	document.getElementById("outPicker")?.classList.add("hidden");
+
+	showMainMenu();
+	alert("Game ended early. No stats, schedule results, or standings were saved.");
+}
 
 	// GAME FUNCTIONS
 	function saveGameState() {
@@ -557,9 +606,6 @@ function confirmError() {
   let fielderKey = getGameStatsKey(fieldingTeam, fielderName);
 
   if (game?.gameStats?.[fielderKey]) game.gameStats[fielderKey].fieldingErrors++;
-  const fielderSeasonStats = getOrCreateSeasonStatsByKey(fielderKey, fieldingTeam?.name, fielderName);
-  fielderSeasonStats.fieldingErrors++;
-  saveSeason();
 
   const batterName = lastPlay.batterName;
   ["first", "second", "third"].forEach(base => {
@@ -585,6 +631,14 @@ function confirmError() {
   showNotification("Error charged to " + fielderName, 1500);
   lastPlay = null;
   updateGameScreen();
+}
+
+async function finalizeCompletedGame() {
+	const lockReleased = await saveGameStats();
+	if (!lockReleased) {
+		alert("Game stats were saved, but the live-game lock could not be cleared. Please sync again before anyone starts another game.");
+	}
+	displayGameOver();
 }
 
 function endHalfInning(pitcherKey, reasonText) {
@@ -621,8 +675,7 @@ game.inning++;
 
 // ✅ your game ends after bottom of 3rd
 if (game.inning > 3) {
-saveGameStats();
-displayGameOver();
+finalizeCompletedGame();
 return;
 }
 
@@ -798,7 +851,7 @@ if (game.inning <= 2 && game.halfInningRuns>= 6) {
 	updateGameScreen();
 }
 
-function saveGameStats() {
+async function saveGameStats() {
 	for (let key in game.gameStats) {
 		let gameStats = game.gameStats[key];
 		let seasonStats = getOrCreateSeasonStatsByKey(key, gameStats.teamName, gameStats.playerName);
@@ -824,6 +877,7 @@ function saveGameStats() {
 	applyGameOutcomeOnce();
 	saveSeason();
 	queueServerSync("game", { immediate: true });
+	return await releaseGameLock(game?._lockId || activeGameLock?.lockId || null, { quiet: true });
 }
 
 	function displayGameOver() {
