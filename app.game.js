@@ -1038,7 +1038,7 @@ function createBattingStatsTable(team, isSeason) {
 		let stats = isSeason ? season.playerStats[key] : game?.gameStats?.[key];
 
 		if (!stats) {
-			stats = isSeason ? initPlayerStats(team.name, player) : createEmptyStats(team.name, player);
+			stats = createEmptyStats(team.name, player, { isSub: false });
 			if (!isSeason && game?.gameStats) game.gameStats[key] = stats;
 		}
 
@@ -1094,7 +1094,7 @@ function createPitchingStatsTable(team, isSeason) {
 		let stats = isSeason ? season.playerStats[key] : game?.gameStats?.[key];
 
 		if (!stats) {
-			stats = isSeason ? initPlayerStats(team.name, player) : createEmptyStats(team.name, player);
+			stats = createEmptyStats(team.name, player, { isSub: false });
 			if (!isSeason && game?.gameStats) game.gameStats[key] = stats;
 		}
 
@@ -1237,59 +1237,420 @@ function getSeasonTeamsForDisplay() {
 	}));
 }
 
+function buildSeasonStatsMetricGrid(metrics) {
+	const grid = document.createElement("div");
+	grid.className = "season-stats-metric-grid";
+
+	(metrics || []).forEach(metric => {
+		const item = document.createElement("div");
+		item.className = "season-stats-metric";
+		item.innerHTML = `
+			<div class="season-stats-metric-label">${metric.label}</div>
+			<div class="season-stats-metric-value">${metric.value}</div>
+		`;
+		grid.appendChild(item);
+	});
+
+	return grid;
+}
+
+function getSeasonPlayerOptions(teamsForDisplay) {
+	const options = [];
+	const seen = new Set();
+
+	(teamsForDisplay || []).forEach(team => {
+		(team.players || []).forEach(player => {
+			const value = `REG|${team.name}|${player}`;
+			if (seen.has(value)) return;
+			seen.add(value);
+			options.push({
+				value,
+				teamName: team.name,
+				playerName: player,
+				isSub: false,
+				label: `${player} — ${team.name}`
+			});
+		});
+	});
+
+	Object.values(season.subStats || {})
+		.sort((a, b) => String(a.playerName || "").localeCompare(String(b.playerName || "")))
+		.forEach(stats => {
+			const value = `SUB|${stats.playerName}`;
+			if (seen.has(value)) return;
+			seen.add(value);
+			options.push({
+				value,
+				teamName: "SUB",
+				playerName: stats.playerName,
+				isSub: true,
+				label: `${stats.playerName} — Sub`
+			});
+		});
+
+	return options;
+}
+
+function getSeasonPlayerStatsForOption(option) {
+	if (!option) return null;
+	if (option.isSub) {
+		return season.subStats?.[getSubKey(option.playerName)] || createEmptyStats("SUB", option.playerName, { isSub: true });
+	}
+	return season.playerStats?.[getPlayerKey(option.teamName, option.playerName)] || createEmptyStats(option.teamName, option.playerName, { isSub: false });
+}
+
+function getSeasonTeamRankings(teamsForDisplay) {
+	const sorted = (teamsForDisplay || [])
+		.map(team => {
+			const record = getTeamRecord(team.name);
+			return {
+				teamName: team.name,
+				wins: Number(record.wins || 0),
+				losses: Number(record.losses || 0)
+			};
+		})
+		.sort((a, b) => {
+			if (b.wins !== a.wins) return b.wins - a.wins;
+			if (a.losses !== b.losses) return a.losses - b.losses;
+			return a.teamName.localeCompare(b.teamName);
+		});
+
+	let lastRank = 0;
+	let lastRecordKey = "";
+	return sorted.map((entry, index) => {
+		const recordKey = `${entry.wins}-${entry.losses}`;
+		if (recordKey !== lastRecordKey) {
+			lastRank = index + 1;
+			lastRecordKey = recordKey;
+		}
+		return { ...entry, rank: lastRank };
+	});
+}
+
+function getTeamGameLogForStats(teamName) {
+	const logs = [];
+	(schedule?.days || []).forEach(day => {
+		(day.games || []).forEach(seriesEntry => {
+			(seriesEntry.gamesInSeries || []).forEach(seriesGame => {
+				const result = seriesGame?.result;
+				if (!result) return;
+
+				if (result.type === "win") {
+					if (result.winner === teamName) {
+						logs.push({
+							scored: Number(result.winnerScore || 0),
+							allowed: Number(result.loserScore || 0),
+							margin: Number(result.winnerScore || 0) - Number(result.loserScore || 0)
+						});
+					} else if (result.loser === teamName) {
+						logs.push({
+							scored: Number(result.loserScore || 0),
+							allowed: Number(result.winnerScore || 0),
+							margin: Number(result.loserScore || 0) - Number(result.winnerScore || 0)
+						});
+					}
+				} else if (result.type === "tie") {
+					if (result.team1 === teamName) {
+						logs.push({
+							scored: Number(result.score1 || 0),
+							allowed: Number(result.score2 || 0),
+							margin: Number(result.score1 || 0) - Number(result.score2 || 0)
+						});
+					} else if (result.team2 === teamName) {
+						logs.push({
+							scored: Number(result.score2 || 0),
+							allowed: Number(result.score1 || 0),
+							margin: Number(result.score2 || 0) - Number(result.score1 || 0)
+						});
+					}
+				}
+			});
+		});
+	});
+	return logs;
+}
+
+function formatSeasonStatsPercent(value) {
+	return `${(Number(value || 0) * 100).toFixed(1)}%`;
+}
+
+function formatSeasonStatsSignedNumber(value, digits = 1) {
+	const num = Number(value || 0);
+	if (!Number.isFinite(num)) return "-";
+	if (num > 0) return `+${num.toFixed(digits)}`;
+	if (num < 0) return num.toFixed(digits);
+	return num.toFixed(digits);
+}
+
+function createSeasonPlayerDetails(option) {
+	const wrap = document.createElement("div");
+	wrap.className = "season-stats-stack";
+
+	if (!option) {
+		wrap.innerHTML = '<p class="season-stats-empty">No players available yet.</p>';
+		return wrap;
+	}
+
+	const stats = getSeasonPlayerStatsForOption(option);
+	const battingAvg = stats.atBats > 0 ? (stats.hits / stats.atBats).toFixed(3) : ".000";
+	const era = stats.inningsPitched > 0 ? ((stats.earnedRunsAllowed / stats.inningsPitched) * 3).toFixed(2) : "-";
+	const kPer3 = stats.inningsPitched > 0 ? ((stats.pitchStrikeouts / stats.inningsPitched) * 3).toFixed(2) : "-";
+
+	const header = document.createElement("div");
+	header.className = "season-stats-selection-header";
+	header.innerHTML = `
+		<h4>${option.playerName}</h4>
+		<p>${option.isSub ? "Substitute Player" : option.teamName}</p>
+	`;
+	wrap.appendChild(header);
+
+	const battingCard = document.createElement("div");
+	battingCard.className = "card";
+	battingCard.innerHTML = '<h4>Batting Stats</h4>';
+	battingCard.appendChild(buildSeasonStatsMetricGrid([
+		{ label: "AVG", value: battingAvg },
+		{ label: "AB", value: stats.atBats },
+		{ label: "H", value: stats.hits },
+		{ label: "1B", value: stats.singles },
+		{ label: "2B", value: stats.doubles },
+		{ label: "3B", value: stats.triples },
+		{ label: "HR", value: stats.homeRuns },
+		{ label: "RBI", value: stats.rbis },
+		{ label: "BB", value: stats.walks },
+		{ label: "K", value: stats.strikeouts }
+	]));
+	wrap.appendChild(battingCard);
+
+	const pitchingCard = document.createElement("div");
+	pitchingCard.className = "card";
+	pitchingCard.innerHTML = '<h4>Pitching Stats</h4>';
+	pitchingCard.appendChild(buildSeasonStatsMetricGrid([
+		{ label: "IP", value: Number(stats.inningsPitched || 0).toFixed(1) },
+		{ label: "Outs", value: stats.pitchOuts },
+		{ label: "K's", value: stats.pitchStrikeouts },
+		{ label: "K/3", value: kPer3 },
+		{ label: "R", value: stats.runsAllowed },
+		{ label: "ER", value: stats.earnedRunsAllowed },
+		{ label: "ERA", value: era },
+		{ label: "Errors", value: stats.fieldingErrors }
+	]));
+	wrap.appendChild(pitchingCard);
+
+	return wrap;
+}
+
+function createSeasonTeamDetails(team, rankings) {
+	const wrap = document.createElement("div");
+	wrap.className = "season-stats-stack";
+
+	if (!team) {
+		wrap.innerHTML = '<p class="season-stats-empty">No teams available yet.</p>';
+		return wrap;
+	}
+
+	const record = getTeamRecord(team.name);
+	const wins = Number(record.wins || 0);
+	const losses = Number(record.losses || 0);
+	const totalGames = wins + losses;
+	const winRate = totalGames > 0 ? wins / totalGames : 0;
+	const teamRank = (rankings || []).find(entry => entry.teamName === team.name)?.rank || "-";
+	const gameLog = getTeamGameLogForStats(team.name);
+	const avgMargin = gameLog.length
+		? gameLog.reduce((sum, gameRow) => sum + Number(gameRow.margin || 0), 0) / gameLog.length
+		: null;
+
+	const header = document.createElement("div");
+	header.className = "season-stats-selection-header";
+	header.innerHTML = `
+		<h4>${team.name}</h4>
+		<p>${(team.players || []).length} player${(team.players || []).length === 1 ? "" : "s"} on roster</p>
+	`;
+	wrap.appendChild(header);
+
+	const summaryCard = document.createElement("div");
+	summaryCard.className = "card";
+	summaryCard.innerHTML = '<h4>Team Summary</h4>';
+	summaryCard.appendChild(buildSeasonStatsMetricGrid([
+		{ label: "Record", value: `${wins}-${losses}` },
+		{ label: "Win Rate", value: formatSeasonStatsPercent(winRate) },
+		{ label: "Avg Margin", value: avgMargin === null ? "-" : formatSeasonStatsSignedNumber(avgMargin, 1) },
+		{ label: "League Rank", value: `#${teamRank}` }
+	]));
+
+	const summaryNote = document.createElement("p");
+	summaryNote.className = "season-stats-note";
+	summaryNote.textContent = "Average margin uses recorded game scores saved in the schedule.";
+	summaryCard.appendChild(summaryNote);
+	wrap.appendChild(summaryCard);
+
+	const battingCard = document.createElement("div");
+	battingCard.className = "card";
+	battingCard.innerHTML = `<h4>${team.name} Batting</h4>`;
+	battingCard.appendChild(createBattingStatsTable(team, true));
+	wrap.appendChild(battingCard);
+
+	const pitchingCard = document.createElement("div");
+	pitchingCard.className = "card";
+	pitchingCard.innerHTML = `<h4>${team.name} Pitching</h4>`;
+	pitchingCard.appendChild(createPitchingStatsTable(team, true));
+	wrap.appendChild(pitchingCard);
+
+	return wrap;
+}
+
 function displaySeasonStats() {
-	let container = document.getElementById("seasonStatsContainer");
+	const container = document.getElementById("seasonStatsContainer");
+	if (!container) return;
+
+	const previousPlayerValue = document.getElementById("seasonPlayerSelect")?.value || "";
+	const previousTeamValue = document.getElementById("seasonTeamSelect")?.value || "";
 	container.innerHTML = "";
 
 	const hasRegularStats = Object.keys(season.playerStats || {}).length > 0;
 	const hasSubStats = Object.keys(season.subStats || {}).length > 0;
+	const teamsForDisplay = getSeasonTeamsForDisplay();
 
-	if (!hasRegularStats && !hasSubStats) {
+	if (!teamsForDisplay.length && !hasRegularStats && !hasSubStats) {
 		container.innerHTML = "<div class='card'><p>No season statistics published yet.</p></div>";
 		return;
 	}
 
-	const teamsForDisplay = getSeasonTeamsForDisplay();
+	const playerOptions = getSeasonPlayerOptions(teamsForDisplay);
+	const teamRankings = getSeasonTeamRankings(teamsForDisplay);
 
-	teamsForDisplay.forEach(team => {
-		const playersWithStats = (team.players || []).filter(player => season.playerStats[getPlayerKey(team.name, player)]);
-		if (!playersWithStats.length) return;
+	const introCard = document.createElement("div");
+	introCard.className = "card";
+	introCard.innerHTML = `
+		<h3 style="margin-top:0;">Season Stats Hub</h3>
+		<p class="season-stats-note">Use the dropdowns below to quickly switch between one player or one team at a time instead of scrolling through every stat table at once.</p>
+	`;
+	container.appendChild(introCard);
 
-		const statsTeam = { ...team, players: playersWithStats };
+	const layout = document.createElement("div");
+	layout.className = "season-stats-layout";
+	container.appendChild(layout);
 
-		let battingCard = document.createElement("div");
-		battingCard.className = "card";
-		battingCard.innerHTML = `<h3>${team.name} (${formatTeamRecord(team.name)}) - Season Batting Statistics</h3>`;
-		battingCard.appendChild(createBattingStatsTable(statsTeam, true));
-		container.appendChild(battingCard);
+	const playerPanel = document.createElement("div");
+	playerPanel.className = "card season-stats-panel";
+	playerPanel.innerHTML = `
+		<h3>Player Stats</h3>
+		<p class="season-stats-note">Select one player to view that player’s batting and pitching stats together.</p>
+	`;
+	layout.appendChild(playerPanel);
 
-		let pitchingCard = document.createElement("div");
-		pitchingCard.className = "card";
-		pitchingCard.innerHTML = `<h3>${team.name} (${formatTeamRecord(team.name)}) - Season Pitching Statistics</h3>`;
-		pitchingCard.appendChild(createPitchingStatsTable(statsTeam, true));
-		container.appendChild(pitchingCard);
-	});
+	const playerSelect = document.createElement("select");
+	playerSelect.id = "seasonPlayerSelect";
+	playerSelect.className = "season-stats-select";
+	if (!playerOptions.length) {
+		const opt = document.createElement("option");
+		opt.value = "";
+		opt.textContent = "No players available";
+		playerSelect.appendChild(opt);
+		playerSelect.disabled = true;
+	} else {
+		playerOptions.forEach(option => {
+			const opt = document.createElement("option");
+			opt.value = option.value;
+			opt.textContent = option.label;
+			playerSelect.appendChild(opt);
+		});
+	}
+	playerPanel.appendChild(playerSelect);
+
+	const playerDetails = document.createElement("div");
+	playerDetails.id = "seasonPlayerDetails";
+	playerPanel.appendChild(playerDetails);
+
+	const teamPanel = document.createElement("div");
+	teamPanel.className = "card season-stats-panel";
+	teamPanel.innerHTML = `
+		<h3>Team Stats</h3>
+		<p class="season-stats-note">Select one team to view its record summary plus full batting and pitching tables.</p>
+	`;
+	layout.appendChild(teamPanel);
+
+	const teamSelect = document.createElement("select");
+	teamSelect.id = "seasonTeamSelect";
+	teamSelect.className = "season-stats-select";
+	if (!teamsForDisplay.length) {
+		const opt = document.createElement("option");
+		opt.value = "";
+		opt.textContent = "No teams available";
+		teamSelect.appendChild(opt);
+		teamSelect.disabled = true;
+	} else {
+		teamsForDisplay.forEach(team => {
+			const opt = document.createElement("option");
+			opt.value = team.name;
+			opt.textContent = team.name;
+			teamSelect.appendChild(opt);
+		});
+	}
+	teamPanel.appendChild(teamSelect);
+
+	const teamDetails = document.createElement("div");
+	teamDetails.id = "seasonTeamDetails";
+	teamPanel.appendChild(teamDetails);
+
+	function renderSelectedPlayer() {
+		const selected = playerOptions.find(option => option.value === playerSelect.value) || playerOptions[0] || null;
+		playerDetails.innerHTML = "";
+		playerDetails.appendChild(createSeasonPlayerDetails(selected));
+	}
+
+	function renderSelectedTeam() {
+		const selected = teamsForDisplay.find(team => team.name === teamSelect.value) || teamsForDisplay[0] || null;
+		teamDetails.innerHTML = "";
+		teamDetails.appendChild(createSeasonTeamDetails(selected, teamRankings));
+	}
+
+	if (playerOptions.length) {
+		playerSelect.value = playerOptions.some(option => option.value === previousPlayerValue)
+			? previousPlayerValue
+			: playerOptions[0].value;
+	}
+
+	if (teamsForDisplay.length) {
+		teamSelect.value = teamsForDisplay.some(team => team.name === previousTeamValue)
+			? previousTeamValue
+			: teamsForDisplay[0].name;
+	}
+
+	playerSelect.addEventListener("change", renderSelectedPlayer);
+	teamSelect.addEventListener("change", renderSelectedTeam);
+	renderSelectedPlayer();
+	renderSelectedTeam();
 
 	const subEntries = Object.values(season.subStats || {}).sort((a, b) =>
 		String(a.playerName).localeCompare(String(b.playerName))
 	);
 
 	if (subEntries.length) {
-		const subHeader = document.createElement("div");
-		subHeader.className = "card";
-		subHeader.innerHTML = `<h3 style="margin-bottom:0;">Sub Stats</h3><p style="color:#aaa; margin-top:8px;">Season totals earned by substitute players. These stats stay separate from regular team rosters.</p>`;
-		container.appendChild(subHeader);
+		const subWrap = document.createElement("details");
+		subWrap.className = "season-substats-details";
+		subWrap.innerHTML = '<summary>View Sub Stats</summary>';
+
+		const subInner = document.createElement("div");
+		subInner.className = "season-stats-stack";
+
+		const subNote = document.createElement("div");
+		subNote.className = "card";
+		subNote.innerHTML = `<p class="season-stats-note">Season totals earned by substitute players stay separate from regular team rosters.</p>`;
+		subInner.appendChild(subNote);
 
 		const battingCard = document.createElement("div");
 		battingCard.className = "card";
 		battingCard.innerHTML = `<h3>Sub Stats - Batting</h3>`;
 		battingCard.appendChild(createSubBattingStatsTable(subEntries));
-		container.appendChild(battingCard);
+		subInner.appendChild(battingCard);
 
 		const pitchingCard = document.createElement("div");
 		pitchingCard.className = "card";
 		pitchingCard.innerHTML = `<h3>Sub Stats - Pitching</h3>`;
 		pitchingCard.appendChild(createSubPitchingStatsTable(subEntries));
-		container.appendChild(pitchingCard);
+		subInner.appendChild(pitchingCard);
+
+		subWrap.appendChild(subInner);
+		container.appendChild(subWrap);
 	}
 }
