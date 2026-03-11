@@ -217,6 +217,8 @@
 	
 	<h2>🎮 Start a Game</h2>
 
+	<button class="emergency-end-button" onclick="emergencyEndGameFromSetup()">Emergency End Game</button>
+	<p style="color:#aaa; font-size:13px; margin-top:8px;">Use this only if a live game got stuck after a reload and you need to clear the current game lock.</p>
 	<p id="gameSetupLockNotice" class="hidden" style="color:#ffb3b3; font-size:14px; margin-top:6px;"></p>
 
 <div class="card" id="scheduledGameCard">
@@ -286,6 +288,7 @@
 		<button class="menu-button" id="manualStartGameBtn" onclick="startGame()">Start Game</button>
 	</div>
 </div>
+
 <!-- GAME SCREEN -->
 <div id="gameScreen" class="hidden">
 	<p style="color:#aaa; font-size:13px; margin-bottom:10px;">Finish the game normally or use End Game Early to discard it.</p>
@@ -306,110 +309,102 @@
 
 	<div id="notification" class="notification hidden"></div>
 
-	<div class="card">
-		<button class="undo-button" id="undoButton" onclick="undoLastAction()" disabled>↶ Undo Last Action</button>
-	</div>
-
-	<!-- BATTING SECTION -->
-	<div id="battingSection">
-		<div class="section-header">⚾ BATTING</div>
-
-		<div class="card">
-			<h3 id="inningText"></h3>
-			<p id="outsText"></p>
-			<h2 id="batterText"></h2>
+	<div class="card live-top-tools">
+		<div class="live-top-tools-row">
+			<button class="undo-button" id="undoButton" onclick="undoLastAction()" disabled>↶ Undo Last Action</button>
+			<button class="live-error-button" onclick="showErrorPicker()">Error</button>
 		</div>
 
-		<div class="card">
-			<h3>Bases</h3>
-			<div class="diamond">
-				<div class="base second" id="base2">2nd</div>
-				<div class="base third" id="base3">3rd</div>
-				<div class="base first" id="base1">1st</div>
-				<div class="base home">Home</div>
-			</div>
-		</div>
-
-		<div class="card">
-			<h3>Record Batting Result</h3>
-			<button onclick="recordBattingResult('single')">Single</button>
-			<button onclick="recordBattingResult('double')">Double</button>
-			<button onclick="recordBattingResult('triple')">Triple</button>
-			<button onclick="recordBattingResult('HR')">Home Run</button>
-			<button onclick="recordBattingResult('walk')">Walk</button>
-			<button onclick="recordBattingResult('K')">Strikeout</button>
-			<button onclick="recordBattingResult('out')">Out</button>
-			<button onclick="recordBattingResult('doublePlay')">Double Play</button>
-		</div>
-	</div>
-
-	<div class="card">
-		<h3>Manual Base Controls</h3>
-		<p style="font-size: 13px; color:#aaa;">
-			Use for steals, pickoffs, or corrections. Does not change hit/AB stats.
-		</p>
-	
-		<div>
-			<button onclick="manualMove('first','second')">1st → 2nd</button>
-			<button onclick="manualMove('second','third')">2nd → 3rd</button>
-			<button onclick="manualScoreFromThird()">3rd → Home (Score)</button>
-		</div>
-	
-		<div>
-			<button onclick="manualMove('second','first')">2nd → 1st</button>
-			<button onclick="manualMove('third','second')">3rd → 2nd</button>
-		</div>
-	
-		<div style="margin-top:8px;">
-			<button onclick="clearBases()" style="background:#555;color:white;">Clear Bases</button>
-		</div>
-	</div>
-
-	<div style="margin-top:10px;">
-		<button onclick="showOutPicker()" style="background:#a66;color:white;">
-	    Runner Thrown Out
-	  </button>
-	
-		<div id="outPicker" class="hidden" style="margin-top:10px;">
-			<p style="margin:6px 0;">Which runner got thrown out?</p>
-			<select id="outBaseSelect">
-	      <option value="first">Runner on 1st</option>
-	      <option value="second">Runner on 2nd</option>
-	      <option value="third">Runner on 3rd</option>
-	    </select>
-	
-			<button onclick="confirmRunnerOut()">Confirm Out</button>
-			<button onclick="cancelRunnerOut()">Cancel</button>
-		</div>
-	</div>
-
-	<!-- PITCHING SECTION -->
-	<div id="pitchingSection" class="disabled">
-		<div class="section-header">🥎 PITCHING</div>
-
-		<div class="card">
-			<h3>Select Pitcher</h3>
-			<select id="pitcherSelect" onchange="updatePitcherDisplay()"></select>
-			<p id="pitcherText"></p>
-		</div>
-
-		<div class="card">
-			<h3>Record Pitching Result</h3>
-			<p style="font-size: 14px; color: #aaa;">Batting result recorded. Was there a fielding error?</p>
-
-	<button onclick="showErrorPicker()">Error (Last Play)</button>
-		
-		<div id="errorPicker" class="hidden" style="margin-top:10px;">
+		<div id="errorPicker" class="hidden live-inline-picker">
 			<p style="margin:6px 0;">Who made the error?</p>
 			<select id="errorPlayerSelect"></select>
 			<button onclick="confirmError()">Confirm Error</button>
 			<button onclick="cancelError()">Cancel</button>
 		</div>
+	</div>
+
+	<div id="battingSection">
+		<div class="live-status-row">
+			<div class="card live-status-card">
+				<h3 id="inningText"></h3>
+				<p id="outsText"></p>
+			</div>
+
+			<div class="card live-batter-card">
+				<h3>Who's Up</h3>
+				<h2 id="batterText"></h2>
+			</div>
+		</div>
+
+		<div class="live-main-row">
+			<div class="live-left-column">
+				<div class="card live-bases-card">
+					<h3>Bases</h3>
+					<div class="diamond">
+						<div class="base second" id="base2">2nd</div>
+						<div class="base third" id="base3">3rd</div>
+						<div class="base first" id="base1">1st</div>
+						<div class="base home">Home</div>
+					</div>
+				</div>
+
+				<div class="card live-runner-out-card">
+					<button class="live-secondary-button" onclick="showOutPicker()">Runner Thrown Out</button>
+
+					<div id="outPicker" class="hidden live-inline-picker">
+						<p style="margin:6px 0;">Which runner got thrown out?</p>
+						<select id="outBaseSelect"></select>
+						<button onclick="confirmRunnerOut()">Confirm Out</button>
+						<button onclick="cancelRunnerOut()">Cancel</button>
+					</div>
+				</div>
+			</div>
+
+			<div class="live-right-column">
+				<div id="pitchingSection" class="card live-pitcher-card">
+					<h3>Select Pitcher</h3>
+					<select id="pitcherSelect" onchange="updatePitcherDisplay()"></select>
+					<p id="pitcherText"></p>
+				</div>
+
+				<div class="card live-results-card">
+					<h3>Record Batting Result</h3>
+					<div class="live-button-grid">
+						<button onclick="recordBattingResult('single')">Single</button>
+						<button onclick="recordBattingResult('double')">Double</button>
+						<button onclick="recordBattingResult('triple')">Triple</button>
+						<button onclick="recordBattingResult('HR')">Home Run</button>
+						<button onclick="recordBattingResult('walk')">Walk</button>
+						<button onclick="recordBattingResult('K')">Strikeout</button>
+						<button onclick="recordBattingResult('out')">Out</button>
+						<button onclick="recordBattingResult('doublePlay')">Double Play</button>
+					</div>
+				</div>
+			</div>
+		</div>
+	</div>
+
+	<div class="card live-manual-card">
+		<h3>Manual Base Controls</h3>
+		<p style="font-size: 13px; color:#aaa;">
+			Use for steals, pickoffs, or corrections. Does not change hit/AB stats.
+		</p>
+
+		<div class="live-manual-controls">
+			<select id="manualRunnerSelect"></select>
+			<select id="manualTargetBaseSelect">
+				<option value="first">Move to 1st</option>
+				<option value="second">Move to 2nd</option>
+				<option value="third">Move to 3rd</option>
+				<option value="home">Move to Home (Score)</option>
+			</select>
+			<button onclick="executeManualRunnerMove()">Move Runner</button>
+			<button class="live-clear-button" onclick="clearBases()">Clear Bases</button>
 		</div>
 	</div>
 
 </div>
-
+	
 <!-- GAME OVER SCREEN -->
 <div id="gameOverScreen" class="hidden">
 	<button class="back-button" onclick="showMainMenu()">← Back to Main Menu</button>
