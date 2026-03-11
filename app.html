@@ -324,15 +324,14 @@
 	</div>
 
 	<div id="battingSection">
-		<div class="live-status-row">
-			<div class="card live-status-card">
-				<h3 id="inningText"></h3>
-				<p id="outsText"></p>
-			</div>
-
-			<div class="card live-batter-card">
-				<h3>Who's Up</h3>
-				<h2 id="batterText"></h2>
+				<div class="live-status-row">
+			<div class="card live-status-card live-status-merged-card">
+				<div class="live-status-main" id="inningText"></div>
+				<div class="live-status-subrow">
+					<span class="live-status-chip">Who's Up</span>
+					<span class="live-status-batter" id="batterText"></span>
+					<span class="live-status-outs" id="outsText"></span>
+				</div>
 			</div>
 		</div>
 
