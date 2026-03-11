@@ -285,3 +285,195 @@
 .fatal-screen.hidden {
   display: none;
 }
+
+/* ================================
+   LIVE GAME LAYOUT REFRESH (Revision 3, dark theme)
+==================================*/
+.emergency-end-button {
+	width: 100%;
+	padding: 14px;
+	font-size: 16px;
+	margin: 10px 0 4px 0;
+	background: #7a3030;
+	color: white;
+	border: 2px solid #9b4a4a;
+	border-radius: 10px;
+	font-weight: bold;
+}
+
+.emergency-end-button:hover {
+	background: #8a3a3a;
+}
+
+.live-game-screen .card {
+	border: 1px solid #3a3a3a;
+}
+
+.live-top-tools-row {
+	display: flex;
+	gap: 10px;
+	flex-wrap: wrap;
+}
+
+.live-top-tools-row .undo-button,
+.live-top-tools-row .live-error-button {
+	flex: 1 1 180px;
+	width: auto;
+	margin: 0;
+}
+
+.live-error-button,
+.live-secondary-button,
+.live-clear-button,
+.live-manual-card button,
+.live-inline-picker button,
+.live-results-card button {
+	background: #333;
+	color: white;
+	border: 2px solid #555;
+	border-radius: 10px;
+}
+
+.live-error-button:hover,
+.live-secondary-button:hover,
+.live-clear-button:hover,
+.live-manual-card button:hover,
+.live-inline-picker button:hover,
+.live-results-card button:hover {
+	background: #444;
+	border-color: #777;
+}
+
+.live-inline-picker {
+	margin-top: 10px;
+	padding-top: 10px;
+	border-top: 1px solid #3a3a3a;
+}
+
+.live-status-row,
+.live-main-row {
+	display: flex;
+	gap: 12px;
+	align-items: stretch;
+	flex-wrap: wrap;
+}
+
+.live-status-row .card {
+	flex: 1 1 240px;
+}
+
+.live-left-column {
+	flex: 0 0 220px;
+	display: flex;
+	flex-direction: column;
+	gap: 12px;
+}
+
+.live-right-column {
+	flex: 1 1 320px;
+	display: flex;
+	flex-direction: column;
+	gap: 12px;
+}
+
+.live-status-card h3,
+.live-batter-card h3,
+.live-bases-card h3,
+.live-runner-out-card h3,
+.live-pitcher-card h3,
+.live-results-card h3,
+.live-manual-card h3 {
+	margin-top: 0;
+}
+
+.live-batter-card h2 {
+	margin-bottom: 0;
+}
+
+.live-pitcher-card {
+	border: 2px solid #666;
+	box-shadow: 0 0 0 1px #2c2c2c inset;
+}
+
+.live-pitcher-card select {
+	width: 100%;
+	box-sizing: border-box;
+	margin: 6px 0 10px 0;
+	padding: 10px;
+	font-size: 16px;
+	background: #2b2b2b;
+	color: white;
+	border: 1px solid #555;
+	border-radius: 8px;
+}
+
+.live-pitcher-card p {
+	margin: 0;
+	font-size: 14px;
+	color: #ddd;
+	font-weight: bold;
+}
+
+.live-bases-card .diamond {
+	margin: 0;
+}
+
+.live-runner-out-card button {
+	width: 100%;
+	margin: 0;
+}
+
+.live-results-card .live-button-grid {
+	display: grid;
+	grid-template-columns: repeat(2, minmax(0, 1fr));
+	gap: 10px;
+}
+
+.live-results-card button {
+	width: 100%;
+	margin: 0;
+	padding: 12px 10px;
+}
+
+.live-manual-controls {
+	display: grid;
+	grid-template-columns: repeat(2, minmax(0, 1fr));
+	gap: 10px;
+	align-items: center;
+}
+
+.live-manual-controls select {
+	width: 100%;
+	box-sizing: border-box;
+	margin: 0;
+	padding: 10px;
+	background: #2b2b2b;
+	color: white;
+	border: 1px solid #555;
+	border-radius: 8px;
+}
+
+.live-manual-controls button {
+	width: 100%;
+	margin: 0;
+}
+
+@media (max-width: 720px) {
+	.live-left-column,
+	.live-right-column {
+		flex: 1 1 100%;
+	}
+
+	.live-main-row {
+		flex-direction: column;
+	}
+
+	.live-bases-card .diamond {
+		margin: 0 auto;
+	}
+
+	.live-manual-controls,
+	.live-results-card .live-button-grid {
+		grid-template-columns: 1fr;
+	}
+}
