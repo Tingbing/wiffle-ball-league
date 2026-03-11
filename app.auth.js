@@ -67,6 +67,41 @@ async function ensureSupabaseGlobal() {
   return { ok: false, tried };
 }
 
+function getBootNavigationType() {
+	try {
+		const navEntry = performance.getEntriesByType?.("navigation")?.[0];
+		if (navEntry?.type) return navEntry.type;
+		if (performance.navigation) {
+			if (performance.navigation.type === 1) return "reload";
+			if (performance.navigation.type === 2) return "back_forward";
+		}
+	} catch (e) {}
+	return "navigate";
+}
+
+function getSupabaseSessionStorageKey() {
+	try {
+		const ref = new URL(SUPABASE_URL).hostname.split(".")[0];
+		return "sb-" + ref + "-auth-token";
+	} catch (e) {
+		return null;
+	}
+}
+
+function clearReloadOnlySessionState() {
+	try {
+		sessionStorage.removeItem("wiggleLiveGameSnapshot");
+		const authKey = getSupabaseSessionStorageKey();
+		if (authKey) sessionStorage.removeItem(authKey);
+	} catch (e) {}
+}
+
+window.__WBL_RELOAD_BOOT = getBootNavigationType() === "reload";
+
+if (!window.__WBL_RELOAD_BOOT) {
+	clearReloadOnlySessionState();
+}
+
 async function initializeSupabaseClient() {
   if (SUPABASE_READY && supabaseClient) return true;
 
@@ -100,15 +135,16 @@ async function initializeSupabaseClient() {
     new URL(SUPABASE_URL);
 
     initStage = "create-client";
-    supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
-      auth: {
-        detectSessionInUrl: true,
-       persistSession: false,
-       autoRefreshToken: true,
-        // Avoid browser LockManager abort issues seen in some localhost/browser states.
-        lock: async (_name, _acquireTimeout, fn) => await fn()
-      }
-    });
+  supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+  auth: {
+    detectSessionInUrl: true,
+   persistSession: true,
+   autoRefreshToken: true,
+   storage: window.sessionStorage,
+    // Avoid browser LockManager abort issues seen in some localhost/browser states.
+    lock: async (_name, _acquireTimeout, fn) => await fn()
+  }
+});
 
     initStage = "mark-ready";
     SUPABASE_READY = true;
@@ -401,6 +437,10 @@ async function evaluateAccess() {
 
   setPublicViewOnlyMode(false);
 
+  if (!isLeagueUnlocked() && canAutoUnlockForSavedGame(session)) {
+    setLeagueUnlocked(true);
+  }
+
   if (!isLeagueUnlocked()) {
     showGate("code", "Logged in. Now enter the league code.");
     await updateAuthUI();
@@ -476,10 +516,12 @@ async function logout() {
   setLeagueUnlocked(false);
   CURRENT_EMAIL = "";
 
-  try {
+   try {
     localStorage.removeItem("wbl_userName");
     localStorage.removeItem("wbl_userEmail");
     localStorage.removeItem("wbl_leagueOk");
+    clearSavedLiveGameSnapshot();
+    clearReloadOnlySessionState();
   } catch (e) {}
 
   try {
@@ -608,9 +650,10 @@ if (mainLogoutBtn && !mainLogoutBtn.dataset.wired) {
     }
 
     // React to login/logout automatically
-    supabaseClient.auth.onAuthStateChange(async (_event, _session) => {
+      supabaseClient.auth.onAuthStateChange(async (_event, _session) => {
       await evaluateAccess();
       await updateAuthUI();
+      await maybeRestoreLiveGameAfterBoot();
     });
 
     await safeInitStep("load teams", async () => { await load(); });
@@ -624,6 +667,7 @@ await safeInitStep("save season", async () => {
 
     await safeInitStep("evaluate access", async () => { await evaluateAccess(); });
     await safeInitStep("update auth UI", async () => { await updateAuthUI(); });
+    await safeInitStep("restore live game", async () => { await maybeRestoreLiveGameAfterBoot(); });
 
     hideFatalError();
   } catch (err) {
