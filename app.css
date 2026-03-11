@@ -229,13 +229,124 @@
     background: #1b1b1b;
   }
 
+.season-stats-layout {
+	display: grid;
+	grid-template-columns: repeat(2, minmax(0, 1fr));
+	gap: 14px;
+	align-items: start;
+}
+
+.season-stats-panel {
+	margin-top: 0;
+}
+
+.season-stats-panel h3,
+.season-stats-panel h4,
+.season-substats-details h3,
+.season-substats-details h4 {
+	margin-top: 0;
+	margin-bottom: 8px;
+}
+
+.season-stats-note {
+	color: #aaa;
+	margin: 0 0 10px 0;
+	line-height: 1.45;
+}
+
+.season-stats-select {
+	width: 100%;
+	box-sizing: border-box;
+	margin: 0 0 12px 0;
+	padding: 10px 12px;
+	background: #181818;
+	color: #fff;
+	border: 1px solid #444;
+	border-radius: 10px;
+}
+
+.season-stats-stack {
+	display: grid;
+	gap: 12px;
+}
+
+.season-stats-selection-header {
+	padding: 12px 14px;
+	background: #1a1a1a;
+	border: 1px solid #333;
+	border-radius: 10px;
+}
+
+.season-stats-selection-header h4 {
+	margin: 0 0 4px 0;
+}
+
+.season-stats-selection-header p {
+	margin: 0;
+	color: #aaa;
+}
+
+.season-stats-metric-grid {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+	gap: 10px;
+	margin-top: 10px;
+}
+
+.season-stats-metric {
+	background: #1a1a1a;
+	border: 1px solid #333;
+	border-radius: 10px;
+	padding: 10px 12px;
+}
+
+.season-stats-metric-label {
+	font-size: 12px;
+	text-transform: uppercase;
+	letter-spacing: 0.04em;
+	color: #aaa;
+	margin-bottom: 6px;
+}
+
+.season-stats-metric-value {
+	font-size: 20px;
+	font-weight: bold;
+}
+
+.season-stats-empty {
+	color: #aaa;
+	margin: 0;
+}
+
+.season-substats-details {
+	margin-top: 12px;
+	border: 1px solid #333;
+	border-radius: 10px;
+	background: #191919;
+	padding: 12px;
+}
+
+.season-substats-details summary {
+	cursor: pointer;
+	font-weight: bold;
+}
+
+.season-substats-details[open] summary {
+	margin-bottom: 10px;
+}
+
+
   /* Mobile-friendly stats tables (prevents cutoff on small screens) */
   @media (max-width: 720px) {
+	  	.season-stats-layout {
+		grid-template-columns: 1fr;
+	}
     .stats-table.responsive thead { display: none; }
     .stats-table.responsive, .stats-table.responsive tbody, .stats-table.responsive tr, .stats-table.responsive td {
       display: block;
       width: 100%;
     }
+	 
     .stats-table.responsive tr {
       background: #1a1a1a;
       border: 1px solid #333;
@@ -538,6 +649,7 @@
 }
 
 @media (max-width: 720px) {
+
 	.live-left-column,
 	.live-right-column {
 		flex: 1 1 100%;
