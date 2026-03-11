@@ -264,8 +264,6 @@ function getLiveGameSnapshotLockId(snapshot) {
 }
 
 function canAutoUnlockForSavedGame(session) {
-	if (window.__WBL_RELOAD_BOOT !== true) return false;
-
 	const snapshot = getSavedLiveGameSnapshot();
 	if (!snapshot?.game || snapshot.status === "finalizing") return false;
 
@@ -363,13 +361,12 @@ function restoreLiveGameFromSnapshot(snapshot = null) {
 }
 
 async function maybeRestoreLiveGameAfterBoot() {
-	if (window.__WBL_RELOAD_BOOT !== true) return false;
 	if (liveGameRestoreDone || game) return !!game;
 	if (!supabaseClient?.auth) return false;
 
 	const { data } = await supabaseClient.auth.getSession();
 	const session = data?.session;
-	if (!session || !isLeagueUnlocked()) return false;
+	if (!session) return false;
 
 	const snapshot = getSavedLiveGameSnapshot();
 	if (!snapshot?.game) return false;
@@ -377,6 +374,12 @@ async function maybeRestoreLiveGameAfterBoot() {
 		clearSavedLiveGameSnapshot();
 		return false;
 	}
+
+	if (!isLeagueUnlocked() && canAutoUnlockForSavedGame(session)) {
+		setLeagueUnlocked(true);
+	}
+
+	if (!isLeagueUnlocked()) return false;
 	if (!canAutoUnlockForSavedGame(session)) return false;
 
 	const snapshotLockId = getLiveGameSnapshotLockId(snapshot);
