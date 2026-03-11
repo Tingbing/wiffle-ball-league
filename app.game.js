@@ -188,6 +188,17 @@ async function startGame() {
 	await beginLockedGame(t1, t2, null, { type: "manual" });
 }
 
+function resetLiveGameSessionState() {
+	game = null;
+	gameHistory = [];
+	lastPlay = null;
+	pendingBattingResult = null;
+	playInputLock = false;
+
+	document.getElementById("errorPicker")?.classList.add("hidden");
+	document.getElementById("outPicker")?.classList.add("hidden");
+}
+
 async function endGameEarly() {
 	if (!game) return;
 	if (!confirm("End this game early? All progress for this game will be discarded.")) return;
@@ -198,17 +209,28 @@ async function endGameEarly() {
 		return;
 	}
 
-	game = null;
-	gameHistory = [];
-	lastPlay = null;
-	pendingBattingResult = null;
-	playInputLock = false;
-
-	document.getElementById("errorPicker")?.classList.add("hidden");
-	document.getElementById("outPicker")?.classList.add("hidden");
-
+	resetLiveGameSessionState();
 	showMainMenu();
 	alert("Game ended early. No stats, schedule results, or standings were saved.");
+}
+
+async function emergencyEndGameFromSetup() {
+	if (!activeGameLock && !game) {
+		alert("There is no active game to clear right now.");
+		return;
+	}
+
+	if (!confirm("Emergency End Game will clear the current live-game lock and discard the active game. Use this only if a game got stuck. Continue?")) return;
+
+	const released = await releaseGameLock(game?._lockId || activeGameLock?.lockId || null, { quiet: true });
+	if (!released) {
+		alert("Could not clear the live-game lock. Try again while signed in.");
+		return;
+	}
+
+	resetLiveGameSessionState();
+	refreshGameLockUI();
+	alert("The stuck live game was cleared. You can start a new game now.");
 }
 
 	// GAME FUNCTIONS
@@ -298,23 +320,24 @@ function undoLastAction() {
 		document.getElementById("pitcherText").innerText = "Pitching: " + pitcher;
 	}
 
-	function updateGameScreen() {
-		document.getElementById("team1Name").innerText = game.team1.name;
-		document.getElementById("team2Name").innerText = game.team2.name;
-		document.getElementById("team1Score").innerText = game.team1Score;
-		document.getElementById("team2Score").innerText = game.team2Score;
+function updateGameScreen() {
+	document.getElementById("team1Name").innerText = game.team1.name;
+	document.getElementById("team2Name").innerText = game.team2.name;
+	document.getElementById("team1Score").innerText = game.team1Score;
+	document.getElementById("team2Score").innerText = game.team2Score;
 
-		let halfText = game.halfInning === "top" ? "Top" : "Bottom";
-		document.getElementById("inningText").innerText =
-			halfText + " of Inning " + game.inning + " | " + game.batting.name + " Batting";
+	let halfText = game.halfInning === "top" ? "Top" : "Bottom";
+	document.getElementById("inningText").innerText =
+		halfText + " of Inning " + game.inning + " | " + game.batting.name + " Batting";
 
-		document.getElementById("outsText").innerText = "Outs: " + game.outs + "/2";
+	document.getElementById("outsText").innerText = "Outs: " + game.outs + "/2";
 
-		let player = game.batting.players[game.batterIndex] || "No Player";
-		document.getElementById("batterText").innerText = "Up: " + player;
+	let player = game.batting.players[game.batterIndex] || "No Player";
+	document.getElementById("batterText").innerText = player;
 
-		updateBasesDisplay();
-	}
+	updateBasesDisplay();
+	updateManualRunnerControls();
+}
 
 	function updateBasesDisplay() {
 		let base1 = document.getElementById("base1");
@@ -363,6 +386,66 @@ function undoLastAction() {
 function countBaseRunners() {
   if (!game || !game.bases) return 0;
   return ['first','second','third'].reduce((n,b)=> n + (game.bases[b] ? 1 : 0), 0);
+}
+
+function updateManualRunnerControls() {
+	const runnerSelect = document.getElementById("manualRunnerSelect");
+	const targetSelect = document.getElementById("manualTargetBaseSelect");
+	if (!runnerSelect || !targetSelect) return;
+
+	runnerSelect.innerHTML = "";
+
+	const runnerOptions = [
+		{ base: "first", label: "Runner on 1st" },
+		{ base: "second", label: "Runner on 2nd" },
+		{ base: "third", label: "Runner on 3rd" }
+	];
+
+	let hasRunner = false;
+	runnerOptions.forEach(option => {
+		if (game?.bases?.[option.base]) {
+			const opt = document.createElement("option");
+			opt.value = option.base;
+			opt.text = option.label + " (" + game.bases[option.base].player + ")";
+			runnerSelect.appendChild(opt);
+			hasRunner = true;
+		}
+	});
+
+	if (!hasRunner) {
+		const emptyOpt = document.createElement("option");
+		emptyOpt.value = "";
+		emptyOpt.text = "No runners on base";
+		runnerSelect.appendChild(emptyOpt);
+	}
+}
+
+function executeManualRunnerMove() {
+	if (!game) return;
+
+	const fromBase = document.getElementById("manualRunnerSelect")?.value;
+	const toBase = document.getElementById("manualTargetBaseSelect")?.value;
+
+	if (!fromBase) {
+		showNotification("No runner available to move", 1200);
+		return;
+	}
+
+	if (toBase === "home") {
+		if (fromBase !== "third") {
+			showNotification("Only a runner on 3rd can be scored manually", 1500);
+			return;
+		}
+		manualScoreFromThird();
+		return;
+	}
+
+	if (fromBase === toBase) {
+		showNotification("Runner is already on that base", 1200);
+		return;
+	}
+
+	manualMove(fromBase, toBase);
 }
 
 function getCurrentPitcherKey() {
