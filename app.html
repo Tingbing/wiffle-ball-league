@@ -431,14 +431,27 @@
 <div id="seasonStatsScreen" class="hidden">
 	<button class="back-button" onclick="showMainMenu()">← Back to Main Menu</button>
 	
-	<h2>📊 Season Statistics</h2>
+<h2>📊 Season Statistics</h2>
 
-	<div id="seasonStatsContainer"></div>
+<div class="card">
+	<button class="menu-button" onclick="showRankings()">🏆 Rankings</button>
+	<p class="season-stats-note" style="margin-bottom:0;">
+		Open a separate rankings screen for batting and pitching leaderboards.
+	</p>
+</div>
 
+<div id="seasonStatsContainer"></div>
 <div class="card" id="seasonStatsAdminCard">
 	<button onclick="resetSeason()" style="background: #a44; color: white;">Reset Season Data</button>
 </div>
 	
+</div>
+
+<div id="rankingsScreen" class="hidden">
+	<button class="back-button" onclick="showSeasonStats()">← Back to Season Stats</button>
+
+	<h2>🏆 Rankings</h2>
+	<div id="rankingsContainer"></div>
 </div>
 <!-- SCHEDULE SCREEN -->
 
