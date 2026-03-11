@@ -81,7 +81,6 @@ function getSupabaseSessionStorageKey() {
 function clearReloadOnlySessionState() {
 	try {
 		sessionStorage.removeItem("wiggleLiveGameSnapshot");
-		sessionStorage.removeItem(RELOAD_ONLY_LEAGUE_UNLOCK_KEY);
 		const authKey = getSupabaseSessionStorageKey();
 		if (authKey) sessionStorage.removeItem(authKey);
 	} catch (e) {}
@@ -188,12 +187,12 @@ function setStoredEmail(_email) {
 
 let leagueUnlockedThisSession = false;
 
-// Keep league access across accidental reloads only.
-// A fresh non-reload visit clears this in clearReloadOnlySessionState().
+// Keep league access available after reload so the app can reopen normally
+// and restore an in-progress game. This is cleared on logout.
 function isLeagueUnlocked() {
 	if (leagueUnlockedThisSession) return true;
 	try {
-		return sessionStorage.getItem(RELOAD_ONLY_LEAGUE_UNLOCK_KEY) === "1";
+		return localStorage.getItem("wbl_leagueOk") === "1";
 	} catch (e) {
 		return false;
 	}
@@ -202,8 +201,8 @@ function isLeagueUnlocked() {
 function setLeagueUnlocked(v) {
 	leagueUnlockedThisSession = !!v;
 	try {
-		if (v) sessionStorage.setItem(RELOAD_ONLY_LEAGUE_UNLOCK_KEY, "1");
-		else sessionStorage.removeItem(RELOAD_ONLY_LEAGUE_UNLOCK_KEY);
+		if (v) localStorage.setItem("wbl_leagueOk", "1");
+		else localStorage.removeItem("wbl_leagueOk");
 	} catch (e) {}
 }
 
@@ -607,11 +606,10 @@ window.__INIT_STARTED = true;
 
   // Ensure Supabase is initialized before any startup logic runs.
   if (!(await initializeSupabaseClient())) return;
-	// ✅ wipe any old remembered fields from older versions
+// ✅ wipe any old remembered fields from older versions
 try {
   localStorage.removeItem("wbl_userName");
   localStorage.removeItem("wbl_userEmail");
-  localStorage.removeItem("wbl_leagueOk");
 } catch (e) {}
 
   try {
