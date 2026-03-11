@@ -38,6 +38,14 @@ function cancelRunnerOut() {
 document.getElementById("outPicker").classList.add("hidden");
 }
 
+function keepLiveGameSectionsEnabled() {
+	const battingSection = document.getElementById("battingSection");
+	const pitchingSection = document.getElementById("pitchingSection");
+
+	if (battingSection) battingSection.classList.remove("disabled");
+	if (pitchingSection) pitchingSection.classList.remove("disabled");
+}
+
 function confirmRunnerOut() {
 if (!game) return;
 
@@ -129,11 +137,8 @@ _lockInfo: lockInfo || null
 	pendingBattingResult = null;
 	lastPlay = null;
 	playInputLock = false;
-
-	document.getElementById("battingSection").classList.remove("disabled");
-	document.getElementById("pitchingSection").classList.add("disabled");
-	document.getElementById("undoButton").disabled = true;
-
+document.getElementById("undoButton").disabled = true;
+	keepLiveGameSectionsEnabled();
 	showGame();
 	updatePitcherSelect();
 	updateGameScreen();
@@ -282,10 +287,7 @@ function undoLastAction() {
 
     // Keep undo simple with the new auto-clean batting flow
     pendingBattingResult = null;
-
-    document.getElementById("battingSection").classList.remove("disabled");
-    document.getElementById("pitchingSection").classList.add("disabled");
-
+keepLiveGameSectionsEnabled();
     updatePitcherSelect();
     updateGameScreen();
 
@@ -911,8 +913,7 @@ checkAndConvertToGhostie(game.batting.players[game.batterIndex]);
 if (game.inning <= 2 && game.halfInningRuns>= 6) {
 	endHalfInning(pitcherKey, "Run rule reached (6). Switching sides.");
 	pendingBattingResult = null;
-	document.getElementById("battingSection").classList.remove("disabled");
-	document.getElementById("pitchingSection").classList.add("disabled");
+keepLiveGameSectionsEnabled();
 	updateGameScreen();
 	return;
 	}
@@ -921,16 +922,14 @@ if (game.inning <= 2 && game.halfInningRuns>= 6) {
 	if (game.outs >= 2) {
 	endHalfInning(pitcherKey, null);
 	pendingBattingResult = null;
-	document.getElementById("battingSection").classList.remove("disabled");
-	document.getElementById("pitchingSection").classList.add("disabled");
+keepLiveGameSectionsEnabled();
 	updateGameScreen();
 	return;
 	}
 
 	// Reset for next play
 	pendingBattingResult = null;
-	document.getElementById("battingSection").classList.remove("disabled");
-	document.getElementById("pitchingSection").classList.add("disabled");
+keepLiveGameSectionsEnabled();
 	updateGameScreen();
 }
 
