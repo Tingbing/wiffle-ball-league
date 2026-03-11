@@ -1705,8 +1705,7 @@ function getRankingsLeaders(players, config) {
 				return config.lowerIsBetter ? a.value - b.value : b.value - a.value;
 			}
 			return a.playerName.localeCompare(b.playerName);
-		})
-		.slice(0, 8);
+		});
 }
 
 function createRankingsTable(title, players, config) {
@@ -1723,8 +1722,19 @@ function createRankingsTable(title, players, config) {
 		return card;
 	}
 
+	const tableWrap = document.createElement("div");
+	tableWrap.className = "rankings-table-wrap";
+
 	const table = document.createElement("table");
-	table.className = "stats-table responsive";
+	table.className = "stats-table rankings-table";
+
+	const colgroup = document.createElement("colgroup");
+	colgroup.innerHTML = `
+		<col class="rankings-col-rank">
+		<col class="rankings-col-name">
+		<col class="rankings-col-value">
+	`;
+	table.appendChild(colgroup);
 
 	const thead = document.createElement("thead");
 	thead.innerHTML = `
@@ -1741,18 +1751,17 @@ function createRankingsTable(title, players, config) {
 		const tr = document.createElement("tr");
 
 		const rankTd = document.createElement("td");
-		rankTd.setAttribute("data-label", "Rank");
 		rankTd.textContent = String(index + 1);
+		rankTd.className = "rankings-rank-cell";
 		tr.appendChild(rankTd);
 
 		const nameTd = document.createElement("td");
-		nameTd.setAttribute("data-label", "Player Name");
 		nameTd.textContent = leader.displayName;
+		nameTd.className = "rankings-name-cell";
 		tr.appendChild(nameTd);
 
 		const valueTd = document.createElement("td");
-		valueTd.setAttribute("data-label", "Stat Value");
-		valueTd.className = "rankings-value";
+		valueTd.className = "rankings-value rankings-value-cell";
 		valueTd.textContent = config.formatValue(leader.value, leader.stats);
 		tr.appendChild(valueTd);
 
@@ -1760,7 +1769,8 @@ function createRankingsTable(title, players, config) {
 	});
 
 	table.appendChild(tbody);
-	card.appendChild(table);
+	tableWrap.appendChild(table);
+	card.appendChild(tableWrap);
 	return card;
 }
 
@@ -1779,10 +1789,10 @@ function displayRankings() {
 	introCard.className = "card";
 	introCard.innerHTML = `
 		<h3 style="margin-top:0;">Rankings Hub</h3>
-		<p class="season-stats-note">
-			This page shows the top 8 player leaders in each category using the current saved season stats.
-			Substitute players are labeled with <strong>(Sub)</strong>.
-		</p>
+	<p class="season-stats-note">
+	This page shows the full player leaderboard in each category using the current saved season stats.
+	Substitute players are labeled with <strong>(Sub)</strong>.
+</p>
 	`;
 	container.appendChild(introCard);
 
