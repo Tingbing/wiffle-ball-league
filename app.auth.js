@@ -69,35 +69,6 @@ async function ensureSupabaseGlobal() {
 
 const RELOAD_ONLY_LEAGUE_UNLOCK_KEY = "wblReloadLeagueUnlocked";
 
-function getBootNavigationType() {
-	try {
-		const navEntry = performance.getEntriesByType?.("navigation")?.[0];
-		if (navEntry?.type) return navEntry.type;
-		if (performance.navigation) {
-			if (performance.navigation.type === 1) return "reload";
-			if (performance.navigation.type === 2) return "back_forward";
-		}
-	} catch (e) {}
-	return "navigate";
-}
-
-function hasReloadBootHint() {
-	try {
-		return new URL(location.href).searchParams.get("__wbl_boot") === "reload";
-	} catch (e) {
-		return false;
-	}
-}
-
-function stripReloadBootHintFromUrl() {
-	try {
-		const url = new URL(location.href);
-		if (!url.searchParams.has("__wbl_boot")) return;
-		url.searchParams.delete("__wbl_boot");
-		history.replaceState({}, document.title, url.pathname + url.search + url.hash);
-	} catch (e) {}
-}
-
 function getSupabaseSessionStorageKey() {
 	try {
 		const ref = new URL(SUPABASE_URL).hostname.split(".")[0];
@@ -114,15 +85,6 @@ function clearReloadOnlySessionState() {
 		const authKey = getSupabaseSessionStorageKey();
 		if (authKey) sessionStorage.removeItem(authKey);
 	} catch (e) {}
-}
-
-window.__WBL_RELOAD_BOOT =
-	getBootNavigationType() === "reload" || hasReloadBootHint();
-
-stripReloadBootHintFromUrl();
-
-if (!window.__WBL_RELOAD_BOOT) {
-	clearReloadOnlySessionState();
 }
 
 async function initializeSupabaseClient() {
