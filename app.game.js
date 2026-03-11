@@ -1303,25 +1303,34 @@ function getSeasonTeamRankings(teamsForDisplay) {
 	const sorted = (teamsForDisplay || [])
 		.map(team => {
 			const record = getTeamRecord(team.name);
+			const wins = Number(record.wins || 0);
+			const losses = Number(record.losses || 0);
+			const gameLog = getTeamGameLogForStats(team.name);
+			const avgMargin = gameLog.length
+				? gameLog.reduce((sum, gameRow) => sum + Number(gameRow.margin || 0), 0) / gameLog.length
+				: 0;
+
 			return {
 				teamName: team.name,
-				wins: Number(record.wins || 0),
-				losses: Number(record.losses || 0)
+				wins,
+				losses,
+				avgMargin
 			};
 		})
 		.sort((a, b) => {
 			if (b.wins !== a.wins) return b.wins - a.wins;
 			if (a.losses !== b.losses) return a.losses - b.losses;
+			if (b.avgMargin !== a.avgMargin) return b.avgMargin - a.avgMargin;
 			return a.teamName.localeCompare(b.teamName);
 		});
 
 	let lastRank = 0;
-	let lastRecordKey = "";
+	let lastRankKey = "";
 	return sorted.map((entry, index) => {
-		const recordKey = `${entry.wins}-${entry.losses}`;
-		if (recordKey !== lastRecordKey) {
+		const rankKey = `${entry.wins}-${entry.losses}-${Number(entry.avgMargin || 0).toFixed(3)}`;
+		if (rankKey !== lastRankKey) {
 			lastRank = index + 1;
-			lastRecordKey = recordKey;
+			lastRankKey = rankKey;
 		}
 		return { ...entry, rank: lastRank };
 	});
@@ -1453,17 +1462,15 @@ function createSeasonTeamDetails(team, rankings) {
 	const losses = Number(record.losses || 0);
 	const totalGames = wins + losses;
 	const winRate = totalGames > 0 ? wins / totalGames : 0;
-	const teamRank = (rankings || []).find(entry => entry.teamName === team.name)?.rank || "-";
-	const gameLog = getTeamGameLogForStats(team.name);
-	const avgMargin = gameLog.length
-		? gameLog.reduce((sum, gameRow) => sum + Number(gameRow.margin || 0), 0) / gameLog.length
-		: null;
+	const rankedTeam = (rankings || []).find(entry => entry.teamName === team.name) || null;
+	const teamRank = rankedTeam?.rank || "-";
+	const avgMargin = rankedTeam ? rankedTeam.avgMargin : 0;
 
 	const header = document.createElement("div");
 	header.className = "season-stats-selection-header";
 	header.innerHTML = `
 		<h4>${team.name}</h4>
-		<p>${(team.players || []).length} player${(team.players || []).length === 1 ? "" : "s"} on roster</p>
+		<p>Team-only season summary</p>
 	`;
 	wrap.appendChild(header);
 
@@ -1473,27 +1480,23 @@ function createSeasonTeamDetails(team, rankings) {
 	summaryCard.appendChild(buildSeasonStatsMetricGrid([
 		{ label: "Record", value: `${wins}-${losses}` },
 		{ label: "Win Rate", value: formatSeasonStatsPercent(winRate) },
-		{ label: "Avg Margin", value: avgMargin === null ? "-" : formatSeasonStatsSignedNumber(avgMargin, 1) },
+		{ label: "Avg Margin", value: totalGames > 0 ? formatSeasonStatsSignedNumber(avgMargin, 1) : "-" },
 		{ label: "League Rank", value: `#${teamRank}` }
 	]));
 
 	const summaryNote = document.createElement("p");
 	summaryNote.className = "season-stats-note";
-	summaryNote.textContent = "Average margin uses recorded game scores saved in the schedule.";
+	summaryNote.textContent = "Rank is based on record first, then average win/loss margin as the tiebreaker.";
 	summaryCard.appendChild(summaryNote);
 	wrap.appendChild(summaryCard);
 
-	const battingCard = document.createElement("div");
-	battingCard.className = "card";
-	battingCard.innerHTML = `<h4>${team.name} Batting</h4>`;
-	battingCard.appendChild(createBattingStatsTable(team, true));
-	wrap.appendChild(battingCard);
-
-	const pitchingCard = document.createElement("div");
-	pitchingCard.className = "card";
-	pitchingCard.innerHTML = `<h4>${team.name} Pitching</h4>`;
-	pitchingCard.appendChild(createPitchingStatsTable(team, true));
-	wrap.appendChild(pitchingCard);
+	const futureCard = document.createElement("div");
+	futureCard.className = "card";
+	futureCard.innerHTML = `
+		<h4>More Team Stats</h4>
+		<p class="season-stats-note">This section is reserved so more team-level stats can be added later without bringing player stat tables back into this view.</p>
+	`;
+	wrap.appendChild(futureCard);
 
 	return wrap;
 }
