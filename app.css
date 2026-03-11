@@ -335,10 +335,55 @@
 	margin-bottom: 10px;
 }
 
+.rankings-layout {
+	display: grid;
+	gap: 14px;
+}
+
+.rankings-section {
+	display: grid;
+	gap: 12px;
+}
+
+.rankings-section-header {
+	display: flex;
+	justify-content: space-between;
+	align-items: flex-start;
+	gap: 10px;
+	flex-wrap: wrap;
+}
+
+.rankings-section-header h3 {
+	margin: 0;
+}
+
+.rankings-grid {
+	display: grid;
+	grid-template-columns: repeat(2, minmax(0, 1fr));
+	gap: 12px;
+}
+
+.rankings-table-card h4 {
+	margin-top: 0;
+	margin-bottom: 8px;
+}
+
+.rankings-value {
+	font-weight: bold;
+}
+
+.rankings-empty {
+	color: #aaa;
+	margin: 0;
+}
+
 
   /* Mobile-friendly stats tables (prevents cutoff on small screens) */
   @media (max-width: 720px) {
 	  	.season-stats-layout {
+		grid-template-columns: 1fr;
+	}
+	  	.rankings-grid {
 		grid-template-columns: 1fr;
 	}
     .stats-table.responsive thead { display: none; }
