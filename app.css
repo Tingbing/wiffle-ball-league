@@ -377,6 +377,47 @@
 	margin: 0;
 }
 
+.rankings-table-wrap {
+	overflow-x: auto;
+	-webkit-overflow-scrolling: touch;
+}
+
+.rankings-table {
+	table-layout: fixed;
+	min-width: 0;
+}
+
+.rankings-table th,
+.rankings-table td {
+	white-space: normal;
+	vertical-align: middle;
+}
+
+.rankings-col-rank {
+	width: 70px;
+}
+
+.rankings-col-name {
+	width: auto;
+}
+
+.rankings-col-value {
+	width: 110px;
+}
+
+.rankings-rank-cell {
+	text-align: center;
+	font-weight: bold;
+}
+
+.rankings-name-cell {
+	word-break: break-word;
+}
+
+.rankings-value-cell {
+	text-align: right;
+}
+
 
   /* Mobile-friendly stats tables (prevents cutoff on small screens) */
   @media (max-width: 720px) {
@@ -385,6 +426,15 @@
 	}
 	  	.rankings-grid {
 		grid-template-columns: 1fr;
+	}
+	  	.rankings-table {
+		font-size: 13px;
+	}
+	.rankings-col-rank {
+		width: 56px;
+	}
+	.rankings-col-value {
+		width: 88px;
 	}
     .stats-table.responsive thead { display: none; }
     .stats-table.responsive, .stats-table.responsive tbody, .stats-table.responsive tr, .stats-table.responsive td {
