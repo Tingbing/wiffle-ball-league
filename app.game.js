@@ -1657,3 +1657,221 @@ function displaySeasonStats() {
 		container.appendChild(subWrap);
 	}
 }
+
+function buildRankingsPlayerEntry(stats, isSub) {
+	const playerName = String(stats?.playerName || "").trim();
+	if (!playerName) return null;
+	return {
+		playerName,
+		displayName: isSub ? `${playerName} (Sub)` : playerName,
+		isSub: !!isSub,
+		stats
+	};
+}
+
+function getRankingsPlayerPool() {
+	const players = [];
+
+	Object.values(season.playerStats || {}).forEach(stats => {
+		const entry = buildRankingsPlayerEntry(stats, false);
+		if (entry) players.push(entry);
+	});
+
+	Object.values(season.subStats || {}).forEach(stats => {
+		const entry = buildRankingsPlayerEntry(stats, true);
+		if (entry) players.push(entry);
+	});
+
+	return players;
+}
+
+function getRankingsLeaders(players, config) {
+	return (players || [])
+		.map(player => {
+			const value = config.getValue(player.stats);
+			return {
+				...player,
+				value
+			};
+		})
+		.filter(player => {
+			if (!Number.isFinite(player.value)) return false;
+			return typeof config.isEligible === "function"
+				? config.isEligible(player.stats, player.value)
+				: true;
+		})
+		.sort((a, b) => {
+			if (a.value !== b.value) {
+				return config.lowerIsBetter ? a.value - b.value : b.value - a.value;
+			}
+			return a.playerName.localeCompare(b.playerName);
+		})
+		.slice(0, 8);
+}
+
+function createRankingsTable(title, players, config) {
+	const card = document.createElement("div");
+	card.className = "card rankings-table-card";
+	card.innerHTML = `<h4>${title}</h4>`;
+
+	const leaders = getRankingsLeaders(players, config);
+	if (!leaders.length) {
+		const empty = document.createElement("p");
+		empty.className = "rankings-empty";
+		empty.textContent = "No eligible players yet.";
+		card.appendChild(empty);
+		return card;
+	}
+
+	const table = document.createElement("table");
+	table.className = "stats-table responsive";
+
+	const thead = document.createElement("thead");
+	thead.innerHTML = `
+		<tr>
+			<th>Rank</th>
+			<th>Player Name</th>
+			<th>Stat Value</th>
+		</tr>
+	`;
+	table.appendChild(thead);
+
+	const tbody = document.createElement("tbody");
+	leaders.forEach((leader, index) => {
+		const tr = document.createElement("tr");
+
+		const rankTd = document.createElement("td");
+		rankTd.setAttribute("data-label", "Rank");
+		rankTd.textContent = String(index + 1);
+		tr.appendChild(rankTd);
+
+		const nameTd = document.createElement("td");
+		nameTd.setAttribute("data-label", "Player Name");
+		nameTd.textContent = leader.displayName;
+		tr.appendChild(nameTd);
+
+		const valueTd = document.createElement("td");
+		valueTd.setAttribute("data-label", "Stat Value");
+		valueTd.className = "rankings-value";
+		valueTd.textContent = config.formatValue(leader.value, leader.stats);
+		tr.appendChild(valueTd);
+
+		tbody.appendChild(tr);
+	});
+
+	table.appendChild(tbody);
+	card.appendChild(table);
+	return card;
+}
+
+function displayRankings() {
+	const container = document.getElementById("rankingsContainer");
+	if (!container) return;
+	container.innerHTML = "";
+
+	const players = getRankingsPlayerPool();
+	if (!players.length) {
+		container.innerHTML = "<div class='card'><p>No season rankings published yet.</p></div>";
+		return;
+	}
+
+	const introCard = document.createElement("div");
+	introCard.className = "card";
+	introCard.innerHTML = `
+		<h3 style="margin-top:0;">Rankings Hub</h3>
+		<p class="season-stats-note">
+			This page shows the top 8 player leaders in each category using the current saved season stats.
+			Substitute players are labeled with <strong>(Sub)</strong>.
+		</p>
+	`;
+	container.appendChild(introCard);
+
+	const layout = document.createElement("div");
+	layout.className = "rankings-layout";
+	container.appendChild(layout);
+
+	const battingSection = document.createElement("div");
+	battingSection.className = "rankings-section";
+	battingSection.innerHTML = `
+		<div class="card rankings-section-header">
+			<div>
+				<h3>Batting Rankings</h3>
+				<p class="season-stats-note">
+					Highest values rank first for batting average, RBIs, home runs, and total hits.
+				</p>
+			</div>
+		</div>
+	`;
+
+	const battingGrid = document.createElement("div");
+	battingGrid.className = "rankings-grid";
+
+	battingGrid.appendChild(createRankingsTable("Batting Average", players, {
+		getValue: stats => stats.atBats > 0 ? stats.hits / stats.atBats : NaN,
+		isEligible: stats => Number(stats.atBats || 0) > 0,
+		formatValue: value => value.toFixed(3)
+	}));
+
+	battingGrid.appendChild(createRankingsTable("RBIs", players, {
+		getValue: stats => Number(stats.rbis || 0),
+		formatValue: value => String(value)
+	}));
+
+	battingGrid.appendChild(createRankingsTable("Home Runs", players, {
+		getValue: stats => Number(stats.homeRuns || 0),
+		formatValue: value => String(value)
+	}));
+
+	battingGrid.appendChild(createRankingsTable("Total Hits", players, {
+		getValue: stats => Number(stats.hits || 0),
+		formatValue: value => String(value)
+	}));
+
+	battingSection.appendChild(battingGrid);
+	layout.appendChild(battingSection);
+
+	const pitchingSection = document.createElement("div");
+	pitchingSection.className = "rankings-section";
+	pitchingSection.innerHTML = `
+		<div class="card rankings-section-header">
+			<div>
+				<h3>Pitching Rankings</h3>
+				<p class="season-stats-note">
+					K/3 and innings pitched rank highest first. ERA and errors made rank lowest first.
+				</p>
+			</div>
+		</div>
+	`;
+
+	const pitchingGrid = document.createElement("div");
+	pitchingGrid.className = "rankings-grid";
+
+	pitchingGrid.appendChild(createRankingsTable("K/3", players, {
+		getValue: stats => stats.inningsPitched > 0 ? (stats.pitchStrikeouts / stats.inningsPitched) * 3 : NaN,
+		isEligible: stats => Number(stats.inningsPitched || 0) > 0,
+		formatValue: value => value.toFixed(2)
+	}));
+
+	pitchingGrid.appendChild(createRankingsTable("ERA", players, {
+		getValue: stats => stats.inningsPitched > 0 ? (stats.earnedRunsAllowed / stats.inningsPitched) * 3 : NaN,
+		isEligible: stats => Number(stats.inningsPitched || 0) > 0,
+		lowerIsBetter: true,
+		formatValue: value => value.toFixed(2)
+	}));
+
+	pitchingGrid.appendChild(createRankingsTable("Errors Made", players, {
+		getValue: stats => Number(stats.fieldingErrors || 0),
+		isEligible: stats => Number(stats.inningsPitched || 0) > 0 || Number(stats.fieldingErrors || 0) > 0,
+		lowerIsBetter: true,
+		formatValue: value => String(value)
+	}));
+
+	pitchingGrid.appendChild(createRankingsTable("Total Innings Pitched", players, {
+		getValue: stats => Number(stats.inningsPitched || 0),
+		isEligible: stats => Number(stats.inningsPitched || 0) > 0,
+		formatValue: value => value.toFixed(1)
+	}));
+
+	pitchingSection.appendChild(pitchingGrid);
+	layout.appendChild(pitchingSection);
+}
