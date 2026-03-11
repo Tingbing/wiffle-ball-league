@@ -199,6 +199,8 @@ function resetLiveGameSessionState() {
 	lastPlay = null;
 	pendingBattingResult = null;
 	playInputLock = false;
+	liveGameRestoreDone = false;
+	clearSavedLiveGameSnapshot();
 
 	document.getElementById("errorPicker")?.classList.add("hidden");
 	document.getElementById("outPicker")?.classList.add("hidden");
@@ -236,6 +238,166 @@ async function emergencyEndGameFromSetup() {
 	resetLiveGameSessionState();
 	refreshGameLockUI();
 	alert("The stuck live game was cleared. You can start a new game now.");
+}
+
+const LIVE_GAME_SNAPSHOT_KEY = "wiggleLiveGameSnapshot";
+let liveGameRestoreDone = false;
+
+function deepCopyLiveGameData(value) {
+	return value == null ? value : JSON.parse(JSON.stringify(value));
+}
+
+function getSavedLiveGameSnapshot() {
+	try {
+		return JSON.parse(sessionStorage.getItem(LIVE_GAME_SNAPSHOT_KEY) || "null");
+	} catch (e) {
+		return null;
+	}
+}
+
+function clearSavedLiveGameSnapshot() {
+	try { sessionStorage.removeItem(LIVE_GAME_SNAPSHOT_KEY); } catch (e) {}
+}
+
+function getLiveGameSnapshotLockId(snapshot) {
+	return snapshot?.lockId || snapshot?.activeGameLock?.lockId || snapshot?.game?._lockId || null;
+}
+
+function canAutoUnlockForSavedGame(session) {
+	if (window.__WBL_RELOAD_BOOT !== true) return false;
+
+	const snapshot = getSavedLiveGameSnapshot();
+	if (!snapshot?.game || snapshot.status === "finalizing") return false;
+
+	const savedUserId =
+		snapshot.startedByUserId ||
+		snapshot.activeGameLock?.startedByUserId ||
+		snapshot.game?._lockInfo?.startedByUserId ||
+		null;
+
+	if (savedUserId && session?.user?.id && savedUserId !== session.user.id) return false;
+
+	const snapshotLockId = getLiveGameSnapshotLockId(snapshot);
+	if (snapshotLockId && activeGameLock?.lockId && snapshotLockId !== activeGameLock.lockId) return false;
+
+	return true;
+}
+
+function persistLiveGameSnapshot(status = "live") {
+	if (!game) {
+		clearSavedLiveGameSnapshot();
+		return;
+	}
+
+	const pitcherSelect = document.getElementById("pitcherSelect");
+	const selectedPitcherIndex =
+		pitcherSelect && pitcherSelect.value !== ""
+			? parseInt(pitcherSelect.value, 10)
+			: null;
+
+	const snapshot = {
+		version: 1,
+		status,
+		savedAt: new Date().toISOString(),
+		startedByUserId: game?._lockInfo?.startedByUserId || activeGameLock?.startedByUserId || null,
+		activeGameLock: deepCopyLiveGameData(activeGameLock || game?._lockInfo || null),
+		lockId: game?._lockId || activeGameLock?.lockId || null,
+		selectedPitcherIndex: Number.isInteger(selectedPitcherIndex) ? selectedPitcherIndex : null,
+		game: deepCopyLiveGameData(game),
+		gameHistory: Array.isArray(gameHistory) ? gameHistory.slice() : [],
+		lastPlay: deepCopyLiveGameData(lastPlay),
+		pendingBattingResult: deepCopyLiveGameData(pendingBattingResult),
+		playInputLock: !!playInputLock
+	};
+
+	try {
+		sessionStorage.setItem(LIVE_GAME_SNAPSHOT_KEY, JSON.stringify(snapshot));
+	} catch (e) {}
+}
+
+function markLiveGameSnapshotFinalizing() {
+	const snapshot = getSavedLiveGameSnapshot();
+	if (!snapshot) return;
+	snapshot.status = "finalizing";
+	snapshot.savedAt = new Date().toISOString();
+	try {
+		sessionStorage.setItem(LIVE_GAME_SNAPSHOT_KEY, JSON.stringify(snapshot));
+	} catch (e) {}
+}
+
+function restoreLiveGameFromSnapshot(snapshot = null) {
+	const saved = snapshot || getSavedLiveGameSnapshot();
+	if (!saved?.game) return false;
+	if (saved.status === "finalizing") {
+		clearSavedLiveGameSnapshot();
+		return false;
+	}
+
+	game = deepCopyLiveGameData(saved.game);
+	gameHistory = Array.isArray(saved.gameHistory) ? saved.gameHistory.slice() : [];
+	lastPlay = deepCopyLiveGameData(saved.lastPlay) || null;
+	pendingBattingResult = deepCopyLiveGameData(saved.pendingBattingResult) || null;
+	playInputLock = false;
+
+	if (saved.activeGameLock) persistActiveGameLock(saved.activeGameLock);
+
+	document.getElementById("errorPicker")?.classList.add("hidden");
+	document.getElementById("outPicker")?.classList.add("hidden");
+
+	showGame();
+	keepLiveGameSectionsEnabled();
+	document.getElementById("undoButton").disabled = gameHistory.length === 0;
+
+	updatePitcherSelect();
+
+	const select = document.getElementById("pitcherSelect");
+	if (select && Number.isInteger(saved.selectedPitcherIndex) && select.options.length > saved.selectedPitcherIndex) {
+		select.value = String(saved.selectedPitcherIndex);
+		updatePitcherDisplay();
+	}
+
+	updateGameScreen();
+	liveGameRestoreDone = true;
+	persistLiveGameSnapshot();
+	return true;
+}
+
+async function maybeRestoreLiveGameAfterBoot() {
+	if (window.__WBL_RELOAD_BOOT !== true) return false;
+	if (liveGameRestoreDone || game) return !!game;
+	if (!supabaseClient?.auth) return false;
+
+	const { data } = await supabaseClient.auth.getSession();
+	const session = data?.session;
+	if (!session || !isLeagueUnlocked()) return false;
+
+	const snapshot = getSavedLiveGameSnapshot();
+	if (!snapshot?.game) return false;
+	if (snapshot.status === "finalizing") {
+		clearSavedLiveGameSnapshot();
+		return false;
+	}
+	if (!canAutoUnlockForSavedGame(session)) return false;
+
+	const snapshotLockId = getLiveGameSnapshotLockId(snapshot);
+	if (snapshotLockId && activeGameLock?.lockId && snapshotLockId !== activeGameLock.lockId) {
+		clearSavedLiveGameSnapshot();
+		return false;
+	}
+	if (snapshotLockId && !activeGameLock?.lockId) return false;
+
+	const restored = restoreLiveGameFromSnapshot(snapshot);
+	if (restored) showNotification("Recovered in-progress game", 1500);
+	return restored;
+}
+
+if (!window.__WBL_LIVE_GAME_PERSIST_WIRED) {
+	window.__WBL_LIVE_GAME_PERSIST_WIRED = true;
+	window.addEventListener("beforeunload", () => {
+		try {
+			if (game) persistLiveGameSnapshot();
+		} catch (e) {}
+	});
 }
 
 	// GAME FUNCTIONS
@@ -316,11 +478,16 @@ keepLiveGameSectionsEnabled();
 	}
 
 	function updatePitcherDisplay() {
-		let select = document.getElementById("pitcherSelect");
-		let pitcherIndex = parseInt(select.value);
-		let pitcher = game.fielding.players[pitcherIndex];
-		document.getElementById("pitcherText").innerText = "Pitching: " + pitcher;
-	}
+	let select = document.getElementById("pitcherSelect");
+	if (!select || !game) return;
+
+	let pitcherIndex = parseInt(select.value, 10);
+	if (!Number.isInteger(pitcherIndex) || pitcherIndex < 0) pitcherIndex = 0;
+
+	let pitcher = game.fielding.players[pitcherIndex] || "";
+	document.getElementById("pitcherText").innerText = pitcher ? ("Pitching: " + pitcher) : "Pitching:";
+	persistLiveGameSnapshot();
+}
 
 function updateGameScreen() {
 	document.getElementById("team1Name").innerText = game.team1.name;
@@ -339,6 +506,7 @@ function updateGameScreen() {
 
 	updateBasesDisplay();
 	updateManualRunnerControls();
+	persistLiveGameSnapshot();
 }
 
 	function updateBasesDisplay() {
@@ -719,7 +887,11 @@ function confirmError() {
 }
 
 async function finalizeCompletedGame() {
+	markLiveGameSnapshotFinalizing();
 	const lockReleased = await saveGameStats();
+	clearSavedLiveGameSnapshot();
+	liveGameRestoreDone = false;
+
 	if (!lockReleased) {
 		alert("Game stats were saved, but the live-game lock could not be cleared. Please sync again before anyone starts another game.");
 	}
