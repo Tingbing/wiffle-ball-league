@@ -1393,6 +1393,16 @@ async function showSeasonStats() {
 	displaySeasonStats();
 }
 
+async function showRankings() {
+	hideAllScreens();
+	if (isPublicViewOnlyMode()) {
+		try { await refreshPublicViewData({ quiet: true }); } catch (e) {}
+	}
+	document.getElementById("rankingsScreen").classList.remove("hidden");
+	updatePublicAccessUI();
+	displayRankings();
+}
+
 function hideAllScreens() {
 	document.getElementById("publicMenu").classList.add("hidden");
 	document.getElementById("mainMenu").classList.add("hidden");
@@ -1401,6 +1411,7 @@ function hideAllScreens() {
 	document.getElementById("gameScreen").classList.add("hidden");
 	document.getElementById("gameOverScreen").classList.add("hidden");
 	document.getElementById("seasonStatsScreen").classList.add("hidden");
+	document.getElementById("rankingsScreen").classList.add("hidden");
 	document.getElementById("scheduleScreen").classList.add("hidden");
 	document.getElementById("activeUsersScreen").classList.add("hidden");
 }
