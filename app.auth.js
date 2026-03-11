@@ -67,6 +67,8 @@ async function ensureSupabaseGlobal() {
   return { ok: false, tried };
 }
 
+const RELOAD_ONLY_LEAGUE_UNLOCK_KEY = "wblReloadLeagueUnlocked";
+
 function getBootNavigationType() {
 	try {
 		const navEntry = performance.getEntriesByType?.("navigation")?.[0];
@@ -77,6 +79,23 @@ function getBootNavigationType() {
 		}
 	} catch (e) {}
 	return "navigate";
+}
+
+function hasReloadBootHint() {
+	try {
+		return new URL(location.href).searchParams.get("__wbl_boot") === "reload";
+	} catch (e) {
+		return false;
+	}
+}
+
+function stripReloadBootHintFromUrl() {
+	try {
+		const url = new URL(location.href);
+		if (!url.searchParams.has("__wbl_boot")) return;
+		url.searchParams.delete("__wbl_boot");
+		history.replaceState({}, document.title, url.pathname + url.search + url.hash);
+	} catch (e) {}
 }
 
 function getSupabaseSessionStorageKey() {
@@ -91,12 +110,16 @@ function getSupabaseSessionStorageKey() {
 function clearReloadOnlySessionState() {
 	try {
 		sessionStorage.removeItem("wiggleLiveGameSnapshot");
+		sessionStorage.removeItem(RELOAD_ONLY_LEAGUE_UNLOCK_KEY);
 		const authKey = getSupabaseSessionStorageKey();
 		if (authKey) sessionStorage.removeItem(authKey);
 	} catch (e) {}
 }
 
-window.__WBL_RELOAD_BOOT = getBootNavigationType() === "reload";
+window.__WBL_RELOAD_BOOT =
+	getBootNavigationType() === "reload" || hasReloadBootHint();
+
+stripReloadBootHintFromUrl();
 
 if (!window.__WBL_RELOAD_BOOT) {
 	clearReloadOnlySessionState();
@@ -203,13 +226,23 @@ function setStoredEmail(_email) {
 
 let leagueUnlockedThisSession = false;
 
-// ✅ Do NOT persist the league-code unlock.
-// This forces users to re-enter the league code any time the page/app is opened fresh.
+// Keep league access across accidental reloads only.
+// A fresh non-reload visit clears this in clearReloadOnlySessionState().
 function isLeagueUnlocked() {
-  return !!leagueUnlockedThisSession;
+	if (leagueUnlockedThisSession) return true;
+	try {
+		return sessionStorage.getItem(RELOAD_ONLY_LEAGUE_UNLOCK_KEY) === "1";
+	} catch (e) {
+		return false;
+	}
 }
+
 function setLeagueUnlocked(v) {
-  leagueUnlockedThisSession = !!v;
+	leagueUnlockedThisSession = !!v;
+	try {
+		if (v) sessionStorage.setItem(RELOAD_ONLY_LEAGUE_UNLOCK_KEY, "1");
+		else sessionStorage.removeItem(RELOAD_ONLY_LEAGUE_UNLOCK_KEY);
+	} catch (e) {}
 }
 
 /* ================================
@@ -665,9 +698,15 @@ await safeInitStep("save season", async () => {
 });
     await safeInitStep("update UI", async () => { update(); });
 
-    await safeInitStep("evaluate access", async () => { await evaluateAccess(); });
+      await safeInitStep("evaluate access", async () => { await evaluateAccess(); });
     await safeInitStep("update auth UI", async () => { await updateAuthUI(); });
     await safeInitStep("restore live game", async () => { await maybeRestoreLiveGameAfterBoot(); });
+    await safeInitStep("show initial screen", async () => {
+      const gateHidden = document.getElementById("accessGate")?.classList.contains("hidden");
+      if (!isPublicViewOnlyMode() && gateHidden && !game) {
+        showMainMenu();
+      }
+    });
 
     hideFatalError();
   } catch (err) {
