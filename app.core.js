@@ -2,7 +2,7 @@
 // Split from the current source-of-truth app.js. Load this BEFORE app.game.js.
 
 	let league = { teams: [] };
-	let season = { playerStats: {}, teamRecords: {}, seasonSubs: [], subStats: {} };
+    let season = { playerStats: {}, teamRecords: {}, seasonSubs: [], subStats: {}, games: [] };
 	let game = null;
 	let gameHistory = [];
 	let lastPlay = null;
@@ -243,7 +243,7 @@ function saveSeason({ skipServerSync = false, touchMeta = true } = {}) {
   // stamp update time (used for cross-device sync)
   try {
     if (!season || typeof season !== "object") {
-      season = { playerStats: {}, teamRecords: {}, seasonSubs: [], subStats: {} };
+     season = { playerStats: {}, teamRecords: {}, seasonSubs: [], subStats: {}, games: [] };
     }
     if (touchMeta) {
       season._meta = season._meta || {};
@@ -293,12 +293,13 @@ function loadSeason() {
 
 function ensureSeasonShape(obj) {
 	if (!obj || typeof obj !== "object") {
-		obj = { playerStats: {}, teamRecords: {}, seasonSubs: [], subStats: {} };
+		obj = { playerStats: {}, teamRecords: {}, seasonSubs: [], subStats: {}, games: [] };
 	}
 	if (!obj.playerStats) obj.playerStats = {};
 	if (!obj.teamRecords) obj.teamRecords = {};
 	if (!Array.isArray(obj.seasonSubs)) obj.seasonSubs = [];
 	if (!obj.subStats || typeof obj.subStats !== "object") obj.subStats = {};
+	if (!Array.isArray(obj.games)) obj.games = [];
 	return obj;
 }
 
@@ -1403,6 +1404,16 @@ async function showRankings() {
 	displayRankings();
 }
 
+async function showPastGameLog() {
+	hideAllScreens();
+	if (isPublicViewOnlyMode()) {
+		try { await refreshPublicViewData({ quiet: true }); } catch (e) {}
+	}
+	document.getElementById("pastGameLogScreen").classList.remove("hidden");
+	updatePublicAccessUI();
+	displayPastGameLog();
+}
+
 function hideAllScreens() {
 	document.getElementById("publicMenu").classList.add("hidden");
 	document.getElementById("mainMenu").classList.add("hidden");
@@ -1412,6 +1423,7 @@ function hideAllScreens() {
 	document.getElementById("gameOverScreen").classList.add("hidden");
 	document.getElementById("seasonStatsScreen").classList.add("hidden");
 	document.getElementById("rankingsScreen").classList.add("hidden");
+	document.getElementById("pastGameLogScreen").classList.add("hidden");
 	document.getElementById("scheduleScreen").classList.add("hidden");
 	document.getElementById("activeUsersScreen").classList.add("hidden");
 }
