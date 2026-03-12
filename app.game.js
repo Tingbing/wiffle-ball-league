@@ -2023,6 +2023,101 @@ function getPastGameLogEntries() {
 	return Array.from(entriesById.values()).sort((a, b) => Number(b.playedAt || 0) - Number(a.playedAt || 0));
 }
 
+function getPastGameBrowserMeta(entry) {
+	const ref = entry?.scheduleRef;
+	if (
+		ref &&
+		Number.isInteger(ref.dayIndex) &&
+		Number.isInteger(ref.seriesIndex) &&
+		Number.isInteger(ref.seriesGameIndex) &&
+		schedule?.days?.[ref.dayIndex]
+	) {
+		const dayObj = schedule.days[ref.dayIndex];
+		const seriesEntry = dayObj?.games?.[ref.seriesIndex] || {};
+		const dayNumber = Number(dayObj?.day || (ref.dayIndex + 1));
+		const away = seriesEntry?.away || entry.team1Name || "Team 1";
+		const home = seriesEntry?.home || entry.team2Name || "Team 2";
+
+		return {
+			dayKey: `day-${ref.dayIndex}`,
+			dayLabel: `Day ${dayNumber}`,
+			seriesKey: `day-${ref.dayIndex}-series-${ref.seriesIndex}`,
+			seriesLabel: `${away} vs ${home}`,
+			gameKey: entry.id,
+			gameLabel: `Game ${Number(ref.seriesGameIndex) + 1}`,
+			sortDay: ref.dayIndex,
+			sortSeries: ref.seriesIndex,
+			sortGame: ref.seriesGameIndex
+		};
+	}
+
+	return {
+		dayKey: "other-games",
+		dayLabel: "Other Games",
+		seriesKey: `other-series-${entry?.team1Name || "team1"}-${entry?.team2Name || "team2"}`,
+		seriesLabel: `${entry?.team1Name || "Team 1"} vs ${entry?.team2Name || "Team 2"}`,
+		gameKey: entry?.id || "",
+		gameLabel: formatPastGameDate(entry?.playedAt),
+		sortDay: 999,
+		sortSeries: 999,
+		sortGame: Number(entry?.playedAt || 0)
+	};
+}
+
+function getPastGameDayOptions(games) {
+	const map = new Map();
+
+	(games || []).forEach(entry => {
+		const meta = getPastGameBrowserMeta(entry);
+		if (!map.has(meta.dayKey)) {
+			map.set(meta.dayKey, {
+				key: meta.dayKey,
+				label: meta.dayLabel,
+				sortDay: meta.sortDay
+			});
+		}
+	});
+
+	return Array.from(map.values()).sort((a, b) => a.sortDay - b.sortDay);
+}
+
+function getPastGameSeriesOptions(games, selectedDayKey) {
+	const map = new Map();
+
+	(games || []).forEach(entry => {
+		const meta = getPastGameBrowserMeta(entry);
+		if (meta.dayKey !== selectedDayKey) return;
+
+		if (!map.has(meta.seriesKey)) {
+			map.set(meta.seriesKey, {
+				key: meta.seriesKey,
+				label: meta.seriesLabel,
+				sortDay: meta.sortDay,
+				sortSeries: meta.sortSeries
+			});
+		}
+	});
+
+	return Array.from(map.values()).sort((a, b) => {
+		if (a.sortDay !== b.sortDay) return a.sortDay - b.sortDay;
+		if (a.sortSeries !== b.sortSeries) return a.sortSeries - b.sortSeries;
+		return a.label.localeCompare(b.label);
+	});
+}
+
+function getPastGameOptionsForSeries(games, selectedSeriesKey) {
+	return (games || [])
+		.map(entry => {
+			const meta = getPastGameBrowserMeta(entry);
+			return { entry, meta };
+		})
+		.filter(item => item.meta.seriesKey === selectedSeriesKey)
+		.sort((a, b) => {
+			if (a.meta.sortGame !== b.meta.sortGame) return a.meta.sortGame - b.meta.sortGame;
+			return Number(a.entry.playedAt || 0) - Number(b.entry.playedAt || 0);
+		});
+}
+
 function getPastGamePlayerDisplayName(stats) {
 	const playerName = String(stats?.playerName || "");
 	return stats?.isSub ? `${playerName} (Sub)` : playerName;
@@ -2219,7 +2314,8 @@ function displayPastGameLog() {
 	const container = document.getElementById("pastGameLogContainer");
 	if (!container) return;
 
-	const previousDateValue = document.getElementById("pastGameDateSelect")?.value || "";
+	const previousDayValue = document.getElementById("pastGameDaySelect")?.value || "";
+	const previousSeriesValue = document.getElementById("pastGameSeriesSelect")?.value || "";
 	const previousGameValue = document.getElementById("pastGameSelect")?.value || "";
 	container.innerHTML = "";
 
@@ -2233,7 +2329,7 @@ function displayPastGameLog() {
 	introCard.className = "card";
 	introCard.innerHTML = `
 		<h3 style="margin-top:0;">Past Game Log</h3>
-		<p class="season-stats-note">Browse completed games by date, then open a single game to review the final score and saved player performances.</p>
+		<p class="season-stats-note">Browse completed games by season day, then choose the series and game number to review the final score and saved player performances.</p>
 	`;
 	container.appendChild(introCard);
 
@@ -2246,15 +2342,25 @@ function displayPastGameLog() {
 	browserGrid.className = "past-game-browser-grid";
 	browserCard.appendChild(browserGrid);
 
-	const dateGroup = document.createElement("div");
-	dateGroup.className = "past-game-select-group";
-	dateGroup.innerHTML = `<label for="pastGameDateSelect">Date</label>`;
-	browserGrid.appendChild(dateGroup);
+	const dayGroup = document.createElement("div");
+	dayGroup.className = "past-game-select-group";
+	dayGroup.innerHTML = `<label for="pastGameDaySelect">Season Day</label>`;
+	browserGrid.appendChild(dayGroup);
 
-	const dateSelect = document.createElement("select");
-	dateSelect.id = "pastGameDateSelect";
-	dateSelect.className = "season-stats-select";
-	dateGroup.appendChild(dateSelect);
+	const daySelect = document.createElement("select");
+	daySelect.id = "pastGameDaySelect";
+	daySelect.className = "season-stats-select";
+	dayGroup.appendChild(daySelect);
+
+	const seriesGroup = document.createElement("div");
+	seriesGroup.className = "past-game-select-group";
+	seriesGroup.innerHTML = `<label for="pastGameSeriesSelect">Series</label>`;
+	browserGrid.appendChild(seriesGroup);
+
+	const seriesSelect = document.createElement("select");
+	seriesSelect.id = "pastGameSeriesSelect";
+	seriesSelect.className = "season-stats-select";
+	seriesGroup.appendChild(seriesSelect);
 
 	const gameGroup = document.createElement("div");
 	gameGroup.className = "past-game-select-group";
@@ -2270,40 +2376,49 @@ function displayPastGameLog() {
 	details.id = "pastGameDetails";
 	container.appendChild(details);
 
-	const dateOptions = [];
-	const dateMap = new Map();
-
-	games.forEach(entry => {
-		const key = getPastGameDayKey(entry.playedAt);
-		if (dateMap.has(key)) return;
-		dateMap.set(key, true);
-		dateOptions.push({ key, label: formatPastGameDate(entry.playedAt) });
-	});
-
-	dateOptions.forEach(option => {
+	const dayOptions = getPastGameDayOptions(games);
+	dayOptions.forEach(option => {
 		const el = document.createElement("option");
 		el.value = option.key;
 		el.textContent = option.label;
-		dateSelect.appendChild(el);
+		daySelect.appendChild(el);
 	});
 
+	function populateSeriesSelect() {
+		const selectedDayKey = daySelect.value;
+		const seriesOptions = getPastGameSeriesOptions(games, selectedDayKey);
+
+		seriesSelect.innerHTML = "";
+		seriesOptions.forEach(option => {
+			const el = document.createElement("option");
+			el.value = option.key;
+			el.textContent = option.label;
+			seriesSelect.appendChild(el);
+		});
+
+		if (seriesOptions.some(option => option.key === previousSeriesValue)) {
+			seriesSelect.value = previousSeriesValue;
+		} else if (seriesOptions[0]) {
+			seriesSelect.value = seriesOptions[0].key;
+		}
+	}
+
 	function populateGameSelect() {
-		const selectedDateKey = dateSelect.value;
-		const filtered = games.filter(entry => getPastGameDayKey(entry.playedAt) === selectedDateKey);
+		const selectedSeriesKey = seriesSelect.value;
+		const gameOptions = getPastGameOptionsForSeries(games, selectedSeriesKey);
 
 		gameSelect.innerHTML = "";
-		filtered.forEach(entry => {
+		gameOptions.forEach(item => {
 			const option = document.createElement("option");
-			option.value = entry.id;
-			const timeLabel = formatPastGameTime(entry.playedAt);
-			option.textContent = `${entry.team1Name} vs ${entry.team2Name}${timeLabel ? ` — ${timeLabel}` : ""}`;
+			option.value = item.entry.id;
+			option.textContent = item.meta.gameLabel;
 			gameSelect.appendChild(option);
 		});
 
-		if (filtered.some(entry => entry.id === previousGameValue)) {
+		if (gameOptions.some(item => item.entry.id === previousGameValue)) {
 			gameSelect.value = previousGameValue;
-		} else if (filtered[0]) {
-			gameSelect.value = filtered[0].id;
+		} else if (gameOptions[0]) {
+			gameSelect.value = gameOptions[0].entry.id;
 		}
 	}
 
@@ -2313,13 +2428,20 @@ function displayPastGameLog() {
 		details.appendChild(createPastGameDetails(selected));
 	}
 
-	dateSelect.value = dateOptions.some(option => option.key === previousDateValue)
-		? previousDateValue
-		: (dateOptions[0]?.key || "");
+	daySelect.value = dayOptions.some(option => option.key === previousDayValue)
+		? previousDayValue
+		: (dayOptions[0]?.key || "");
 
+	populateSeriesSelect();
 	populateGameSelect();
 
-	dateSelect.addEventListener("change", () => {
+	daySelect.addEventListener("change", () => {
+		populateSeriesSelect();
+		populateGameSelect();
+		renderSelectedGame();
+	});
+
+	seriesSelect.addEventListener("change", () => {
 		populateGameSelect();
 		renderSelectedGame();
 	});
