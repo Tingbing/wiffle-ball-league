@@ -418,9 +418,66 @@
 	text-align: right;
 }
 
+.past-game-browser-grid {
+	display: grid;
+	grid-template-columns: repeat(2, minmax(0, 1fr));
+	gap: 12px;
+}
+
+.past-game-select-group label {
+	display: block;
+	font-size: 13px;
+	font-weight: bold;
+	color: #bbb;
+	margin-bottom: 6px;
+}
+
+.past-game-team-grid {
+	display: grid;
+	grid-template-columns: repeat(2, minmax(0, 1fr));
+	gap: 14px;
+}
+
+.past-game-scoreboard {
+	display: grid;
+	grid-template-columns: 1fr auto 1fr;
+	gap: 12px;
+	align-items: center;
+	margin: 14px 0;
+}
+
+.past-game-score-team {
+	background: #1a1a1a;
+	border: 1px solid #333;
+	border-radius: 10px;
+	padding: 12px;
+	text-align: center;
+}
+
+.past-game-score-name {
+	font-size: 14px;
+	color: #bbb;
+	margin-bottom: 6px;
+}
+
+.past-game-score-value {
+	font-size: 32px;
+	font-weight: bold;
+}
+
+.past-game-score-divider {
+	font-size: 28px;
+	font-weight: bold;
+	color: #888;
+}
 
   /* Mobile-friendly stats tables (prevents cutoff on small screens) */
   @media (max-width: 720px) {
+	.past-game-browser-grid,
+	.past-game-team-grid {
+		grid-template-columns: 1fr;
+	}
+	  
 	  	.season-stats-layout {
 		grid-template-columns: 1fr;
 	}
