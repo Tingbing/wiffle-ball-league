@@ -933,6 +933,55 @@ keepLiveGameSectionsEnabled();
 	updateGameScreen();
 }
 
+function buildCompletedGameLogEntry() {
+	if (!game?.team1?.name || !game?.team2?.name) return null;
+
+	const playedAt = Date.now();
+	const scheduleRef = game?._scheduleRef &&
+		Number.isInteger(game._scheduleRef.dayIndex) &&
+		Number.isInteger(game._scheduleRef.seriesIndex) &&
+		Number.isInteger(game._scheduleRef.seriesGameIndex)
+		? {
+			dayIndex: game._scheduleRef.dayIndex,
+			seriesIndex: game._scheduleRef.seriesIndex,
+			seriesGameIndex: game._scheduleRef.seriesGameIndex
+		}
+		: null;
+
+	const id = scheduleRef
+		? `scheduled-${scheduleRef.dayIndex}-${scheduleRef.seriesIndex}-${scheduleRef.seriesGameIndex}`
+		: `manual-${playedAt}-${game.team1.name}-${game.team2.name}`;
+
+	return {
+		id,
+		playedAt,
+		team1Name: game.team1.name,
+		team2Name: game.team2.name,
+		team1Score: Number(game.team1Score || 0),
+		team2Score: Number(game.team2Score || 0),
+		scheduleRef,
+		lineups: {
+			[game.team1.name]: Array.isArray(game.team1.players) ? game.team1.players.slice() : [],
+			[game.team2.name]: Array.isArray(game.team2.players) ? game.team2.players.slice() : []
+		},
+		playerStats: Object.values(game.gameStats || {}).map(stats => ({ ...stats }))
+	};
+}
+
+function saveCompletedGameLog() {
+	const entry = buildCompletedGameLogEntry();
+	if (!entry) return;
+
+	season.games = Array.isArray(season.games) ? season.games : [];
+
+	const existingIndex = season.games.findIndex(gameEntry => gameEntry && gameEntry.id === entry.id);
+	if (existingIndex >= 0) {
+		season.games[existingIndex] = entry;
+	} else {
+		season.games.unshift(entry);
+	}
+}
+
 async function saveGameStats() {
 	for (let key in game.gameStats) {
 		let gameStats = game.gameStats[key];
@@ -956,6 +1005,7 @@ async function saveGameStats() {
 		seasonStats.earnedRunsAllowed += gameStats.earnedRunsAllowed;
 	}
 
+	saveCompletedGameLog();
 	applyGameOutcomeOnce();
 	saveSeason();
 	queueServerSync("game", { immediate: true });
@@ -1884,4 +1934,396 @@ function displayRankings() {
 
 	pitchingSection.appendChild(pitchingGrid);
 	layout.appendChild(pitchingSection);
+}
+
+
+function formatPastGameDate(value) {
+	if (!value) return "Unknown date";
+	const date = new Date(value);
+	if (Number.isNaN(date.getTime())) return "Unknown date";
+	return date.toLocaleDateString(undefined, { month: "long", day: "numeric", year: "numeric" });
+}
+
+function formatPastGameTime(value) {
+	if (!value) return "";
+	const date = new Date(value);
+	if (Number.isNaN(date.getTime())) return "";
+	return date.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+}
+
+function getPastGameDayKey(value) {
+	const date = new Date(value || 0);
+	if (Number.isNaN(date.getTime())) return "unknown";
+	return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+}
+
+function buildLegacyPastGameEntry(dayObj, seriesEntry, seriesGame, dayIndex, seriesIndex, seriesGameIndex) {
+	const result = seriesGame?.result;
+	if (!result) return null;
+
+	const team1Name = seriesEntry?.away || result.team1 || result.winner || "Team 1";
+	const team2Name = seriesEntry?.home || result.team2 || result.loser || "Team 2";
+
+	let team1Score = 0;
+	let team2Score = 0;
+
+	if (result.type === "tie") {
+		team1Score = Number(result.score1 || 0);
+		team2Score = Number(result.score2 || 0);
+	} else {
+		team1Score = result.winner === team1Name ? Number(result.winnerScore || 0) : Number(result.loserScore || 0);
+		team2Score = result.winner === team2Name ? Number(result.winnerScore || 0) : Number(result.loserScore || 0);
+	}
+
+	return {
+		id: `scheduled-${dayIndex}-${seriesIndex}-${seriesGameIndex}`,
+		playedAt: Number(result.playedAt || 0),
+		team1Name,
+		team2Name,
+		team1Score,
+		team2Score,
+		hasDetailedStats: false,
+		playerStats: [],
+		lineups: {},
+		scheduleRef: { dayIndex, seriesIndex, seriesGameIndex },
+		scheduleLabel: `Game Day ${Number(dayObj?.day || (dayIndex + 1))}`
+	};
+}
+
+function normalizePastGameEntry(entry) {
+	if (!entry) return null;
+	return {
+		...entry,
+		playedAt: Number(entry.playedAt || 0),
+		playerStats: Array.isArray(entry.playerStats) ? entry.playerStats.map(stats => ({ ...stats })) : [],
+		lineups: entry.lineups && typeof entry.lineups === "object" ? { ...entry.lineups } : {},
+		hasDetailedStats: Array.isArray(entry.playerStats) && entry.playerStats.length > 0
+	};
+}
+
+function getPastGameLogEntries() {
+	const entriesById = new Map();
+
+	(season.games || []).forEach(entry => {
+		const normalized = normalizePastGameEntry(entry);
+		if (normalized?.id) entriesById.set(normalized.id, normalized);
+	});
+
+	(schedule?.days || []).forEach((dayObj, dayIndex) => {
+		(dayObj.games || []).forEach((seriesEntry, seriesIndex) => {
+			(seriesEntry.gamesInSeries || []).forEach((seriesGame, seriesGameIndex) => {
+				if (!seriesGame?.result) return;
+				const legacyEntry = buildLegacyPastGameEntry(dayObj, seriesEntry, seriesGame, dayIndex, seriesIndex, seriesGameIndex);
+				if (!legacyEntry?.id || entriesById.has(legacyEntry.id)) return;
+				entriesById.set(legacyEntry.id, legacyEntry);
+			});
+		});
+	});
+
+	return Array.from(entriesById.values()).sort((a, b) => Number(b.playedAt || 0) - Number(a.playedAt || 0));
+}
+
+function getPastGamePlayerDisplayName(stats) {
+	const playerName = String(stats?.playerName || "");
+	return stats?.isSub ? `${playerName} (Sub)` : playerName;
+}
+
+function getPastGameStatsForTeam(entry, teamName) {
+	const allStats = (entry?.playerStats || []).filter(stats => stats.teamName === teamName);
+	const order = Array.isArray(entry?.lineups?.[teamName]) ? entry.lineups[teamName] : [];
+
+	return allStats.sort((a, b) => {
+		const aIndex = order.indexOf(a.playerName);
+		const bIndex = order.indexOf(b.playerName);
+
+		if (aIndex !== bIndex) {
+			if (aIndex === -1) return 1;
+			if (bIndex === -1) return -1;
+			return aIndex - bIndex;
+		}
+
+		return String(a.playerName || "").localeCompare(String(b.playerName || ""));
+	});
+}
+
+function createPastGameStatsTable(headers, rows) {
+	const table = document.createElement("table");
+	table.className = "stats-table responsive";
+
+	const thead = document.createElement("thead");
+	const headerRow = document.createElement("tr");
+	headers.forEach(header => {
+		const th = document.createElement("th");
+		th.textContent = header;
+		headerRow.appendChild(th);
+	});
+	thead.appendChild(headerRow);
+	table.appendChild(thead);
+
+	const tbody = document.createElement("tbody");
+	rows.forEach(values => {
+		const tr = document.createElement("tr");
+		values.forEach((value, index) => {
+			const td = document.createElement("td");
+			td.setAttribute("data-label", headers[index]);
+			td.textContent = String(value);
+			tr.appendChild(td);
+		});
+		tbody.appendChild(tr);
+	});
+	table.appendChild(tbody);
+
+	return table;
+}
+
+function createPastGameBattingTable(entry, teamName) {
+	const teamStats = getPastGameStatsForTeam(entry, teamName);
+	const headers = ["Player", "AVG", "AB", "H", "1B", "2B", "3B", "HR", "RBI", "BB", "K"];
+
+	const rows = teamStats.map(stats => {
+		const avg = Number(stats.atBats || 0) > 0 ? (Number(stats.hits || 0) / Number(stats.atBats || 0)).toFixed(3) : ".000";
+		return [
+			getPastGamePlayerDisplayName(stats),
+			avg,
+			stats.atBats,
+			stats.hits,
+			stats.singles,
+			stats.doubles,
+			stats.triples,
+			stats.homeRuns,
+			stats.rbis,
+			stats.walks,
+			stats.strikeouts
+		];
+	});
+
+	return createPastGameStatsTable(headers, rows);
+}
+
+function createPastGamePitchingTable(entry, teamName) {
+	const teamStats = getPastGameStatsForTeam(entry, teamName);
+	const headers = ["Player", "IP", "K's", "K/3", "R", "ER", "ERA", "Errors"];
+
+	const rows = teamStats.map(stats => {
+		const innings = Number(stats.inningsPitched || 0);
+		const kPer3 = innings > 0 ? ((Number(stats.pitchStrikeouts || 0) / innings) * 3).toFixed(2) : "-";
+		const era = innings > 0 ? ((Number(stats.earnedRunsAllowed || 0) / innings) * 3).toFixed(2) : "-";
+
+		return [
+			getPastGamePlayerDisplayName(stats),
+			innings.toFixed(1),
+			stats.pitchStrikeouts,
+			kPer3,
+			stats.runsAllowed,
+			stats.earnedRunsAllowed,
+			era,
+			stats.fieldingErrors
+		];
+	});
+
+	return createPastGameStatsTable(headers, rows);
+}
+
+function createPastGameTeamCard(entry, teamName, score) {
+	const wrap = document.createElement("div");
+	wrap.className = "season-stats-stack";
+
+	const header = document.createElement("div");
+	header.className = "season-stats-selection-header";
+	header.innerHTML = `
+		<h4>${teamName}</h4>
+		<p>Final Score: ${score}</p>
+	`;
+	wrap.appendChild(header);
+
+	const battingCard = document.createElement("div");
+	battingCard.className = "card";
+	battingCard.innerHTML = `<h4>${teamName} Batting</h4>`;
+	battingCard.appendChild(createPastGameBattingTable(entry, teamName));
+	wrap.appendChild(battingCard);
+
+	const pitchingCard = document.createElement("div");
+	pitchingCard.className = "card";
+	pitchingCard.innerHTML = `<h4>${teamName} Pitching</h4>`;
+	pitchingCard.appendChild(createPastGamePitchingTable(entry, teamName));
+	wrap.appendChild(pitchingCard);
+
+	return wrap;
+}
+
+function createPastGameDetails(entry) {
+	const wrap = document.createElement("div");
+	wrap.className = "season-stats-stack";
+
+	if (!entry) {
+		wrap.innerHTML = '<div class="card"><p class="season-stats-empty">No past game selected.</p></div>';
+		return wrap;
+	}
+
+	const summaryCard = document.createElement("div");
+	summaryCard.className = "card";
+	summaryCard.innerHTML = `
+		<h3 style="margin-top:0;">${entry.team1Name} vs ${entry.team2Name}</h3>
+		<div class="past-game-scoreboard">
+			<div class="past-game-score-team">
+				<div class="past-game-score-name">${entry.team1Name}</div>
+				<div class="past-game-score-value">${entry.team1Score}</div>
+			</div>
+			<div class="past-game-score-divider">–</div>
+			<div class="past-game-score-team">
+				<div class="past-game-score-name">${entry.team2Name}</div>
+				<div class="past-game-score-value">${entry.team2Score}</div>
+			</div>
+		</div>
+	`;
+
+	summaryCard.appendChild(buildSeasonStatsMetricGrid([
+		{ label: "Date", value: formatPastGameDate(entry.playedAt) },
+		{ label: "Time", value: formatPastGameTime(entry.playedAt) || "-" },
+		{ label: "Type", value: entry.scheduleRef ? "Scheduled" : "Manual" },
+		{ label: "Detail", value: entry.hasDetailedStats ? "Full box score" : "Score only" }
+	]));
+
+	if (entry.scheduleLabel) {
+		const note = document.createElement("p");
+		note.className = "season-stats-note";
+		note.textContent = entry.hasDetailedStats
+			? `${entry.scheduleLabel}. Batting and pitching lines below come from the saved game log.`
+			: `${entry.scheduleLabel}. This older game was found from the saved schedule results, but detailed player lines were not stored yet.`;
+		summaryCard.appendChild(note);
+	}
+
+	wrap.appendChild(summaryCard);
+
+	if (!entry.hasDetailedStats) {
+		const noDetailsCard = document.createElement("div");
+		noDetailsCard.className = "card";
+		noDetailsCard.innerHTML = `
+			<h4>Player Performances</h4>
+			<p class="season-stats-note">Detailed player game stats will appear here for games saved after this Past Game Log feature was added.</p>
+		`;
+		wrap.appendChild(noDetailsCard);
+		return wrap;
+	}
+
+	const teamsGrid = document.createElement("div");
+	teamsGrid.className = "past-game-team-grid";
+	teamsGrid.appendChild(createPastGameTeamCard(entry, entry.team1Name, entry.team1Score));
+	teamsGrid.appendChild(createPastGameTeamCard(entry, entry.team2Name, entry.team2Score));
+	wrap.appendChild(teamsGrid);
+
+	return wrap;
+}
+
+function displayPastGameLog() {
+	const container = document.getElementById("pastGameLogContainer");
+	if (!container) return;
+
+	const previousDateValue = document.getElementById("pastGameDateSelect")?.value || "";
+	const previousGameValue = document.getElementById("pastGameSelect")?.value || "";
+	container.innerHTML = "";
+
+	const games = getPastGameLogEntries();
+	if (!games.length) {
+		container.innerHTML = "<div class='card'><p>No completed games have been logged yet.</p></div>";
+		return;
+	}
+
+	const introCard = document.createElement("div");
+	introCard.className = "card";
+	introCard.innerHTML = `
+		<h3 style="margin-top:0;">Past Game Log</h3>
+		<p class="season-stats-note">Browse completed games by date, then open a single game to review the final score and saved player performances.</p>
+	`;
+	container.appendChild(introCard);
+
+	const browserCard = document.createElement("div");
+	browserCard.className = "card";
+	browserCard.innerHTML = `<h3 style="margin-top:0;">Find a Game</h3>`;
+	container.appendChild(browserCard);
+
+	const browserGrid = document.createElement("div");
+	browserGrid.className = "past-game-browser-grid";
+	browserCard.appendChild(browserGrid);
+
+	const dateGroup = document.createElement("div");
+	dateGroup.className = "past-game-select-group";
+	dateGroup.innerHTML = `<label for="pastGameDateSelect">Date</label>`;
+	browserGrid.appendChild(dateGroup);
+
+	const dateSelect = document.createElement("select");
+	dateSelect.id = "pastGameDateSelect";
+	dateSelect.className = "season-stats-select";
+	dateGroup.appendChild(dateSelect);
+
+	const gameGroup = document.createElement("div");
+	gameGroup.className = "past-game-select-group";
+	gameGroup.innerHTML = `<label for="pastGameSelect">Game</label>`;
+	browserGrid.appendChild(gameGroup);
+
+	const gameSelect = document.createElement("select");
+	gameSelect.id = "pastGameSelect";
+	gameSelect.className = "season-stats-select";
+	gameGroup.appendChild(gameSelect);
+
+	const details = document.createElement("div");
+	details.id = "pastGameDetails";
+	container.appendChild(details);
+
+	const dateOptions = [];
+	const dateMap = new Map();
+
+	games.forEach(entry => {
+		const key = getPastGameDayKey(entry.playedAt);
+		if (dateMap.has(key)) return;
+		dateMap.set(key, true);
+		dateOptions.push({ key, label: formatPastGameDate(entry.playedAt) });
+	});
+
+	dateOptions.forEach(option => {
+		const el = document.createElement("option");
+		el.value = option.key;
+		el.textContent = option.label;
+		dateSelect.appendChild(el);
+	});
+
+	function populateGameSelect() {
+		const selectedDateKey = dateSelect.value;
+		const filtered = games.filter(entry => getPastGameDayKey(entry.playedAt) === selectedDateKey);
+
+		gameSelect.innerHTML = "";
+		filtered.forEach(entry => {
+			const option = document.createElement("option");
+			option.value = entry.id;
+			const timeLabel = formatPastGameTime(entry.playedAt);
+			option.textContent = `${entry.team1Name} vs ${entry.team2Name}${timeLabel ? ` — ${timeLabel}` : ""}`;
+			gameSelect.appendChild(option);
+		});
+
+		if (filtered.some(entry => entry.id === previousGameValue)) {
+			gameSelect.value = previousGameValue;
+		} else if (filtered[0]) {
+			gameSelect.value = filtered[0].id;
+		}
+	}
+
+	function renderSelectedGame() {
+		const selected = games.find(entry => entry.id === gameSelect.value) || null;
+		details.innerHTML = "";
+		details.appendChild(createPastGameDetails(selected));
+	}
+
+	dateSelect.value = dateOptions.some(option => option.key === previousDateValue)
+		? previousDateValue
+		: (dateOptions[0]?.key || "");
+
+	populateGameSelect();
+
+	dateSelect.addEventListener("change", () => {
+		populateGameSelect();
+		renderSelectedGame();
+	});
+
+	gameSelect.addEventListener("change", renderSelectedGame);
+	renderSelectedGame();
 }
