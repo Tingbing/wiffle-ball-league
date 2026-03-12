@@ -435,8 +435,9 @@
 
 <div class="card">
 	<button class="menu-button" onclick="showRankings()">🏆 Rankings</button>
+	<button class="menu-button" onclick="showPastGameLog()">🗂️ Past Game Log</button>
 	<p class="season-stats-note" style="margin-bottom:0;">
-		Open a separate rankings screen for batting and pitching leaderboards.
+		Open separate screens for player leaderboards and completed game history.
 	</p>
 </div>
 
@@ -452,6 +453,13 @@
 
 	<h2>🏆 Rankings</h2>
 	<div id="rankingsContainer"></div>
+</div>
+
+<div id="pastGameLogScreen" class="hidden">
+	<button class="back-button" onclick="showSeasonStats()">← Back to Season Stats</button>
+
+	<h2>🗂️ Past Game Log</h2>
+	<div id="pastGameLogContainer"></div>
 </div>
 <!-- SCHEDULE SCREEN -->
 
