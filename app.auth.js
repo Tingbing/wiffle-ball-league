@@ -420,14 +420,17 @@ async function submitLeagueCode() {
   const entered = (document.getElementById("gateLeagueCode")?.value || "").trim();
   if (!entered) return alert("Enter the league code.");
 
-  if (entered === String(LEAGUE_CODE).trim()) {
-    setLeagueUnlocked(true);
-    await updateAuthUI();
-    showGate("done", "Access granted. You’ll need the league code each time you open the app.");
-} else {
+  if (entered !== String(LEAGUE_CODE).trim()) {
     setLeagueUnlocked(false);
     alert("Incorrect league code.");
+    return;
   }
+
+  setLeagueUnlocked(true);
+
+  // Go straight into the unlocked flow so resume can run immediately.
+  await finishAccessGrant();
+  await updateAuthUI();
 }
 
 
