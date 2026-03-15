@@ -152,9 +152,9 @@
 
 	<h2>📅 Season Schedule</h2>
 
-	<div class="card">
-		<p style="color:#aaa; margin-top:0;">
-			6 game days • 4 teams • everyone plays each other twice
+<div class="card">
+		<p id="scheduleSummaryText" style="color:#aaa; margin-top:0;">
+			Season schedule will appear here once teams are ready.
 		</p>
 	</div>
 
@@ -181,7 +181,7 @@
 	<h2>⚙️ Team Configuration</h2>
 
 	<div class="card">
-		<h3>Add Team (Max 4)</h3>
+		<h3>Add Team (Max 5)</h3>
 		<input id="teamName" placeholder="Team Name">
 		<button onclick="addTeam()">Add Team</button>
 	</div>
@@ -276,7 +276,7 @@
 	<div class="card" id="manualTeamCard">
 		<h3>Select Teams (Manual)</h3>
 		<p style="color:#aaa; font-size:13px;">
-			Schedule pick requires exactly 4 teams with players.
+			Schedule pick works with the supported season formats (4 or 5 teams with players).
 		</p>
 
 		<p>Team 1:</p>
