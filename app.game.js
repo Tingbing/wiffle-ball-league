@@ -4,38 +4,38 @@
 // RUNNER OUT PICKER (kept with gameplay helpers)
 
 function showOutPicker() {
-if (!game) return;
+	if (!game) return;
 
-// If no runners on, don't show
-if (!game.bases.first && !game.bases.second && !game.bases.third) {
-showNotification("No runners on base", 1200);
-return;
-}
+	if (!game.bases.first && !game.bases.second && !game.bases.third) {
+		showNotification("No runners on base", 1200);
+		return;
+	}
 
-// Build dropdown to only show bases that actually have runners
-const sel = document.getElementById("outBaseSelect");
-sel.innerHTML = "";
+	const sel = document.getElementById("outBaseSelect");
+	sel.innerHTML = "";
 
-const options = [
-{ base: "first", label: "Runner on 1st" },
-{ base: "second", label: "Runner on 2nd" },
-{ base: "third", label: "Runner on 3rd" }
-];
+	const options = [
+		{ base: "first", label: "Runner on 1st" },
+		{ base: "second", label: "Runner on 2nd" },
+		{ base: "third", label: "Runner on 3rd" }
+	];
 
-options.forEach(o => {
-if (game.bases[o.base]) {
-const opt = document.createElement("option");
-opt.value = o.base;
-opt.text = o.label + " (" + game.bases[o.base].player + ")";
-sel.appendChild(opt);
-}
-});
+	options.forEach(o => {
+		if (game.bases[o.base]) {
+			const opt = document.createElement("option");
+			opt.value = o.base;
+			opt.text = o.label + " (" + game.bases[o.base].player + ")";
+			sel.appendChild(opt);
+		}
+	});
 
-document.getElementById("outPicker").classList.remove("hidden");
+	document.getElementById("outPicker").classList.remove("hidden");
+	persistLiveGameAutosave();
 }
 
 function cancelRunnerOut() {
-document.getElementById("outPicker").classList.add("hidden");
+	document.getElementById("outPicker").classList.add("hidden");
+	persistLiveGameAutosave();
 }
 
 function keepLiveGameSectionsEnabled() {
@@ -81,6 +81,199 @@ updateGameScreen();
 
 // LIVE GAME ENGINE
 
+const LIVE_GAME_SAVE_KEY = "wiggleLiveGameStateV1";
+let liveGameResumePromptShown = false;
+
+function cloneJson(value) {
+	return value == null ? value : JSON.parse(JSON.stringify(value));
+}
+
+function getCompletedGameEntryId(gameLike = game) {
+	if (!gameLike) return null;
+	const scheduleRef = gameLike._scheduleRef;
+	if (scheduleRef && Number.isInteger(scheduleRef.dayIndex) && Number.isInteger(scheduleRef.seriesIndex) && Number.isInteger(scheduleRef.seriesGameIndex)) {
+		return `scheduled-${scheduleRef.dayIndex}-${scheduleRef.seriesIndex}-${scheduleRef.seriesGameIndex}`;
+	}
+	if (gameLike._gameInstanceId) return gameLike._gameInstanceId;
+	if (gameLike._lockId) return `manual-${gameLike._lockId}`;
+	return null;
+}
+
+function findCompletedGameLogEntry(entryId) {
+	if (!entryId) return null;
+	season.games = Array.isArray(season.games) ? season.games : [];
+	return season.games.find(entry => entry && entry.id === entryId) || null;
+}
+
+function markCompletedGameOutcomeApplied(entryId) {
+	const entry = findCompletedGameLogEntry(entryId);
+	if (entry) entry.outcomeApplied = true;
+}
+
+function getCurrentHalfInningKey() {
+	if (!game) return "";
+	return `${game.inning}-${game.halfInning}`;
+}
+
+function captureSelectedPitcherState() {
+	if (!game) return;
+	const select = document.getElementById("pitcherSelect");
+	let pitcherIndex = parseInt(select?.value, 10);
+	if (!Number.isInteger(pitcherIndex) || pitcherIndex < 0) pitcherIndex = 0;
+	const halfInningKey = getCurrentHalfInningKey();
+	if (halfInningKey) {
+		game.currentInningPitchers = game.currentInningPitchers || {};
+		game.currentInningPitchers[halfInningKey] = pitcherIndex;
+	}
+	game.currentPitcher = {
+		halfInningKey,
+		pitcherIndex,
+		pitcherName: game.fielding?.players?.[pitcherIndex] || null,
+		teamName: game.fielding?.name || null
+	};
+}
+
+function getLiveGameUiState() {
+	return {
+		errorPickerOpen: !document.getElementById("errorPicker")?.classList.contains("hidden"),
+		errorPlayerIndex: parseInt(document.getElementById("errorPlayerSelect")?.value, 10),
+		outPickerOpen: !document.getElementById("outPicker")?.classList.contains("hidden"),
+		outBase: document.getElementById("outBaseSelect")?.value || "",
+		manualRunnerBase: document.getElementById("manualRunnerSelect")?.value || "",
+		manualTargetBase: document.getElementById("manualTargetBaseSelect")?.value || "first"
+	};
+}
+
+function applyLiveGameUiState(uiState = {}) {
+	const manualRunner = document.getElementById("manualRunnerSelect");
+	const manualTarget = document.getElementById("manualTargetBaseSelect");
+	if (manualRunner && uiState.manualRunnerBase) manualRunner.value = uiState.manualRunnerBase;
+	if (manualTarget && uiState.manualTargetBase) manualTarget.value = uiState.manualTargetBase;
+
+	if (uiState.outPickerOpen) {
+		showOutPicker();
+		const outBaseSelect = document.getElementById("outBaseSelect");
+		if (outBaseSelect && uiState.outBase) outBaseSelect.value = uiState.outBase;
+	} else {
+		document.getElementById("outPicker")?.classList.add("hidden");
+	}
+
+	if (uiState.errorPickerOpen && lastPlay) {
+		showErrorPicker();
+		const errorPlayerSelect = document.getElementById("errorPlayerSelect");
+		if (errorPlayerSelect && Number.isInteger(uiState.errorPlayerIndex)) {
+			errorPlayerSelect.value = String(uiState.errorPlayerIndex);
+		}
+	} else {
+		document.getElementById("errorPicker")?.classList.add("hidden");
+	}
+}
+
+function buildLiveGameSavePayload() {
+	if (!game) return null;
+	captureSelectedPitcherState();
+	return {
+		version: 1,
+		savedAt: new Date().toISOString(),
+		lockId: game._lockId || activeGameLock?.lockId || null,
+		gameInstanceId: game._gameInstanceId || null,
+		game: cloneJson(game),
+		gameHistory: Array.isArray(gameHistory) ? gameHistory.slice() : [],
+		pendingBattingResult: cloneJson(pendingBattingResult),
+		lastPlay: cloneJson(lastPlay),
+		uiState: getLiveGameUiState()
+	};
+}
+
+function persistLiveGameAutosave() {
+	const payload = buildLiveGameSavePayload();
+	if (!payload) return false;
+	try {
+		localStorage.setItem(LIVE_GAME_SAVE_KEY, JSON.stringify(payload));
+		return true;
+	} catch (e) {
+		console.warn("live game autosave failed:", e);
+		return false;
+	}
+}
+
+function readLiveGameAutosave() {
+	try {
+		const raw = localStorage.getItem(LIVE_GAME_SAVE_KEY);
+		if (!raw) return null;
+		const parsed = JSON.parse(raw);
+		return parsed && parsed.game ? parsed : null;
+	} catch (e) {
+		return null;
+	}
+}
+
+function clearLiveGameAutosave() {
+	try { localStorage.removeItem(LIVE_GAME_SAVE_KEY); } catch (e) {}
+}
+
+function resumeLiveGameFromAutosave(snapshot) {
+	if (!snapshot?.game) return false;
+
+	game = cloneJson(snapshot.game);
+	gameHistory = Array.isArray(snapshot.gameHistory) ? snapshot.gameHistory.slice() : [];
+	pendingBattingResult = cloneJson(snapshot.pendingBattingResult) || null;
+	lastPlay = cloneJson(snapshot.lastPlay) || null;
+	playInputLock = false;
+
+	game._lockId = game._lockId || snapshot.lockId || activeGameLock?.lockId || null;
+	game.bases = game.bases || { first: null, second: null, third: null };
+	game.gameStats = game.gameStats || {};
+	game.currentInningPitchers = game.currentInningPitchers || {};
+	game.batterIndexByTeam = game.batterIndexByTeam || {
+		[game.team1?.name || "Team 1"]: 0,
+		[game.team2?.name || "Team 2"]: 0
+	};
+
+	keepLiveGameSectionsEnabled();
+	showGame();
+	updatePitcherSelect();
+	updateGameScreen();
+	applyLiveGameUiState(snapshot.uiState || {});
+	document.getElementById("undoButton").disabled = gameHistory.length === 0;
+	persistLiveGameAutosave();
+	showNotification("Recovered saved live game", 1500);
+	return true;
+}
+
+async function maybeOfferLiveGameResume() {
+	if (liveGameResumePromptShown || game || isPublicViewOnlyMode()) return;
+	liveGameResumePromptShown = true;
+
+	const snapshot = readLiveGameAutosave();
+	if (!snapshot?.game) return;
+
+	const snapshotLockId = snapshot.lockId || snapshot.game?._lockId || null;
+	if (!snapshotLockId) {
+		clearLiveGameAutosave();
+		return;
+	}
+
+	if (!activeGameLock || activeGameLock.lockId !== snapshotLockId) {
+		clearLiveGameAutosave();
+		return;
+	}
+
+	const scheduleRef = snapshot.game?._scheduleRef;
+	if (scheduleRef && Number.isInteger(scheduleRef.dayIndex) && Number.isInteger(scheduleRef.seriesIndex) && Number.isInteger(scheduleRef.seriesGameIndex)) {
+		const seriesGame = schedule?.days?.[scheduleRef.dayIndex]?.games?.[scheduleRef.seriesIndex]?.gamesInSeries?.[scheduleRef.seriesGameIndex];
+		if (seriesGame?.result) {
+			clearLiveGameAutosave();
+			return;
+		}
+	}
+
+	const label = getActiveGameLockLabel(activeGameLock) || `${snapshot.game?.team1?.name || "Team 1"} vs ${snapshot.game?.team2?.name || "Team 2"}`;
+	if (!confirm(`A live game save was found on this device.\n\n${label}\n\nResume this in-progress game?`)) return;
+
+	resumeLiveGameFromAutosave(snapshot);
+}
+
 function startGameWithTeams(t1, t2, scheduleRef = null, lockInfo = null) {
 	const activeTeam1 = buildActiveTeamForGame(t1, scheduleRef);
 	const activeTeam2 = buildActiveTeamForGame(t2, scheduleRef);
@@ -109,20 +302,24 @@ function startGameWithTeams(t1, t2, scheduleRef = null, lockInfo = null) {
 		fielding: fielding,
 		outs: 0,
 		inning: 1,
-halfInning: "top",
-batterIndex: 0,
-batterIndexByTeam: {
-	[activeTeam1.name]: 0,
-	[activeTeam2.name]: 0
-},
-currentPitcher: null,
+		halfInning: "top",
+		batterIndex: 0,
+		batterIndexByTeam: {
+			[activeTeam1.name]: 0,
+			[activeTeam2.name]: 0
+		},
+		currentPitcher: null,
 		bases: { first: null, second: null, third: null },
 		gameStats: {},
 		currentInningPitchers: {},
-	halfInningRuns: 0,
-_scheduleRef: scheduleRef,
-_lockId: lockInfo?.lockId || null,
-_lockInfo: lockInfo || null
+		halfInningRuns: 0,
+		_scheduleRef: scheduleRef,
+		_lockId: lockInfo?.lockId || null,
+		_lockInfo: lockInfo || null,
+		_gameInstanceId: scheduleRef
+			? `scheduled-${scheduleRef.dayIndex}-${scheduleRef.seriesIndex}-${scheduleRef.seriesGameIndex}`
+			: (lockInfo?.lockId ? `manual-${lockInfo.lockId}` : `manual-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`),
+		_startedAt: Date.now()
 	};
 
 	[activeTeam1, activeTeam2].forEach(teamObj => {
@@ -141,11 +338,12 @@ _lockInfo: lockInfo || null
 	pendingBattingResult = null;
 	lastPlay = null;
 	playInputLock = false;
-document.getElementById("undoButton").disabled = true;
+	document.getElementById("undoButton").disabled = true;
 	keepLiveGameSectionsEnabled();
 	showGame();
 	updatePitcherSelect();
 	updateGameScreen();
+	persistLiveGameAutosave();
 }
 
 async function beginLockedGame(t1, t2, scheduleRef = null, extraLockDetails = {}) {
@@ -203,6 +401,7 @@ function resetLiveGameSessionState() {
 	lastPlay = null;
 	pendingBattingResult = null;
 	playInputLock = false;
+	clearLiveGameAutosave();
 
 	document.getElementById("errorPicker")?.classList.add("hidden");
 	document.getElementById("outPicker")?.classList.add("hidden");
@@ -350,11 +549,13 @@ keepLiveGameSectionsEnabled();
 	}
 
 	function updatePitcherDisplay() {
-		let select = document.getElementById("pitcherSelect");
-		let pitcherIndex = parseInt(select.value);
-		let pitcher = game.fielding.players[pitcherIndex];
-		document.getElementById("pitcherText").innerText = "Pitching: " + pitcher;
-	}
+	let select = document.getElementById("pitcherSelect");
+	let pitcherIndex = parseInt(select.value);
+	let pitcher = game.fielding.players[pitcherIndex];
+	document.getElementById("pitcherText").innerText = "Pitching: " + pitcher;
+	captureSelectedPitcherState();
+	persistLiveGameAutosave();
+}
 
 function updateGameScreen() {
 	document.getElementById("team1Name").innerText = game.team1.name;
@@ -369,11 +570,12 @@ function updateGameScreen() {
 	document.getElementById("outsText").innerText = "Outs: " + game.outs + "/2";
 
 	const batterIndex = getCurrentBatterIndex();
-let player = game.batting.players[batterIndex] || "No Player";
+	let player = game.batting.players[batterIndex] || "No Player";
 	document.getElementById("batterText").innerText = player;
 
 	updateBasesDisplay();
 	updateManualRunnerControls();
+	persistLiveGameAutosave();
 }
 
 	function updateBasesDisplay() {
@@ -694,28 +896,30 @@ let currentBatter = game.batting.players[batterIndex];
 }
 
 function showErrorPicker() {
-  if (!lastPlay) {
-    alert("No play to assign an error to yet.");
-    return;
-  }
+	if (!lastPlay) {
+		alert("No play to assign an error to yet.");
+		return;
+	}
 
-  let sel = document.getElementById("errorPlayerSelect");
-  sel.innerHTML = "";
+	let sel = document.getElementById("errorPlayerSelect");
+	sel.innerHTML = "";
 
-  (game.fielding?.players || []).forEach((p, i) => {
-    let opt = document.createElement("option");
-    opt.value = i;
-    opt.text = p;
-    sel.appendChild(opt);
-  });
+	(game.fielding?.players || []).forEach((p, i) => {
+		let opt = document.createElement("option");
+		opt.value = i;
+		opt.text = p;
+		sel.appendChild(opt);
+	});
 
-  document.getElementById("errorPicker").classList.remove("hidden");
+	document.getElementById("errorPicker").classList.remove("hidden");
+	persistLiveGameAutosave();
 }
 
 function cancelError() {
-  document.getElementById("errorPicker").classList.add("hidden");
+	document.getElementById("errorPicker").classList.add("hidden");
+	persistLiveGameAutosave();
 }
-  
+
 function confirmError() {
   if (!lastPlay) return;
 
@@ -984,9 +1188,10 @@ function buildCompletedGameLogEntry() {
 		}
 		: null;
 
-	const id = scheduleRef
-		? `scheduled-${scheduleRef.dayIndex}-${scheduleRef.seriesIndex}-${scheduleRef.seriesGameIndex}`
-		: `manual-${playedAt}-${game.team1.name}-${game.team2.name}`;
+	const id = getCompletedGameEntryId(game)
+		|| (scheduleRef
+			? `scheduled-${scheduleRef.dayIndex}-${scheduleRef.seriesIndex}-${scheduleRef.seriesGameIndex}`
+			: `manual-${game._lockId || playedAt}-${game.team1.name}-${game.team2.name}`);
 
 	return {
 		id,
@@ -1000,25 +1205,46 @@ function buildCompletedGameLogEntry() {
 			[game.team1.name]: Array.isArray(game.team1.players) ? game.team1.players.slice() : [],
 			[game.team2.name]: Array.isArray(game.team2.players) ? game.team2.players.slice() : []
 		},
-		playerStats: Object.values(game.gameStats || {}).map(stats => ({ ...stats }))
+		lockId: game._lockId || null,
+		gameInstanceId: game._gameInstanceId || null,
+		playerStats: Object.values(game.gameStats || {}).map(stats => ({ ...stats })),
+		outcomeApplied: false
 	};
 }
 
-function saveCompletedGameLog() {
+function saveCompletedGameLog(extraFields = {}) {
 	const entry = buildCompletedGameLogEntry();
-	if (!entry) return;
+	if (!entry) return null;
 
+	const nextEntry = { ...entry, ...extraFields };
 	season.games = Array.isArray(season.games) ? season.games : [];
 
-	const existingIndex = season.games.findIndex(gameEntry => gameEntry && gameEntry.id === entry.id);
+	const existingIndex = season.games.findIndex(gameEntry => gameEntry && gameEntry.id === nextEntry.id);
 	if (existingIndex >= 0) {
-		season.games[existingIndex] = entry;
+		season.games[existingIndex] = { ...season.games[existingIndex], ...nextEntry };
 	} else {
-		season.games.unshift(entry);
+		season.games.unshift(nextEntry);
 	}
+
+	return nextEntry;
 }
 
 async function saveGameStats() {
+	const completedEntry = buildCompletedGameLogEntry();
+	const completedEntryId = completedEntry?.id || null;
+	const existingEntry = findCompletedGameLogEntry(completedEntryId);
+
+	if (existingEntry) {
+		if (!existingEntry.outcomeApplied) {
+			applyGameOutcomeOnce();
+			markCompletedGameOutcomeApplied(completedEntryId);
+			saveSeason();
+		}
+		clearLiveGameAutosave();
+		queueServerSync("game", { immediate: true });
+		return await releaseGameLock(game?._lockId || activeGameLock?.lockId || null, { quiet: true });
+	}
+
 	for (let key in game.gameStats) {
 		let gameStats = game.gameStats[key];
 		let seasonStats = getOrCreateSeasonStatsByKey(key, gameStats.teamName, gameStats.playerName);
@@ -1041,9 +1267,12 @@ async function saveGameStats() {
 		seasonStats.earnedRunsAllowed += gameStats.earnedRunsAllowed;
 	}
 
-	saveCompletedGameLog();
+	saveCompletedGameLog({ outcomeApplied: false });
+	saveSeason({ skipServerSync: true });
 	applyGameOutcomeOnce();
+	markCompletedGameOutcomeApplied(completedEntryId);
 	saveSeason();
+	clearLiveGameAutosave();
 	queueServerSync("game", { immediate: true });
 	return await releaseGameLock(game?._lockId || activeGameLock?.lockId || null, { quiet: true });
 }
