@@ -103,7 +103,7 @@ async function initializeSupabaseClient() {
     supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
       auth: {
         detectSessionInUrl: true,
-       persistSession: false,
+       persistSession: true,
        autoRefreshToken: true,
         // Avoid browser LockManager abort issues seen in some localhost/browser states.
         lock: async (_name, _acquireTimeout, fn) => await fn()
@@ -369,10 +369,14 @@ function showGate(step, msg) {
   }
 }
 
+async function finishAccessGrant() {
+  document.getElementById("accessGate").classList.add("hidden");
+  showMainMenu();
+  try { await maybeOfferLiveGameResume(); } catch (e) { console.warn("resume prompt failed:", e); }
+}
+
 async function closeGate() {
-	document.getElementById("accessGate").classList.add("hidden");
-	showMainMenu();
-	try { await maybeOfferLiveGameResume(); } catch (e) { console.warn("resume prompt failed:", e); }
+  await finishAccessGrant();
 }
 
 function validateEmailBasic(email) {
@@ -408,7 +412,7 @@ async function evaluateAccess() {
     return;
   }
 
-  document.getElementById("accessGate").classList.add("hidden");
+  await finishAccessGrant();
   await updateAuthUI();
 }
 	
