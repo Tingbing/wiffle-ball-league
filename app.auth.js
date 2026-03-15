@@ -137,7 +137,7 @@ async function initializeSupabaseClient() {
   }
 }
 
-const MAX_TEAMS = 4;
+const MAX_TEAMS = 5;
 const MAX_PLAYERS_PER_TEAM = 2;
 
 /* ================================
