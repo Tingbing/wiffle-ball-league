@@ -344,54 +344,29 @@ function getEditableFiveTeamDayOptions(dayIndex) {
 		.sort((a, b) => a.label.localeCompare(b.label));
 }
 
-function getEditableFiveTeamSeriesLayouts(dayIndex, seriesIndex) {
-	return getEditableFiveTeamDayOptions(dayIndex).filter(option => {
-		const pair = option?.pairings?.[seriesIndex];
-		return Array.isArray(pair) && pair.length === 2;
-	});
-}
-
-function getAllowedTeamsForFiveTeamSeries(dayIndex, seriesIndex) {
+function getAllowedByeTeamsForFiveTeamDay(dayIndex) {
 	return Array.from(new Set(
-		getEditableFiveTeamSeriesLayouts(dayIndex, seriesIndex).flatMap(option => option.pairings?.[seriesIndex] || [])
+		getEditableFiveTeamDayOptions(dayIndex).map(option => option?.byeTeam).filter(Boolean)
 	)).sort();
 }
 
-function getAllowedOpponentsForFiveTeamSeries(dayIndex, seriesIndex, teamName) {
-	if (!teamName) return [];
-
-	return Array.from(new Set(
-		getEditableFiveTeamSeriesLayouts(dayIndex, seriesIndex)
-			.flatMap(option => {
-				const pair = option?.pairings?.[seriesIndex] || [];
-				if (pair[0] === teamName) return [pair[1]];
-				if (pair[1] === teamName) return [pair[0]];
-				return [];
-			})
-	)).sort();
-}
-
-function getBestFiveTeamSeriesEditOption(dayIndex, seriesIndex, team1, team2) {
-	const matchupKey = normalizeMatchupKey(team1, team2);
+function getBestFiveTeamByeEditOption(dayIndex, byeTeam) {
 	const currentDay = schedule?.days?.[dayIndex];
+	const currentMatchupKeys = (currentDay?.games || []).map(getSeriesMatchupKey).filter(Boolean).sort();
 	const currentByeTeam = getByeTeamForDay(currentDay, schedule?.teamNames || []);
-	const currentOtherMatchupKey = getSeriesMatchupKey(currentDay?.games?.[seriesIndex === 0 ? 1 : 0]);
 
-	const candidates = getEditableFiveTeamSeriesLayouts(dayIndex, seriesIndex)
-		.filter(option => {
-			const pair = option?.pairings?.[seriesIndex] || [];
-			return normalizeMatchupKey(pair[0], pair[1]) === matchupKey;
-		})
+	const candidates = getEditableFiveTeamDayOptions(dayIndex)
+		.filter(option => option?.byeTeam === byeTeam)
 		.sort((a, b) => {
-			const aByeScore = a.byeTeam === currentByeTeam ? 1 : 0;
-			const bByeScore = b.byeTeam === currentByeTeam ? 1 : 0;
-			if (bByeScore !== aByeScore) return bByeScore - aByeScore;
+			const aCurrentByeScore = a.byeTeam === currentByeTeam ? 1 : 0;
+			const bCurrentByeScore = b.byeTeam === currentByeTeam ? 1 : 0;
+			if (bCurrentByeScore !== aCurrentByeScore) return bCurrentByeScore - aCurrentByeScore;
 
-			const aOtherKey = normalizeMatchupKey(...(a?.pairings?.[seriesIndex === 0 ? 1 : 0] || ["", ""]));
-			const bOtherKey = normalizeMatchupKey(...(b?.pairings?.[seriesIndex === 0 ? 1 : 0] || ["", ""]));
-			const aOtherScore = aOtherKey === currentOtherMatchupKey ? 1 : 0;
-			const bOtherScore = bOtherKey === currentOtherMatchupKey ? 1 : 0;
-			if (bOtherScore !== aOtherScore) return bOtherScore - aOtherScore;
+			const aKeys = (a?.matchupKeys || []).slice().sort();
+			const bKeys = (b?.matchupKeys || []).slice().sort();
+			const aMatchScore = aKeys.filter(key => currentMatchupKeys.includes(key)).length;
+			const bMatchScore = bKeys.filter(key => currentMatchupKeys.includes(key)).length;
+			if (bMatchScore !== aMatchScore) return bMatchScore - aMatchScore;
 
 			return a.label.localeCompare(b.label);
 		});
@@ -424,12 +399,10 @@ function refreshChangeScheduleControls() {
 	if (!panel) return;
 
 	const daySelect = document.getElementById("changeScheduleDaySelect");
-	const seriesSelect = document.getElementById("changeScheduleSeriesSelect");
-	const team1Select = document.getElementById("changeScheduleTeam1Select");
-	const team2Select = document.getElementById("changeScheduleTeam2Select");
+	const byeSelect = document.getElementById("changeScheduleByeSelect");
 	const status = document.getElementById("changeScheduleStatus");
 	const applyBtn = document.getElementById("applyScheduleChangeBtn");
-	if (!daySelect || !seriesSelect || !team1Select || !team2Select || !status || !applyBtn) return;
+	if (!daySelect || !byeSelect || !status || !applyBtn) return;
 
 	const teamNames = Array.isArray(schedule?.teamNames) ? schedule.teamNames.filter(Boolean) : [];
 	const config = getScheduleConfigForTeams(teamNames);
@@ -445,9 +418,7 @@ function refreshChangeScheduleControls() {
 
 	if (!editableDayIndexes.length) {
 		daySelect.innerHTML = `<option value="">No editable days</option>`;
-		seriesSelect.innerHTML = `<option value="">Series locked</option>`;
-		team1Select.innerHTML = `<option value="">First Team</option>`;
-		team2Select.innerHTML = `<option value="">Second Team</option>`;
+		byeSelect.innerHTML = `<option value="">Bye Team Locked</option>`;
 		status.innerText = "Schedule changes lock once the selected day or later days already have recorded games.";
 		applyBtn.disabled = true;
 		return;
@@ -462,32 +433,20 @@ function refreshChangeScheduleControls() {
 
 	const dayIndex = Number(daySelect.value);
 	const dayObj = schedule?.days?.[dayIndex];
-	const seriesCount = Math.min(2, Array.isArray(dayObj?.games) ? dayObj.games.length : 0);
-	const previousSeriesValue = seriesSelect.value;
-	seriesSelect.innerHTML = Array.from({ length: seriesCount }, (_, idx) => (
-		`<option value="${idx}">Series ${idx + 1}</option>`
-	)).join("");
-	seriesSelect.value = previousSeriesValue && Number(previousSeriesValue) < seriesCount ? previousSeriesValue : "0";
+	const currentByeTeam = getByeTeamForDay(dayObj, teamNames);
+	const allowedByeTeams = getAllowedByeTeamsForFiveTeamDay(dayIndex);
+	const previousByeValue = byeSelect.value;
 
-	const seriesIndex = Number(seriesSelect.value || 0);
-	const currentSeries = dayObj?.games?.[seriesIndex];
-	const currentTeam1 = currentSeries?.away || "";
-	const currentTeam2 = currentSeries?.home || "";
+	byeSelect.innerHTML = allowedByeTeams.map(teamName => `<option value="${teamName}">${teamName}</option>`).join("");
+	byeSelect.value = allowedByeTeams.includes(previousByeValue) ? previousByeValue : (allowedByeTeams.includes(currentByeTeam) ? currentByeTeam : (allowedByeTeams[0] || ""));
 
-	const allowedTeams = getAllowedTeamsForFiveTeamSeries(dayIndex, seriesIndex);
-	team1Select.innerHTML = allowedTeams.map(teamName => `<option value="${teamName}">${teamName}</option>`).join("");
-	team1Select.value = allowedTeams.includes(team1Select.value) ? team1Select.value : (allowedTeams.includes(currentTeam1) ? currentTeam1 : (allowedTeams[0] || ""));
-
-	const allowedOpponents = getAllowedOpponentsForFiveTeamSeries(dayIndex, seriesIndex, team1Select.value)
-		.filter(teamName => teamName !== team1Select.value);
-	team2Select.innerHTML = allowedOpponents.map(teamName => `<option value="${teamName}">${teamName}</option>`).join("");
-	team2Select.value = allowedOpponents.includes(team2Select.value) ? team2Select.value : (allowedOpponents.includes(currentTeam2) ? currentTeam2 : (allowedOpponents[0] || ""));
-
-	const selectedOption = getBestFiveTeamSeriesEditOption(dayIndex, seriesIndex, team1Select.value, team2Select.value);
-	const previewByeTeam = selectedOption?.byeTeam || getByeTeamForDay(dayObj, teamNames);
-	status.innerText = selectedOption
-		? `Day ${Number(dayObj?.day || (dayIndex + 1))}, Series ${seriesIndex + 1}. Bye team will be ${previewByeTeam}. The other series and later unplayed days will auto-adjust only if needed to keep the round robin valid.`
-		: "That matchup is not valid for this round robin setup.";
+	const selectedOption = getBestFiveTeamByeEditOption(dayIndex, byeSelect.value);
+	if (selectedOption) {
+		const pairingsText = (selectedOption.pairings || []).map((pair, idx) => `Series ${idx + 1}: ${pair[0]} vs ${pair[1]}`).join(" • ");
+		status.innerText = `Day ${Number(dayObj?.day || (dayIndex + 1))} bye: ${selectedOption.byeTeam}. ${pairingsText}. Later unplayed days will auto-adjust only if needed to keep the round robin valid.`;
+	} else {
+		status.innerText = "That bye team is not valid for this round robin setup.";
+	}
 	applyBtn.disabled = !selectedOption;
 }
 
@@ -499,16 +458,14 @@ function applySelectedScheduleChange() {
 	}
 
 	const dayIndex = Number(document.getElementById("changeScheduleDaySelect")?.value);
-	const seriesIndex = Number(document.getElementById("changeScheduleSeriesSelect")?.value);
-	const team1 = document.getElementById("changeScheduleTeam1Select")?.value || "";
-	const team2 = document.getElementById("changeScheduleTeam2Select")?.value || "";
+	const byeTeam = document.getElementById("changeScheduleByeSelect")?.value || "";
 
-	if (!Number.isInteger(dayIndex) || !Number.isInteger(seriesIndex)) {
-		alert("Pick a valid day and series first.");
+	if (!Number.isInteger(dayIndex)) {
+		alert("Pick a valid day first.");
 		return;
 	}
-	if (!team1 || !team2 || team1 === team2) {
-		alert("Pick two different teams for the new matchup.");
+	if (!byeTeam) {
+		alert("Pick a valid bye team.");
 		return;
 	}
 	if (!canEditFiveTeamScheduleFromDay(dayIndex)) {
@@ -516,9 +473,9 @@ function applySelectedScheduleChange() {
 		return;
 	}
 
-	const selectedOption = getBestFiveTeamSeriesEditOption(dayIndex, seriesIndex, team1, team2);
+	const selectedOption = getBestFiveTeamByeEditOption(dayIndex, byeTeam);
 	if (!selectedOption) {
-		alert("That matchup is not valid. Choose a different team pairing.");
+		alert("That bye team is not valid. Choose a different team.");
 		return;
 	}
 
@@ -526,7 +483,7 @@ function applySelectedScheduleChange() {
 	rebuildFiveTeamScheduleFromDay(dayIndex, selectedOption.plan, teamNames);
 	saveSchedule();
 	renderScheduleUI();
-	showNotification(`✅ Day ${Number(schedule.days?.[dayIndex]?.day || (dayIndex + 1))} Series ${seriesIndex + 1} updated`, 1600);
+	showNotification(`✅ Day ${Number(schedule.days?.[dayIndex]?.day || (dayIndex + 1))} bye updated to ${byeTeam}`, 1600);
 }
 
 function applyFiveTeamDayEdit(dayIndex) {
@@ -1760,39 +1717,31 @@ function renderScheduleUI() {
 
 	const activeConfigId = activeConfig?.id || "";
 
-	if (activeConfigId === SCHEDULE_FORMAT_SINGLE_ROUND_ROBIN_5 && hasFullAppAccess()) {
-		const editCard = document.createElement("div");
-		editCard.className = "card";
-		editCard.innerHTML = `
-			<div class="section-header">Change Schedule</div>
-			<div id="changeSchedulePanel">
-				<div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(170px, 1fr)); gap:10px; align-items:end;">
-					<div>
-						<div style="font-size:13px; color:#aaa; margin-bottom:6px;">Day</div>
-						<select id="changeScheduleDaySelect" onchange="refreshChangeScheduleControls()"></select>
-					</div>
-					<div>
-						<div style="font-size:13px; color:#aaa; margin-bottom:6px;">Series</div>
-						<select id="changeScheduleSeriesSelect" onchange="refreshChangeScheduleControls()"></select>
-					</div>
-					<div>
-						<div style="font-size:13px; color:#aaa; margin-bottom:6px;">First Team</div>
-						<select id="changeScheduleTeam1Select" onchange="refreshChangeScheduleControls()"></select>
-					</div>
-					<div>
-						<div style="font-size:13px; color:#aaa; margin-bottom:6px;">Second Team</div>
-						<select id="changeScheduleTeam2Select" onchange="refreshChangeScheduleControls()"></select>
-					</div>
+if (activeConfigId === SCHEDULE_FORMAT_SINGLE_ROUND_ROBIN_5 && hasFullAppAccess()) {
+	const editCard = document.createElement("div");
+	editCard.className = "card";
+	editCard.innerHTML = `
+		<div class="section-header">Change Schedule</div>
+		<div id="changeSchedulePanel">
+			<div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(170px, 1fr)); gap:10px; align-items:end;">
+				<div>
+					<div style="font-size:13px; color:#aaa; margin-bottom:6px;">Day</div>
+					<select id="changeScheduleDaySelect" onchange="refreshChangeScheduleControls()"></select>
 				</div>
-				<div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-top:12px;">
-					<button id="applyScheduleChangeBtn" type="button" onclick="applySelectedScheduleChange()">Apply Change</button>
-					<span id="changeScheduleStatus" style="color:#aaa; font-size:13px;"></span>
+				<div>
+					<div style="font-size:13px; color:#aaa; margin-bottom:6px;">Bye Team</div>
+					<select id="changeScheduleByeSelect" onchange="refreshChangeScheduleControls()"></select>
 				</div>
 			</div>
-		`;
-		container.appendChild(editCard);
-		setTimeout(refreshChangeScheduleControls, 0);
-	}
+			<div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-top:12px;">
+				<button id="applyScheduleChangeBtn" type="button" onclick="applySelectedScheduleChange()">Update Schedule</button>
+				<span id="changeScheduleStatus" style="color:#aaa; font-size:13px;"></span>
+			</div>
+		</div>
+	`;
+	container.appendChild(editCard);
+	setTimeout(refreshChangeScheduleControls, 0);
+}
 
 	schedule.days.forEach((dayObj, dayIndex) => {
 		const dayCard = document.createElement("div");
