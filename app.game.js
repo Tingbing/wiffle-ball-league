@@ -109,9 +109,13 @@ function startGameWithTeams(t1, t2, scheduleRef = null, lockInfo = null) {
 		fielding: fielding,
 		outs: 0,
 		inning: 1,
-		halfInning: "top",
-		batterIndex: 0,
-		currentPitcher: null,
+halfInning: "top",
+batterIndex: 0,
+batterIndexByTeam: {
+	[activeTeam1.name]: 0,
+	[activeTeam2.name]: 0
+},
+currentPitcher: null,
 		bases: { first: null, second: null, third: null },
 		gameStats: {},
 		currentInningPitchers: {},
@@ -246,9 +250,10 @@ async function emergencyEndGameFromSetup() {
 			outs: game.outs,
 			halfInningRuns: game.halfInningRuns,
 			inning: game.inning,
-			halfInning: game.halfInning,
-			batterIndex: game.batterIndex,
-			currentPitcher: game.currentPitcher,
+halfInning: game.halfInning,
+batterIndex: game.batterIndex,
+batterIndexByTeam: JSON.parse(JSON.stringify(game.batterIndexByTeam || {})),
+currentPitcher: game.currentPitcher,
 			bases: {
 				first: game.bases.first ? {...game.bases.first} : null,
 				second: game.bases.second ? {...game.bases.second} : null,
@@ -269,16 +274,45 @@ async function emergencyEndGameFromSetup() {
 		game.halfInningRuns = state.halfInningRuns ?? 0;
 		game.outs = state.outs;
 		game.inning = state.inning;
-		game.halfInning = state.halfInning;
-		game.batterIndex = state.batterIndex;
-		game.currentPitcher = state.currentPitcher;
+game.halfInning = state.halfInning;
+game.batterIndex = state.batterIndex;
+game.batterIndexByTeam = state.batterIndexByTeam || {
+	[game.team1.name]: 0,
+	[game.team2.name]: 0
+};
+game.currentPitcher = state.currentPitcher;
 		game.bases = state.bases;
 		game.gameStats = state.gameStats;
 		game.batting = state.batting;
 		game.fielding = state.fielding;
 		game.currentInningPitchers = state.currentInningPitchers;
-		pendingBattingResult = state.pendingBattingResult;
+	pendingBattingResult = state.pendingBattingResult;
+game.batterIndex = getCurrentBatterIndex();
 	}
+
+function getCurrentBatterIndex() {
+	if (!game?.batting?.name) return 0;
+	if (!game.batterIndexByTeam || typeof game.batterIndexByTeam !== "object") {
+		game.batterIndexByTeam = {};
+	}
+	let index = Number(game.batterIndexByTeam[game.batting.name]);
+	if (!Number.isInteger(index) || index < 0) index = 0;
+	return index;
+}
+
+function setCurrentBatterIndex(nextIndex) {
+	if (!game?.batting?.name) return 0;
+	if (!game.batterIndexByTeam || typeof game.batterIndexByTeam !== "object") {
+		game.batterIndexByTeam = {};
+	}
+	const playerCount = Math.max(1, Number(game.batting?.players?.length) || 1);
+	let normalized = Number(nextIndex);
+	if (!Number.isFinite(normalized)) normalized = 0;
+	normalized = ((Math.trunc(normalized) % playerCount) + playerCount) % playerCount;
+	game.batterIndexByTeam[game.batting.name] = normalized;
+	game.batterIndex = normalized;
+	return normalized;
+}
 
 function undoLastAction() {
   if (gameHistory.length > 0) {
@@ -334,7 +368,8 @@ function updateGameScreen() {
 
 	document.getElementById("outsText").innerText = "Outs: " + game.outs + "/2";
 
-	let player = game.batting.players[game.batterIndex] || "No Player";
+	const batterIndex = getCurrentBatterIndex();
+let player = game.batting.players[batterIndex] || "No Player";
 	document.getElementById("batterText").innerText = player;
 
 	updateBasesDisplay();
@@ -633,7 +668,8 @@ function recordBattingResult(result) {
 
   playInputLock = true;
   try {
-    let currentBatter = game.batting.players[game.batterIndex];
+ const batterIndex = getCurrentBatterIndex();
+let currentBatter = game.batting.players[batterIndex];
     let batterKey = getGameStatsKey(game.batting, currentBatter);
 
     pendingBattingResult = {
@@ -745,7 +781,7 @@ game.halfInning = "bottom";
 let temp = game.batting;
 game.batting = game.fielding;
 game.fielding = temp;
-game.batterIndex = 0;
+setCurrentBatterIndex(getCurrentBatterIndex());
 
 updatePitcherSelect();
 showNotification(reasonText || ("Side change! " + game.batting.name + " now batting."), 1500);
@@ -754,7 +790,7 @@ game.halfInning = "top";
 let temp = game.batting;
 game.batting = game.fielding;
 game.fielding = temp;
-game.batterIndex = 0;
+setCurrentBatterIndex(getCurrentBatterIndex());
 
 game.inning++;
 
@@ -906,8 +942,8 @@ game.gameStats[pitcherKey].runsAllowed += runs;
 game.gameStats[pitcherKey].earnedRunsAllowed += earnedRuns;
 
 // Next batter
-game.batterIndex = (game.batterIndex + 1) % game.batting.players.length;
-checkAndConvertToGhostie(game.batting.players[game.batterIndex]);
+const nextBatterIndex = setCurrentBatterIndex(getCurrentBatterIndex() + 1);
+checkAndConvertToGhostie(game.batting.players[nextBatterIndex]);
 
 // ✅ Run rule: innings 1-2 only
 if (game.inning <= 2 && game.halfInningRuns>= 6) {
