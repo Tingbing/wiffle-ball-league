@@ -1401,67 +1401,357 @@ function applyGameOutcomeOnce() {
 	saveSeason();
 }
 
-	async function resetSeason() {
-		if (!(await requireLogin())) return;
-  const msg =
-    "⚠️ Reset Season?\n\n" +
-    "This will permanently delete:\n" +
-    "• All season stats\n" +
-    "• All schedule game results\n" +
-    "• Local saved season/schedule data\n" +
-    "• Server backup (season_data) for this league\n\n" +
-    "This cannot be undone.\n\n" +
-    "Are you sure you want to continue?";
-  if (!confirm(msg)) return;
+const STATS_BACKUP_KIND = "wbl_stats_backup";
+const STATS_BACKUP_VERSION = 1;
 
-  try {
-    // 1) Clear local season + schedule
-    try { localStorage.removeItem("wiggleSeason"); } catch (e) {}
-    try { localStorage.removeItem("wiggleSchedule"); } catch (e) {}
-    try { localStorage.removeItem("wbl_lastSchedule"); } catch (e) {}
-    try { localStorage.removeItem("wbl_lastScheduleKey"); } catch (e) {}
+function deepCloneJson(value) {
+	try {
+		return JSON.parse(JSON.stringify(value ?? null));
+	} catch (e) {
+		return null;
+	}
+}
 
-    // Reset in-memory structures if they exist
-    if (typeof season !== "undefined") {
-     season = { teamRecords: {}, playerStats: {}, seasonSubs: [], subStats: {}, games: [] };
-    }
-    if (typeof schedule !== "undefined") {
-      schedule = [];
-    }
+function createEmptySeasonState() {
+	return { playerStats: {}, teamRecords: {}, seasonSubs: [], subStats: {}, games: [] };
+}
 
-    // 2) Delete server backup row (best-effort)
-    // Only runs if supabaseClient exists and user is logged in
-    if (typeof supabaseClient !== "undefined") {
-      const { data: { user } = {} } = await supabaseClient.auth.getUser();
-      const leagueCode = (typeof LEAGUE_CODE !== "undefined" ? String(LEAGUE_CODE) : "").trim();
+function stripScheduleResultsForStatsClear(scheduleObj) {
+	const base = ensureScheduleShape(deepCloneJson(scheduleObj) || { days: [], teamNames: [] });
+	const teamNames = Array.isArray(base.teamNames) ? base.teamNames.slice() : [];
 
-      if (user && leagueCode) {
-        const { error } = await supabaseClient
-          .from("season_data")
-          .delete()
-          .eq("league_code", leagueCode);
+	return ensureScheduleShape({
+		...base,
+		teamNames,
+		days: (base.days || []).map((dayObj, dayIndex) => ({
+			day: Number(dayObj?.day || (dayIndex + 1)),
+			byeTeam: getByeTeamForDay(dayObj, teamNames),
+			games: (dayObj?.games || []).map((seriesEntry, seriesIndex) => ({
+				...createSeriesEntry(seriesEntry?.away || "", seriesEntry?.home || "", Number(seriesEntry?.gameNumber || (seriesIndex + 1))),
+				result: null,
+				subAssignments: [],
+				gamesInSeries: [1, 2, 3].map(gameNumber => createSeriesGameSlot(gameNumber, null))
+			}))
+		}))
+	});
+}
 
-        if (error) {
-          console.warn("Season reset: server delete failed:", error);
-          // Don’t throw—local reset still succeeded
-        }
-      }
-    }
+function buildStatsBackupFilename(backup) {
+	const rawLeagueCode = String(backup?.leagueCode || "league").trim() || "league";
+	const safeLeagueCode = rawLeagueCode.replace(/[^a-z0-9_-]+/gi, "-").replace(/^-+|-+$/g, "") || "league";
+	const datePart = new Date().toISOString().slice(0, 10);
+	return `wbl-stats-backup-${safeLeagueCode}-${datePart}.json`;
+}
 
-    // 3) Re-render UI / save fresh empty season locally
-    if (typeof loadSeason === "function") loadSeason();
-    if (typeof loadSchedule === "function") loadSchedule();
-    if (typeof renderSeasonStats === "function") renderSeasonStats();
-    if (typeof renderSchedule === "function") renderSchedule();
-    if (typeof showToast === "function") {
-      showToast("✅ Season reset complete.");
-    } else {
-      alert("✅ Season reset complete.");
-    }
-  } catch (err) {
-    console.error(err);
-    alert("❌ Reset failed. Check console for details.");
-  }
+function createStatsBackupPayload() {
+	return {
+		kind: STATS_BACKUP_KIND,
+		version: STATS_BACKUP_VERSION,
+		exportedAt: new Date().toISOString(),
+		leagueCode: String(typeof LEAGUE_CODE !== "undefined" ? LEAGUE_CODE : "").trim(),
+		appBuild: String(typeof APP_BUILD !== "undefined" ? APP_BUILD : ""),
+		leagueSnapshot: {
+			teams: Array.isArray(league?.teams)
+				? league.teams.map(team => ({
+					name: team?.name || "",
+					players: Array.isArray(team?.players) ? team.players.slice() : []
+				}))
+				: []
+		},
+		season: ensureSeasonShape(deepCloneJson(season)),
+		schedule: ensureScheduleShape(deepCloneJson(schedule))
+	};
+}
+
+function refreshStatsBackupViews() {
+	try { syncTeamRecordsWithLeague(); } catch (e) {}
+	try { update(); } catch (e) {}
+	try { updatePublicAccessUI(); } catch (e) {}
+
+	try {
+		const statsScreen = document.getElementById("seasonStatsScreen");
+		if (statsScreen && !statsScreen.classList.contains("hidden") && typeof displaySeasonStats === "function") {
+			displaySeasonStats();
+		}
+	} catch (e) {}
+
+	try {
+		const rankingsScreen = document.getElementById("rankingsScreen");
+		if (rankingsScreen && !rankingsScreen.classList.contains("hidden") && typeof displayRankings === "function") {
+			displayRankings();
+		}
+	} catch (e) {}
+
+	try {
+		const pastGameLogScreen = document.getElementById("pastGameLogScreen");
+		if (pastGameLogScreen && !pastGameLogScreen.classList.contains("hidden") && typeof displayPastGameLog === "function") {
+			displayPastGameLog();
+		}
+	} catch (e) {}
+
+	try {
+		const scheduleScreen = document.getElementById("scheduleScreen");
+		if (scheduleScreen && !scheduleScreen.classList.contains("hidden")) {
+			renderScheduleUI();
+		}
+	} catch (e) {}
+
+	try {
+		const gameSetupScreen = document.getElementById("gameSetupScreen");
+		const schedCard = document.getElementById("scheduledGameCard");
+		const manualCard = document.getElementById("manualTeamCard");
+
+		if (gameSetupScreen && !gameSetupScreen.classList.contains("hidden") && schedCard && manualCard) {
+			const info = ensureScheduleUpToDateForSelection();
+
+			if (info.ok) {
+				schedCard.style.display = "block";
+				manualCard.style.display = "none";
+				populateScheduleDaySelect();
+			} else {
+				schedCard.style.display = "none";
+				manualCard.style.display = "block";
+				updateGameSetupSelects();
+			}
+		}
+	} catch (e) {}
+}
+
+function validateStatsBackupPayload(raw) {
+	if (!raw || typeof raw !== "object") {
+		return { ok: false, message: "Backup file is empty or not a valid object." };
+	}
+
+	if (raw.kind !== STATS_BACKUP_KIND) {
+		return { ok: false, message: "That file is not a Wiffle Ball stats backup created by this app." };
+	}
+
+	if (!raw.season || !raw.schedule) {
+		return { ok: false, message: "Backup file is missing season or schedule data." };
+	}
+
+	const seasonData = ensureSeasonShape(deepCloneJson(raw.season));
+	const scheduleData = ensureScheduleShape(deepCloneJson(raw.schedule));
+
+	if (!seasonData || !scheduleData) {
+		return { ok: false, message: "Backup file could not be normalized safely." };
+	}
+
+	return {
+		ok: true,
+		backup: {
+			...raw,
+			season: seasonData,
+			schedule: scheduleData,
+			leagueSnapshot: raw.leagueSnapshot || { teams: [] }
+		}
+	};
+}
+
+function doesBackupRosterDiffer(backup) {
+	const backupTeams = Array.isArray(backup?.leagueSnapshot?.teams)
+		? backup.leagueSnapshot.teams.map(team => ({
+			name: String(team?.name || "").trim(),
+			players: Array.isArray(team?.players) ? team.players.map(player => String(player || "").trim()).sort() : []
+		})).sort((a, b) => a.name.localeCompare(b.name))
+		: [];
+
+	const currentTeams = Array.isArray(league?.teams)
+		? league.teams.map(team => ({
+			name: String(team?.name || "").trim(),
+			players: Array.isArray(team?.players) ? team.players.map(player => String(player || "").trim()).sort() : []
+		})).sort((a, b) => a.name.localeCompare(b.name))
+		: [];
+
+	if (!backupTeams.length || !currentTeams.length) return false;
+	return JSON.stringify(backupTeams) !== JSON.stringify(currentTeams);
+}
+
+function downloadStatsBackupJson() {
+	if (isPublicViewOnlyMode()) {
+		alert("Sign in with full access before downloading a stats backup.");
+		return;
+	}
+
+	const backup = createStatsBackupPayload();
+	const blob = new Blob([JSON.stringify(backup, null, 2)], { type: "application/json" });
+	const url = URL.createObjectURL(blob);
+
+	const link = document.createElement("a");
+	link.href = url;
+	link.download = buildStatsBackupFilename(backup);
+	document.body.appendChild(link);
+	link.click();
+	link.remove();
+	URL.revokeObjectURL(url);
+
+	showNotification("⬇️ Stats backup downloaded", 1800);
+}
+
+async function clearCurrentStatsOnly({ skipConfirm = false, quiet = false, syncToServer = true } = {}) {
+	if (isPublicViewOnlyMode()) {
+		alert("Sign in with full access before clearing season stats.");
+		return false;
+	}
+
+	if (!skipConfirm) {
+		const confirmed = confirm(
+			"Clear current season stats?\n\n" +
+			"This will remove:\n" +
+			"• Player stats\n" +
+			"• Team records\n" +
+			"• Sub stats\n" +
+			"• Saved past game log entries\n" +
+			"• Recorded schedule game results\n\n" +
+			"Your teams and schedule structure will stay in place."
+		);
+		if (!confirmed) return false;
+	}
+
+	season = ensureSeasonShape(createEmptySeasonState());
+	schedule = stripScheduleResultsForStatsClear(schedule);
+
+	try { syncTeamRecordsWithLeague(); } catch (e) {}
+	try { saveSeason({ skipServerSync: true }); } catch (e) {}
+	try { saveSchedule({ skipServerSync: true }); } catch (e) {}
+
+	refreshStatsBackupViews();
+
+	if (syncToServer) {
+		try { await syncSeasonToServer({ quiet: true }); } catch (e) {}
+	}
+
+	if (!quiet) showNotification("🧹 Current stats cleared", 1800);
+	return true;
+}
+
+function openStatsRestorePicker() {
+	if (isPublicViewOnlyMode()) {
+		alert("Sign in with full access before restoring a stats backup.");
+		return;
+	}
+
+	const input = document.getElementById("statsRestoreFileInput");
+	if (!input) {
+		alert("Restore file input not found.");
+		return;
+	}
+
+	input.value = "";
+	input.click();
+}
+
+async function restoreStatsBackupFromPayload(raw) {
+	const validation = validateStatsBackupPayload(raw);
+	if (!validation.ok) {
+		alert(`Restore failed.\n\n${validation.message}`);
+		return false;
+	}
+
+	const backup = validation.backup;
+	const currentLeagueCode = String(typeof LEAGUE_CODE !== "undefined" ? LEAGUE_CODE : "").trim();
+	const backupLeagueCode = String(backup?.leagueCode || "").trim();
+
+	if (backupLeagueCode && currentLeagueCode && backupLeagueCode !== currentLeagueCode) {
+		alert(`Restore cancelled.\n\nThis backup belongs to league code "${backupLeagueCode}", but the current league is "${currentLeagueCode}".`);
+		return false;
+	}
+
+	if (doesBackupRosterDiffer(backup)) {
+		const continueRestore = confirm(
+			"This backup was created with a different team/player setup than the one currently loaded.\n\n" +
+			"You can still restore the stats, but some stat views may not line up perfectly until the current teams match the backup again.\n\n" +
+			"Restore anyway?"
+		);
+		if (!continueRestore) return false;
+	}
+
+	const restoreConfirmed = confirm(
+		"Restore this stats backup?\n\n" +
+		"This will replace the current season stats and recorded schedule results with the uploaded backup."
+	);
+	if (!restoreConfirmed) return false;
+
+	season = ensureSeasonShape(deepCloneJson(backup.season));
+	schedule = ensureScheduleShape(deepCloneJson(backup.schedule));
+
+	try { syncTeamRecordsWithLeague(); } catch (e) {}
+	try { saveSeason({ skipServerSync: true }); } catch (e) {}
+	try { saveSchedule({ skipServerSync: true }); } catch (e) {}
+
+	refreshStatsBackupViews();
+
+	try { await syncSeasonToServer({ quiet: true }); } catch (e) {}
+
+	showNotification("✅ Stats backup restored", 2000);
+	return true;
+}
+
+async function handleStatsRestoreFile(event) {
+	const input = event?.target;
+	const file = input?.files?.[0];
+	if (!file) return;
+
+	try {
+		const text = await file.text();
+		let parsed;
+
+		try {
+			parsed = JSON.parse(text);
+		} catch (e) {
+			alert("Restore failed.\n\nThat file is not valid JSON.");
+			return;
+		}
+
+		await restoreStatsBackupFromPayload(parsed);
+	} catch (e) {
+		console.error("stats restore failed:", e);
+		alert("Restore failed.\n\nCould not read that backup file.");
+	} finally {
+		if (input) input.value = "";
+	}
+}
+
+async function resetSeason() {
+	if (!(await requireLogin())) return;
+
+	const msg =
+		"⚠️ Reset Season?\n\n" +
+		"This will permanently delete:\n" +
+		"• All season stats\n" +
+		"• All schedule game results\n" +
+		"• Local saved season/schedule data\n" +
+		"• Server backup (season_data) for this league\n\n" +
+		"This cannot be undone.\n\n" +
+		"Are you sure you want to continue?";
+
+	if (!confirm(msg)) return;
+
+	try {
+		await clearCurrentStatsOnly({ skipConfirm: true, quiet: true, syncToServer: false });
+
+		if (typeof supabaseClient !== "undefined") {
+			const { data: { user } = {} } = await supabaseClient.auth.getUser();
+			const leagueCode = (typeof LEAGUE_CODE !== "undefined" ? String(LEAGUE_CODE) : "").trim();
+
+			if (user && leagueCode) {
+				const { error } = await supabaseClient
+					.from("season_data")
+					.delete()
+					.eq("league_code", leagueCode);
+
+				if (error) {
+					console.warn("Season reset: server delete failed:", error);
+				}
+			}
+		}
+
+		refreshStatsBackupViews();
+		showNotification("✅ Season reset complete.", 1800);
+	} catch (err) {
+		console.error(err);
+		alert("❌ Reset failed. Check console for details.");
+	}
 }
 
 function getPlayerKey(teamName, playerName) {
