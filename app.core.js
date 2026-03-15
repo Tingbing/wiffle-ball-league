@@ -322,7 +322,7 @@ function updatePublicAccessUI() {
 
 async function refreshPublicViewData({ quiet = true } = {}) {
 	const row = await fetchSeasonRowFromServer({ quiet, publicView: true });
-	if (row) applyServerSeasonRow(row);
+	if (row) applyServerSeasonRow(row, { force: true, source: "public-view" });
 	return row;
 }
 
