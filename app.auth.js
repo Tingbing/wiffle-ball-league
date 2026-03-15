@@ -369,9 +369,10 @@ function showGate(step, msg) {
   }
 }
 
-function closeGate() {
-  document.getElementById("accessGate").classList.add("hidden");
-  showMainMenu();
+async function closeGate() {
+	document.getElementById("accessGate").classList.add("hidden");
+	showMainMenu();
+	try { await maybeOfferLiveGameResume(); } catch (e) { console.warn("resume prompt failed:", e); }
 }
 
 function validateEmailBasic(email) {
