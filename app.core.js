@@ -344,6 +344,191 @@ function getEditableFiveTeamDayOptions(dayIndex) {
 		.sort((a, b) => a.label.localeCompare(b.label));
 }
 
+function getEditableFiveTeamSeriesLayouts(dayIndex, seriesIndex) {
+	return getEditableFiveTeamDayOptions(dayIndex).filter(option => {
+		const pair = option?.pairings?.[seriesIndex];
+		return Array.isArray(pair) && pair.length === 2;
+	});
+}
+
+function getAllowedTeamsForFiveTeamSeries(dayIndex, seriesIndex) {
+	return Array.from(new Set(
+		getEditableFiveTeamSeriesLayouts(dayIndex, seriesIndex).flatMap(option => option.pairings?.[seriesIndex] || [])
+	)).sort();
+}
+
+function getAllowedOpponentsForFiveTeamSeries(dayIndex, seriesIndex, teamName) {
+	if (!teamName) return [];
+
+	return Array.from(new Set(
+		getEditableFiveTeamSeriesLayouts(dayIndex, seriesIndex)
+			.flatMap(option => {
+				const pair = option?.pairings?.[seriesIndex] || [];
+				if (pair[0] === teamName) return [pair[1]];
+				if (pair[1] === teamName) return [pair[0]];
+				return [];
+			})
+	)).sort();
+}
+
+function getBestFiveTeamSeriesEditOption(dayIndex, seriesIndex, team1, team2) {
+	const matchupKey = normalizeMatchupKey(team1, team2);
+	const currentDay = schedule?.days?.[dayIndex];
+	const currentByeTeam = getByeTeamForDay(currentDay, schedule?.teamNames || []);
+	const currentOtherMatchupKey = getSeriesMatchupKey(currentDay?.games?.[seriesIndex === 0 ? 1 : 0]);
+
+	const candidates = getEditableFiveTeamSeriesLayouts(dayIndex, seriesIndex)
+		.filter(option => {
+			const pair = option?.pairings?.[seriesIndex] || [];
+			return normalizeMatchupKey(pair[0], pair[1]) === matchupKey;
+		})
+		.sort((a, b) => {
+			const aByeScore = a.byeTeam === currentByeTeam ? 1 : 0;
+			const bByeScore = b.byeTeam === currentByeTeam ? 1 : 0;
+			if (bByeScore !== aByeScore) return bByeScore - aByeScore;
+
+			const aOtherKey = normalizeMatchupKey(...(a?.pairings?.[seriesIndex === 0 ? 1 : 0] || ["", ""]));
+			const bOtherKey = normalizeMatchupKey(...(b?.pairings?.[seriesIndex === 0 ? 1 : 0] || ["", ""]));
+			const aOtherScore = aOtherKey === currentOtherMatchupKey ? 1 : 0;
+			const bOtherScore = bOtherKey === currentOtherMatchupKey ? 1 : 0;
+			if (bOtherScore !== aOtherScore) return bOtherScore - aOtherScore;
+
+			return a.label.localeCompare(b.label);
+		});
+
+	return candidates[0] || null;
+}
+
+function rebuildFiveTeamScheduleFromDay(dayIndex, rebuiltPlan, teamNames) {
+	const newDays = (schedule.days || []).slice(0, dayIndex).map((dayObj, idx) => ({
+		...dayObj,
+		day: Number(dayObj?.day || (idx + 1)),
+		byeTeam: getByeTeamForDay(dayObj, teamNames)
+	}));
+
+	rebuiltPlan.forEach((layout, offset) => {
+		const originalDay = schedule.days?.[dayIndex + offset] || {};
+		newDays.push(createDayEntryFromLayout(layout, Number(originalDay?.day || (dayIndex + offset + 1))));
+	});
+
+	schedule = ensureScheduleShape({
+		...schedule,
+		format: SCHEDULE_FORMAT_SINGLE_ROUND_ROBIN_5,
+		teamNames,
+		days: newDays
+	});
+}
+
+function refreshChangeScheduleControls() {
+	const panel = document.getElementById("changeSchedulePanel");
+	if (!panel) return;
+
+	const daySelect = document.getElementById("changeScheduleDaySelect");
+	const seriesSelect = document.getElementById("changeScheduleSeriesSelect");
+	const team1Select = document.getElementById("changeScheduleTeam1Select");
+	const team2Select = document.getElementById("changeScheduleTeam2Select");
+	const status = document.getElementById("changeScheduleStatus");
+	const applyBtn = document.getElementById("applyScheduleChangeBtn");
+	if (!daySelect || !seriesSelect || !team1Select || !team2Select || !status || !applyBtn) return;
+
+	const teamNames = Array.isArray(schedule?.teamNames) ? schedule.teamNames.filter(Boolean) : [];
+	const config = getScheduleConfigForTeams(teamNames);
+	if (!config || config.id !== SCHEDULE_FORMAT_SINGLE_ROUND_ROBIN_5 || !hasFullAppAccess()) {
+		panel.classList.add("hidden");
+		return;
+	}
+	panel.classList.remove("hidden");
+
+	const editableDayIndexes = (schedule.days || [])
+		.map((dayObj, idx) => canEditFiveTeamScheduleFromDay(idx) ? idx : null)
+		.filter(idx => Number.isInteger(idx));
+
+	if (!editableDayIndexes.length) {
+		daySelect.innerHTML = `<option value="">No editable days</option>`;
+		seriesSelect.innerHTML = `<option value="">Series locked</option>`;
+		team1Select.innerHTML = `<option value="">First Team</option>`;
+		team2Select.innerHTML = `<option value="">Second Team</option>`;
+		status.innerText = "Schedule changes lock once the selected day or later days already have recorded games.";
+		applyBtn.disabled = true;
+		return;
+	}
+
+	const previousDayValue = daySelect.value;
+	daySelect.innerHTML = editableDayIndexes.map(dayIndex => {
+		const dayNumber = Number(schedule?.days?.[dayIndex]?.day || (dayIndex + 1));
+		return `<option value="${dayIndex}">Day ${dayNumber}</option>`;
+	}).join("");
+	daySelect.value = editableDayIndexes.includes(Number(previousDayValue)) ? previousDayValue : String(editableDayIndexes[0]);
+
+	const dayIndex = Number(daySelect.value);
+	const dayObj = schedule?.days?.[dayIndex];
+	const seriesCount = Math.min(2, Array.isArray(dayObj?.games) ? dayObj.games.length : 0);
+	const previousSeriesValue = seriesSelect.value;
+	seriesSelect.innerHTML = Array.from({ length: seriesCount }, (_, idx) => (
+		`<option value="${idx}">Series ${idx + 1}</option>`
+	)).join("");
+	seriesSelect.value = previousSeriesValue && Number(previousSeriesValue) < seriesCount ? previousSeriesValue : "0";
+
+	const seriesIndex = Number(seriesSelect.value || 0);
+	const currentSeries = dayObj?.games?.[seriesIndex];
+	const currentTeam1 = currentSeries?.away || "";
+	const currentTeam2 = currentSeries?.home || "";
+
+	const allowedTeams = getAllowedTeamsForFiveTeamSeries(dayIndex, seriesIndex);
+	team1Select.innerHTML = allowedTeams.map(teamName => `<option value="${teamName}">${teamName}</option>`).join("");
+	team1Select.value = allowedTeams.includes(team1Select.value) ? team1Select.value : (allowedTeams.includes(currentTeam1) ? currentTeam1 : (allowedTeams[0] || ""));
+
+	const allowedOpponents = getAllowedOpponentsForFiveTeamSeries(dayIndex, seriesIndex, team1Select.value)
+		.filter(teamName => teamName !== team1Select.value);
+	team2Select.innerHTML = allowedOpponents.map(teamName => `<option value="${teamName}">${teamName}</option>`).join("");
+	team2Select.value = allowedOpponents.includes(team2Select.value) ? team2Select.value : (allowedOpponents.includes(currentTeam2) ? currentTeam2 : (allowedOpponents[0] || ""));
+
+	const selectedOption = getBestFiveTeamSeriesEditOption(dayIndex, seriesIndex, team1Select.value, team2Select.value);
+	const previewByeTeam = selectedOption?.byeTeam || getByeTeamForDay(dayObj, teamNames);
+	status.innerText = selectedOption
+		? `Day ${Number(dayObj?.day || (dayIndex + 1))}, Series ${seriesIndex + 1}. Bye team will be ${previewByeTeam}. The other series and later unplayed days will auto-adjust only if needed to keep the round robin valid.`
+		: "That matchup is not valid for this round robin setup.";
+	applyBtn.disabled = !selectedOption;
+}
+
+function applySelectedScheduleChange() {
+	const config = getScheduleConfigForTeams(schedule?.teamNames || []);
+	if (!config || config.id !== SCHEDULE_FORMAT_SINGLE_ROUND_ROBIN_5) {
+		alert("Schedule editing is only available for the 5-team single round robin schedule.");
+		return;
+	}
+
+	const dayIndex = Number(document.getElementById("changeScheduleDaySelect")?.value);
+	const seriesIndex = Number(document.getElementById("changeScheduleSeriesSelect")?.value);
+	const team1 = document.getElementById("changeScheduleTeam1Select")?.value || "";
+	const team2 = document.getElementById("changeScheduleTeam2Select")?.value || "";
+
+	if (!Number.isInteger(dayIndex) || !Number.isInteger(seriesIndex)) {
+		alert("Pick a valid day and series first.");
+		return;
+	}
+	if (!team1 || !team2 || team1 === team2) {
+		alert("Pick two different teams for the new matchup.");
+		return;
+	}
+	if (!canEditFiveTeamScheduleFromDay(dayIndex)) {
+		alert("You can only change a day when that day and all later days are still unplayed.");
+		return;
+	}
+
+	const selectedOption = getBestFiveTeamSeriesEditOption(dayIndex, seriesIndex, team1, team2);
+	if (!selectedOption) {
+		alert("That matchup is not valid. Choose a different team pairing.");
+		return;
+	}
+
+	const teamNames = schedule.teamNames.slice();
+	rebuildFiveTeamScheduleFromDay(dayIndex, selectedOption.plan, teamNames);
+	saveSchedule();
+	renderScheduleUI();
+	showNotification(`✅ Day ${Number(schedule.days?.[dayIndex]?.day || (dayIndex + 1))} Series ${seriesIndex + 1} updated`, 1600);
+}
+
 function applyFiveTeamDayEdit(dayIndex) {
 	const config = getScheduleConfigForTeams(schedule?.teamNames || []);
 	if (!config || config.id !== SCHEDULE_FORMAT_SINGLE_ROUND_ROBIN_5) {
@@ -377,24 +562,7 @@ function applyFiveTeamDayEdit(dayIndex) {
 		return;
 	}
 
-	const newDays = (schedule.days || []).slice(0, dayIndex).map((dayObj, idx) => ({
-		...dayObj,
-		day: Number(dayObj?.day || (idx + 1)),
-		byeTeam: getByeTeamForDay(dayObj, teamNames)
-	}));
-
-	rebuiltPlan.forEach((layout, offset) => {
-		const originalDay = schedule.days?.[dayIndex + offset] || {};
-		newDays.push(createDayEntryFromLayout(layout, Number(originalDay?.day || (dayIndex + offset + 1))));
-	});
-
-	schedule = ensureScheduleShape({
-		...schedule,
-		format: SCHEDULE_FORMAT_SINGLE_ROUND_ROBIN_5,
-		teamNames,
-		days: newDays
-	});
-
+	rebuildFiveTeamScheduleFromDay(dayIndex, rebuiltPlan, teamNames);
 	saveSchedule();
 	renderScheduleUI();
 	showNotification(`✅ Day ${Number(schedule.days?.[dayIndex]?.day || (dayIndex + 1))} updated`, 1600);
@@ -1592,6 +1760,40 @@ function renderScheduleUI() {
 
 	const activeConfigId = activeConfig?.id || "";
 
+	if (activeConfigId === SCHEDULE_FORMAT_SINGLE_ROUND_ROBIN_5 && hasFullAppAccess()) {
+		const editCard = document.createElement("div");
+		editCard.className = "card";
+		editCard.innerHTML = `
+			<div class="section-header">Change Schedule</div>
+			<div id="changeSchedulePanel">
+				<div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(170px, 1fr)); gap:10px; align-items:end;">
+					<div>
+						<div style="font-size:13px; color:#aaa; margin-bottom:6px;">Day</div>
+						<select id="changeScheduleDaySelect" onchange="refreshChangeScheduleControls()"></select>
+					</div>
+					<div>
+						<div style="font-size:13px; color:#aaa; margin-bottom:6px;">Series</div>
+						<select id="changeScheduleSeriesSelect" onchange="refreshChangeScheduleControls()"></select>
+					</div>
+					<div>
+						<div style="font-size:13px; color:#aaa; margin-bottom:6px;">First Team</div>
+						<select id="changeScheduleTeam1Select" onchange="refreshChangeScheduleControls()"></select>
+					</div>
+					<div>
+						<div style="font-size:13px; color:#aaa; margin-bottom:6px;">Second Team</div>
+						<select id="changeScheduleTeam2Select" onchange="refreshChangeScheduleControls()"></select>
+					</div>
+				</div>
+				<div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-top:12px;">
+					<button id="applyScheduleChangeBtn" type="button" onclick="applySelectedScheduleChange()">Apply Change</button>
+					<span id="changeScheduleStatus" style="color:#aaa; font-size:13px;"></span>
+				</div>
+			</div>
+		`;
+		container.appendChild(editCard);
+		setTimeout(refreshChangeScheduleControls, 0);
+	}
+
 	schedule.days.forEach((dayObj, dayIndex) => {
 		const dayCard = document.createElement("div");
 		dayCard.className = "card";
@@ -1619,7 +1821,7 @@ function renderScheduleUI() {
 
 			return `
 			<tr>
-				<td>Game ${seriesEntry.gameNumber}</td>
+				<td>Series ${seriesEntry.gameNumber}</td>
 				<td>
 					<b>${seriesEntry.away}</b> <span style="color:#aaa;">(${awayRec})</span>${awayTag}
 					&nbsp;vs&nbsp;
@@ -1634,45 +1836,17 @@ function renderScheduleUI() {
 			? getByeTeamForDay(dayObj, activeTeamNames)
 			: "";
 
-		let editBlock = "";
-		if (activeConfigId === SCHEDULE_FORMAT_SINGLE_ROUND_ROBIN_5 && hasFullAppAccess()) {
-			const canEdit = canEditFiveTeamScheduleFromDay(dayIndex);
-			if (canEdit) {
-				const options = getEditableFiveTeamDayOptions(dayIndex);
-				if (options.length) {
-					const currentKey = getFiveTeamLayoutKeyForDay(dayObj, activeTeamNames);
-					const optionMarkup = options.map(option => {
-						const selected = option.key === currentKey ? "selected" : "";
-						return `<option value="${option.key}" ${selected}>${option.label}</option>`;
-					}).join("");
-					editBlock = `
-					<div style="margin:12px 0 14px; padding:12px; border:1px solid #333; border-radius:10px; background:rgba(255,255,255,0.02);">
-						<div style="display:flex; gap:10px; flex-wrap:wrap; align-items:center;">
-							<select id="dayEditSelect-${dayIndex}" style="flex:1; min-width:280px;">
-								${optionMarkup}
-							</select>
-							<button class="small-link" type="button" onclick="applyFiveTeamDayEdit(${dayIndex})">Apply Matchup Change</button>
-						</div>
-						<p style="color:#aaa; font-size:13px; margin:8px 0 0;">This keeps Day ${Number(dayObj?.day || (dayIndex + 1))} valid and automatically rebuilds the later unplayed days so no duplicate regular-season matchup is created.</p>
-					</div>
-					`;
-				}
-			} else {
-				editBlock = `
-				<div style="margin:12px 0 14px; color:#aaa; font-size:13px;">
-					Day edits are locked once this day or a later day has recorded games.
-				</div>
-				`;
-			}
-		}
+		const dayLockedNote = activeConfigId === SCHEDULE_FORMAT_SINGLE_ROUND_ROBIN_5 && hasFullAppAccess() && !canEditFiveTeamScheduleFromDay(dayIndex)
+			? `<div style="margin:6px 0 12px; color:#aaa; font-size:13px;">Schedule editing is locked for this day because this day or a later day already has recorded games.</div>`
+			: "";
 
 		dayCard.innerHTML = `
 		<div class="section-header">Day ${dayObj.day}</div>
 		${byeTeam ? `<div style="margin:6px 0 12px; color:#aaa;"><b style="color:white;">Bye:</b> ${byeTeam}</div>` : ""}
-		${editBlock}
+		${dayLockedNote}
 		<table class="stats-table">
 			<tr>
-				<th>Game</th>
+				<th>Series</th>
 				<th>Matchup</th>
 			</tr>
 			${rows}
