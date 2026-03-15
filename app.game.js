@@ -242,34 +242,88 @@ function resumeLiveGameFromAutosave(snapshot) {
 }
 
 async function maybeOfferLiveGameResume() {
-	if (liveGameResumePromptShown || game || isPublicViewOnlyMode()) return;
-	liveGameResumePromptShown = true;
+	if (game || isPublicViewOnlyMode()) return;
 
 	const snapshot = readLiveGameAutosave();
 	if (!snapshot?.game) return;
 
-	const snapshotLockId = snapshot.lockId || snapshot.game?._lockId || null;
+	const snapshotLockId =
+		snapshot.lockId ||
+		snapshot.game?._lockId ||
+		snapshot.game?._lockInfo?.lockId ||
+		null;
+
 	if (!snapshotLockId) {
 		clearLiveGameAutosave();
 		return;
 	}
 
-	if (!activeGameLock || activeGameLock.lockId !== snapshotLockId) {
-		clearLiveGameAutosave();
-		return;
+	let resolvedLock = activeGameLock || null;
+
+	// First try to recover the lock from the saved snapshot itself
+	if ((!resolvedLock || resolvedLock.lockId !== snapshotLockId) && snapshot.game?._lockInfo?.lockId === snapshotLockId) {
+		persistActiveGameLock(snapshot.game._lockInfo);
+		resolvedLock = snapshot.game._lockInfo;
+	}
+
+	// Then try server state if needed
+	if ((!resolvedLock || resolvedLock.lockId !== snapshotLockId) && typeof fetchSeasonRowFromServer === "function") {
+		try {
+			const row = await fetchSeasonRowFromServer({ quiet: true });
+			const serverLock = row?.active_game_lock || null;
+			if (serverLock?.lockId === snapshotLockId) {
+				persistActiveGameLock(serverLock);
+				resolvedLock = serverLock;
+			}
+		} catch (e) {
+			console.warn("resume lock fetch failed:", e);
+		}
+	}
+
+	// Last fallback: rebuild a local lock from the snapshot instead of deleting the autosave
+	if (!resolvedLock || resolvedLock.lockId !== snapshotLockId) {
+		const scheduleRef = snapshot.game?._scheduleRef || null;
+		const fallbackLock = snapshot.game?._lockInfo || {
+			lockId: snapshotLockId,
+			type: scheduleRef ? "scheduled" : "manual",
+			team1: snapshot.game?.team1?.name || "",
+			team2: snapshot.game?.team2?.name || "",
+			dayNumber: Number.isInteger(scheduleRef?.dayIndex) ? scheduleRef.dayIndex + 1 : undefined,
+			seriesNumber: Number.isInteger(scheduleRef?.seriesIndex) ? scheduleRef.seriesIndex + 1 : undefined,
+			seriesGameNumber: Number.isInteger(scheduleRef?.seriesGameIndex) ? scheduleRef.seriesGameIndex + 1 : undefined,
+			startedAt: snapshot.savedAt || new Date().toISOString(),
+			startedByName: (typeof getStoredName === "function" ? getStoredName() : "") || CURRENT_EMAIL || "This device"
+		};
+		persistActiveGameLock(fallbackLock);
+		resolvedLock = fallbackLock;
 	}
 
 	const scheduleRef = snapshot.game?._scheduleRef;
-	if (scheduleRef && Number.isInteger(scheduleRef.dayIndex) && Number.isInteger(scheduleRef.seriesIndex) && Number.isInteger(scheduleRef.seriesGameIndex)) {
-		const seriesGame = schedule?.days?.[scheduleRef.dayIndex]?.games?.[scheduleRef.seriesIndex]?.gamesInSeries?.[scheduleRef.seriesGameIndex];
+	if (
+		scheduleRef &&
+		Number.isInteger(scheduleRef.dayIndex) &&
+		Number.isInteger(scheduleRef.seriesIndex) &&
+		Number.isInteger(scheduleRef.seriesGameIndex)
+	) {
+		const seriesGame =
+			schedule?.days?.[scheduleRef.dayIndex]?.games?.[scheduleRef.seriesIndex]?.gamesInSeries?.[scheduleRef.seriesGameIndex];
+
 		if (seriesGame?.result) {
 			clearLiveGameAutosave();
 			return;
 		}
 	}
 
-	const label = getActiveGameLockLabel(activeGameLock) || `${snapshot.game?.team1?.name || "Team 1"} vs ${snapshot.game?.team2?.name || "Team 2"}`;
-	if (!confirm(`A live game save was found on this device.\n\n${label}\n\nResume this in-progress game?`)) return;
+	if (liveGameResumePromptShown) return;
+	liveGameResumePromptShown = true;
+
+	const label =
+		getActiveGameLockLabel(resolvedLock) ||
+		`${snapshot.game?.team1?.name || "Team 1"} vs ${snapshot.game?.team2?.name || "Team 2"}`;
+
+	if (!confirm(`A live game save was found on this device.\n\n${label}\n\nResume this in-progress game?`)) {
+		return;
+	}
 
 	resumeLiveGameFromAutosave(snapshot);
 }
