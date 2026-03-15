@@ -10,7 +10,290 @@
     let playInputLock = false;
 let activeGameLock = null;
 const ACTIVE_GAME_LOCK_KEY = "wiggleActiveGameLock";
+const SEASON_STORAGE_KEY = "wiggleSeason";
+const SCHEDULE_STORAGE_KEY = "wiggleSchedule";
+const SYNC_HEAD_KEY = "wiggleSyncHeadV1";
+const APP_TAB_ID = `tab_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 
+let syncConflictState = null;
+let syncConflictAlertShown = false;
+let syncState = {
+	tabId: APP_TAB_ID,
+	serverUpdatedAt: null,
+	serverSeasonRevision: 0,
+	serverScheduleRevision: 0
+};
+
+function readJsonStorage(key, fallback = null) {
+	try {
+		const raw = localStorage.getItem(key);
+		return raw ? JSON.parse(raw) : fallback;
+	} catch (e) {
+		return fallback;
+	}
+}
+
+function getSeasonRevisionFrom(obj = season) {
+	return Math.max(0, Number(obj?._meta?.revision || 0) || 0);
+}
+
+function getScheduleRevisionFrom(obj = schedule) {
+	return Math.max(0, Number(obj?._meta?.revision || 0) || 0);
+}
+
+function normalizeSnapshotMeta(target, kind) {
+	if (!target || typeof target !== "object") return target;
+	target._meta = target._meta || {};
+	const currentRevision = Number(target._meta.revision || 0);
+	target._meta.revision = Number.isFinite(currentRevision) && currentRevision > 0 ? Math.floor(currentRevision) : 0;
+	if (!target._meta.updated_at && kind !== "server") {
+		target._meta.updated_at = new Date().toISOString();
+	}
+	return target;
+}
+
+function readLocalSyncHead() {
+	const head = readJsonStorage(SYNC_HEAD_KEY, null);
+	if (!head || typeof head !== "object") return null;
+	return {
+		leagueCode: String(head.leagueCode || "").trim(),
+		seasonRevision: Math.max(0, Number(head.seasonRevision || 0) || 0),
+		scheduleRevision: Math.max(0, Number(head.scheduleRevision || 0) || 0),
+		serverUpdatedAt: head.serverUpdatedAt || null,
+		serverSeasonRevision: Math.max(0, Number(head.serverSeasonRevision || 0) || 0),
+		serverScheduleRevision: Math.max(0, Number(head.serverScheduleRevision || 0) || 0),
+		lastWriterTabId: head.lastWriterTabId || null,
+		lastWriterAt: head.lastWriterAt || null
+	};
+}
+
+function syncStateFromHead() {
+	const head = readLocalSyncHead();
+	if (!head) return;
+	if (head.serverUpdatedAt) syncState.serverUpdatedAt = head.serverUpdatedAt;
+	syncState.serverSeasonRevision = Math.max(syncState.serverSeasonRevision || 0, head.serverSeasonRevision || 0);
+	syncState.serverScheduleRevision = Math.max(syncState.serverScheduleRevision || 0, head.serverScheduleRevision || 0);
+}
+
+function writeLocalSyncHead(extra = {}) {
+	const nextHead = {
+		leagueCode: String(typeof LEAGUE_CODE !== "undefined" ? LEAGUE_CODE : "").trim(),
+		seasonRevision: getSeasonRevisionFrom(season),
+		scheduleRevision: getScheduleRevisionFrom(schedule),
+		serverUpdatedAt: syncState.serverUpdatedAt || null,
+		serverSeasonRevision: Math.max(0, Number(syncState.serverSeasonRevision || 0) || 0),
+		serverScheduleRevision: Math.max(0, Number(syncState.serverScheduleRevision || 0) || 0),
+		lastWriterTabId: APP_TAB_ID,
+		lastWriterAt: new Date().toISOString(),
+		...extra
+	};
+	try { localStorage.setItem(SYNC_HEAD_KEY, JSON.stringify(nextHead)); } catch (e) {}
+	return nextHead;
+}
+
+function hasUnsyncedLocalChanges() {
+	return getSeasonRevisionFrom(season) > (syncState.serverSeasonRevision || 0)
+		|| getScheduleRevisionFrom(schedule) > (syncState.serverScheduleRevision || 0);
+}
+
+function clearSyncConflictState() {
+	syncConflictState = null;
+	if (autoSyncEnabled || postUnlockSetupPromise) setSyncButtonEnabled(true);
+}
+
+function refreshAfterSnapshotChange() {
+	try { update(); } catch (e) {}
+	try { if (!document.getElementById("seasonStatsScreen")?.classList.contains("hidden")) displaySeasonStats(); } catch (e) {}
+	try { if (!document.getElementById("scheduleScreen")?.classList.contains("hidden")) renderScheduleUI(); } catch (e) {}
+	try {
+		if (!document.getElementById("gameSetupScreen")?.classList.contains("hidden")) {
+			const info = ensureScheduleUpToDateForSelection();
+			if (info.ok) populateScheduleDaySelect();
+			else updateGameSetupSelects();
+			refreshGameLockUI();
+		}
+	} catch (e) {}
+}
+
+async function resolveSyncConflictByReloadingLatest({ quiet = false } = {}) {
+	const localSeason = ensureSeasonShape(readJsonStorage(SEASON_STORAGE_KEY, season));
+	const localSchedule = ensureScheduleShape(readJsonStorage(SCHEDULE_STORAGE_KEY, schedule));
+	normalizeSnapshotMeta(localSeason, "season");
+	normalizeSnapshotMeta(localSchedule, "schedule");
+	const head = readLocalSyncHead();
+
+	let row = null;
+	try {
+		if (typeof supabaseClient !== "undefined" && supabaseClient && !isPublicViewOnlyMode()) {
+			row = await fetchSeasonRowFromServer({ quiet: true });
+		}
+	} catch (e) {}
+
+	let shouldUseServer = false;
+	if (row) {
+		const rowSeason = ensureSeasonShape(deepCloneJson(row.season_json));
+		const rowSchedule = ensureScheduleShape(deepCloneJson(row.schedule_json));
+		normalizeSnapshotMeta(rowSeason, "season");
+		normalizeSnapshotMeta(rowSchedule, "schedule");
+
+		const rowSeasonRev = getSeasonRevisionFrom(rowSeason);
+		const rowScheduleRev = getScheduleRevisionFrom(rowSchedule);
+		const headSeasonRev = Math.max(getSeasonRevisionFrom(localSeason), Number(head?.serverSeasonRevision || 0) || 0);
+		const headScheduleRev = Math.max(getScheduleRevisionFrom(localSchedule), Number(head?.serverScheduleRevision || 0) || 0);
+		const rowMs = Date.parse(row.updated_at || "") || 0;
+		const headMs = Date.parse(head?.serverUpdatedAt || "") || 0;
+
+		shouldUseServer = rowMs > headMs || rowSeasonRev > headSeasonRev || rowScheduleRev > headScheduleRev;
+	}
+
+	if (shouldUseServer && row) {
+		applyServerSeasonRow(row, { force: true, source: "conflict-recovery" });
+		clearSyncConflictState();
+		if (!quiet) showNotification("⬇️ Loaded latest data after conflict", 1800);
+		return true;
+	}
+
+	suppressAutoSync = true;
+	season = ensureSeasonShape(localSeason);
+	schedule = ensureScheduleShape(localSchedule);
+	suppressAutoSync = false;
+
+	syncState.serverUpdatedAt = head?.serverUpdatedAt || syncState.serverUpdatedAt || null;
+	syncState.serverSeasonRevision = Math.max(0, Number(head?.serverSeasonRevision || 0) || 0);
+	syncState.serverScheduleRevision = Math.max(0, Number(head?.serverScheduleRevision || 0) || 0);
+
+	persistActiveGameLock(readJsonStorage(ACTIVE_GAME_LOCK_KEY, activeGameLock) || null);
+	clearSyncConflictState();
+	refreshAfterSnapshotChange();
+
+	if (!quiet) showNotification("↺ Reloaded latest local snapshot", 1800);
+	return true;
+}
+
+function scheduleConflictNotice(reason, detail = {}) {
+	if (!syncConflictState) {
+		syncConflictState = {
+			reason,
+			detail,
+			detectedAt: new Date().toISOString(),
+			tabId: APP_TAB_ID
+		};
+	}
+
+	if (serverSyncTimer) {
+		clearTimeout(serverSyncTimer);
+		serverSyncTimer = null;
+	}
+	setSyncButtonEnabled(false);
+	if (syncConflictAlertShown) return false;
+
+	syncConflictAlertShown = true;
+	setTimeout(async () => {
+		try {
+			const shouldRecover = confirm(
+				"Data conflict detected.\n\n" +
+				reason + "\n\n" +
+				"This tab is blocked from saving so it cannot overwrite newer data.\n\n" +
+				"Press OK to load the latest saved data now. Press Cancel to keep viewing this stale tab without saving."
+			);
+			if (shouldRecover) await resolveSyncConflictByReloadingLatest({ quiet: false });
+		} catch (e) {
+			console.warn("conflict recovery prompt failed:", e);
+		} finally {
+			syncConflictAlertShown = false;
+		}
+	}, 0);
+
+	return false;
+}
+
+function assertCanWriteLocalSnapshot(kind) {
+	syncStateFromHead();
+	if (syncConflictState) return false;
+
+	const head = readLocalSyncHead();
+	if (!head) return true;
+
+	const staleSeason = head.lastWriterTabId !== APP_TAB_ID && head.seasonRevision > getSeasonRevisionFrom(season);
+	const staleSchedule = head.lastWriterTabId !== APP_TAB_ID && head.scheduleRevision > getScheduleRevisionFrom(schedule);
+
+	if ((kind === "season" && staleSeason) || (kind === "schedule" && staleSchedule)) {
+		return scheduleConflictNotice("Another browser tab on this device already saved newer season data.", { kind, head });
+	}
+
+	return true;
+}
+
+function adoptServerSyncBaseline(row) {
+	if (!row) return;
+
+	const rowSeason = ensureSeasonShape(deepCloneJson(row.season_json));
+	const rowSchedule = ensureScheduleShape(deepCloneJson(row.schedule_json));
+	normalizeSnapshotMeta(rowSeason, "season");
+	normalizeSnapshotMeta(rowSchedule, "schedule");
+
+	syncState.serverUpdatedAt = row.updated_at || syncState.serverUpdatedAt || null;
+	syncState.serverSeasonRevision = getSeasonRevisionFrom(rowSeason);
+	syncState.serverScheduleRevision = getScheduleRevisionFrom(rowSchedule);
+
+	writeLocalSyncHead({
+		serverUpdatedAt: syncState.serverUpdatedAt,
+		serverSeasonRevision: syncState.serverSeasonRevision,
+		serverScheduleRevision: syncState.serverScheduleRevision
+	});
+
+	clearSyncConflictState();
+}
+
+function getRowRevisionInfo(row) {
+	const rowSeason = ensureSeasonShape(deepCloneJson(row?.season_json));
+	const rowSchedule = ensureScheduleShape(deepCloneJson(row?.schedule_json));
+	normalizeSnapshotMeta(rowSeason, "season");
+	normalizeSnapshotMeta(rowSchedule, "schedule");
+
+	return {
+		seasonJson: rowSeason,
+		scheduleJson: rowSchedule,
+		seasonRevision: getSeasonRevisionFrom(rowSeason),
+		scheduleRevision: getScheduleRevisionFrom(rowSchedule),
+		updatedAt: row?.updated_at || null
+	};
+}
+
+window.addEventListener("storage", (event) => {
+	if (event.key === ACTIVE_GAME_LOCK_KEY) {
+		try {
+			activeGameLock = event.newValue ? JSON.parse(event.newValue) : null;
+		} catch (e) {
+			activeGameLock = null;
+		}
+		try { refreshGameLockUI(); } catch (e) {}
+		return;
+	}
+
+	if (event.key !== SYNC_HEAD_KEY || !event.newValue) return;
+
+	let head = null;
+	try { head = JSON.parse(event.newValue); } catch (e) { head = null; }
+	if (!head || head.lastWriterTabId === APP_TAB_ID) return;
+
+	if (Number(head.serverSeasonRevision || 0) > (syncState.serverSeasonRevision || 0)) {
+		syncState.serverSeasonRevision = Number(head.serverSeasonRevision || 0) || 0;
+	}
+	if (Number(head.serverScheduleRevision || 0) > (syncState.serverScheduleRevision || 0)) {
+		syncState.serverScheduleRevision = Number(head.serverScheduleRevision || 0) || 0;
+	}
+	if (head.serverUpdatedAt) syncState.serverUpdatedAt = head.serverUpdatedAt;
+
+	if (
+		Number(head.seasonRevision || 0) > getSeasonRevisionFrom(season) ||
+		Number(head.scheduleRevision || 0) > getScheduleRevisionFrom(schedule)
+	) {
+		scheduleConflictNotice("Another tab on this browser saved newer data than the copy open in this tab.", { source: "storage", head });
+	}
+});
+
+syncStateFromHead();
 try {
 	activeGameLock = JSON.parse(localStorage.getItem(ACTIVE_GAME_LOCK_KEY) || "null");
 } catch (e) {
@@ -48,24 +331,41 @@ async function refreshPublicViewData({ quiet = true } = {}) {
 	==================================*/
 	let schedule = { days: [], teamNames: [] };
 	
-function saveSchedule({ skipServerSync = false, touchMeta = true } = {}) {
-  // stamp update time (used for cross-device sync)
-  try {
-    if (!schedule || typeof schedule !== "object") schedule = { days: [], teamNames: [] };
-    if (touchMeta) {
-      schedule._meta = schedule._meta || {};
-      schedule._meta.updated_at = new Date().toISOString();
-    }
-  } catch (e) {}
+function saveSchedule({ skipServerSync = false, touchMeta = true, bumpRevision = touchMeta, allowConflictBypass = false } = {}) {
+	try {
+		if (!schedule || typeof schedule !== "object") schedule = { days: [], teamNames: [] };
+		schedule = ensureScheduleShape(schedule);
+		normalizeSnapshotMeta(schedule, "schedule");
 
-  localStorage.setItem("wiggleSchedule", JSON.stringify(schedule));
-  if (!skipServerSync) queueServerSync("schedule");
+		if (!allowConflictBypass && !assertCanWriteLocalSnapshot("schedule")) return false;
+
+		if (bumpRevision) {
+			const head = readLocalSyncHead();
+			schedule._meta.revision = Math.max(getScheduleRevisionFrom(schedule), Number(head?.scheduleRevision || 0) || 0) + 1;
+		} else {
+			schedule._meta.revision = getScheduleRevisionFrom(schedule);
+		}
+
+		if (touchMeta) schedule._meta.updated_at = new Date().toISOString();
+	} catch (e) {}
+
+	try { localStorage.setItem(SCHEDULE_STORAGE_KEY, JSON.stringify(schedule)); } catch (e) {}
+
+	writeLocalSyncHead({
+		seasonRevision: getSeasonRevisionFrom(season),
+		scheduleRevision: getScheduleRevisionFrom(schedule)
+	});
+
+	if (!skipServerSync) queueServerSync("schedule");
+	return true;
 }
 
-	function loadSchedule() {
-	const data = localStorage.getItem("wiggleSchedule");
-	if (data) schedule = JSON.parse(data);
+function loadSchedule() {
+	const data = readJsonStorage(SCHEDULE_STORAGE_KEY, null);
+	if (data) schedule = data;
 	schedule = ensureScheduleShape(schedule);
+	normalizeSnapshotMeta(schedule, "schedule");
+	syncStateFromHead();
 }
 
 	/* ==========================================
@@ -685,28 +985,43 @@ function generateScheduleForTeams(validTeams) {
   }));
 }
 
-function saveSeason({ skipServerSync = false, touchMeta = true } = {}) {
-  // stamp update time (used for cross-device sync)
-  try {
-    if (!season || typeof season !== "object") {
-     season = { playerStats: {}, teamRecords: {}, seasonSubs: [], subStats: {}, games: [] };
-    }
-    if (touchMeta) {
-      season._meta = season._meta || {};
-      season._meta.updated_at = new Date().toISOString();
-    }
-  } catch (e) {}
+function saveSeason({ skipServerSync = false, touchMeta = true, bumpRevision = touchMeta, allowConflictBypass = false } = {}) {
+	try {
+		if (!season || typeof season !== "object") {
+			season = { playerStats: {}, teamRecords: {}, seasonSubs: [], subStats: {}, games: [] };
+		}
+		season = ensureSeasonShape(season);
+		normalizeSnapshotMeta(season, "season");
 
-  localStorage.setItem("wiggleSeason", JSON.stringify(season));
-  if (!skipServerSync) queueServerSync("season");
+		if (!allowConflictBypass && !assertCanWriteLocalSnapshot("season")) return false;
+
+		if (bumpRevision) {
+			const head = readLocalSyncHead();
+			season._meta.revision = Math.max(getSeasonRevisionFrom(season), Number(head?.seasonRevision || 0) || 0) + 1;
+		} else {
+			season._meta.revision = getSeasonRevisionFrom(season);
+		}
+
+		if (touchMeta) season._meta.updated_at = new Date().toISOString();
+	} catch (e) {}
+
+	try { localStorage.setItem(SEASON_STORAGE_KEY, JSON.stringify(season)); } catch (e) {}
+
+	writeLocalSyncHead({
+		seasonRevision: getSeasonRevisionFrom(season),
+		scheduleRevision: getScheduleRevisionFrom(schedule)
+	});
+
+	if (!skipServerSync) queueServerSync("season");
+	return true;
 }
 
 function loadSeason() {
-	let data = localStorage.getItem("wiggleSeason");
-	if (data) {
-		season = JSON.parse(data);
-	}
+	let data = readJsonStorage(SEASON_STORAGE_KEY, null);
+	if (data) season = data;
 	season = ensureSeasonShape(season);
+	normalizeSnapshotMeta(season, "season");
+	syncStateFromHead();
 }
 
 	/* ================================
@@ -926,12 +1241,11 @@ async function acquireGameLock(lockDetails) {
 	for (let attempt = 0; attempt < 2; attempt++) {
 		const { data: updatedRow, error } = await supabaseClient
 			.from("season_data")
-			.update({
-				active_game_lock: lockPayload,
-				active_game_lock_id: lockId,
-				updated_at: new Date().toISOString(),
-				updated_by: user?.id || null
-			})
+		.update({
+	active_game_lock: lockPayload,
+	active_game_lock_id: lockId,
+	updated_by: user?.id || null
+})
 			.eq("league_code", String(LEAGUE_CODE))
 			.is("active_game_lock_id", null)
 			.select("season_json,schedule_json,updated_at,active_game_lock,active_game_lock_id")
@@ -977,11 +1291,10 @@ async function releaseGameLock(lockId, { quiet = false } = {}) {
 	const { error } = await supabaseClient
 		.from("season_data")
 		.update({
-			active_game_lock: null,
-			active_game_lock_id: null,
-			updated_at: new Date().toISOString(),
-			updated_by: userId
-		})
+	active_game_lock: null,
+	active_game_lock_id: null,
+	updated_by: userId
+})
 		.eq("league_code", String(LEAGUE_CODE))
 		.eq("active_game_lock_id", lockId);
 
@@ -1015,13 +1328,26 @@ async function fetchSeasonRowFromServer({ quiet = true, publicView = false } = {
 	}
 }
 
-function applyServerSeasonRow(row) {
-	if (!row) return;
+function applyServerSeasonRow(row, { force = false, source = "server" } = {}) {
+	if (!row) return false;
+
+	const info = getRowRevisionInfo(row);
+	const localDirty = hasUnsyncedLocalChanges();
+	const sameOrOlderData =
+		info.seasonRevision <= (syncState.serverSeasonRevision || 0) &&
+		info.scheduleRevision <= (syncState.serverScheduleRevision || 0);
+
+	if (!force && localDirty && !sameOrOlderData) {
+		persistActiveGameLock(row.active_game_lock || null);
+		return scheduleConflictNotice(
+			"A newer server snapshot was detected while this tab still had unsynced local changes.",
+			{ source, row }
+		);
+	}
 
 	suppressAutoSync = true;
-
-	season = ensureSeasonShape(row.season_json);
-	schedule = ensureScheduleShape(row.schedule_json);
+	season = ensureSeasonShape(info.seasonJson);
+	schedule = ensureScheduleShape(info.scheduleJson);
 	persistActiveGameLock(row.active_game_lock || null);
 
 	try {
@@ -1032,61 +1358,51 @@ function applyServerSeasonRow(row) {
 		schedule._meta.updated_at = serverIso;
 	} catch (e) {}
 
-	try { saveSeason({ skipServerSync: true, touchMeta: false }); } catch (e) {}
-	try { saveSchedule({ skipServerSync: true, touchMeta: false }); } catch (e) {}
+	try { saveSeason({ skipServerSync: true, touchMeta: false, bumpRevision: false, allowConflictBypass: true }); } catch (e) {}
+	try { saveSchedule({ skipServerSync: true, touchMeta: false, bumpRevision: false, allowConflictBypass: true }); } catch (e) {}
 
 	suppressAutoSync = false;
 
-	try { update(); } catch (e) {}
-	try { if (!document.getElementById("seasonStatsScreen").classList.contains("hidden")) displaySeasonStats(); } catch (e) {}
-	try { if (!document.getElementById("scheduleScreen").classList.contains("hidden")) renderScheduleUI(); } catch (e) {}
-	try {
-		if (!document.getElementById("gameSetupScreen").classList.contains("hidden")) {
-			const info = ensureScheduleUpToDateForSelection();
-			if (info.ok) populateScheduleDaySelect();
-			else updateGameSetupSelects();
-			refreshGameLockUI();
-		}
-	} catch (e) {}
+	adoptServerSyncBaseline({
+		season_json: season,
+		schedule_json: schedule,
+		updated_at: row.updated_at || null
+	});
+
+	refreshAfterSnapshotChange();
+	return true;
 }
 
-	async function hydrateFromServerIfNewer() {
-		if (!(await requireLogin())) return;
+async function hydrateFromServerIfNewer() {
+	if (!(await requireLogin())) return;
 
-		const row = await fetchSeasonRowFromServer({ quiet: true });
-		if (!row) return;
+	const row = await fetchSeasonRowFromServer({ quiet: true });
+	if (!row) return;
 
-		const serverMs = Date.parse(row.updated_at || "") || 0;
-		const localMs = getLocalUpdatedAtMs();
-		
-// Pull if server is newer OR server has data and local is empty
-const serverHas = snapshotHasData(row.season_json, row.schedule_json);
-const localHas = snapshotHasData(season, schedule);
+	const previousToken = syncState.serverUpdatedAt || null;
+	const applied = applyServerSeasonRow(row, { source: "hydrate" });
 
-if ((serverHas && !localHas) || (serverMs > localMs + 1000)) {
-  applyServerSeasonRow(row);
-  showNotification("⬇️ Pulled latest stats from server", 1200);
+	if (applied && row.updated_at && row.updated_at !== previousToken) {
+		showNotification("⬇️ Pulled latest stats from server", 1200);
+	}
 }
 
+function queueServerSync(reason, { immediate = false } = {}) {
+	if (!autoSyncEnabled) return;
+	if (suppressAutoSync) return;
+	if (syncConflictState) return;
+	if (!isLeagueUnlocked() || !getStoredName()) return;
 
-	}
+	if (serverSyncTimer) clearTimeout(serverSyncTimer);
 
-	function queueServerSync(reason, { immediate = false } = {}) {
-		if (!autoSyncEnabled) return;
-		if (suppressAutoSync) return;
-		if (!isLeagueUnlocked() || !getStoredName()) return;
+	const run = async () => {
+		serverSyncTimer = null;
+		await syncSeasonToServer({ quiet: true });
+	};
 
-		// debounce sync to avoid spamming Supabase
-		if (serverSyncTimer) clearTimeout(serverSyncTimer);
-
-		const run = async () => {
-			serverSyncTimer = null;
-			await syncSeasonToServer({ quiet: true });
-		};
-
-		if (immediate) run();
-		else serverSyncTimer = setTimeout(run, 1400);
-	}
+	if (immediate) run();
+	else serverSyncTimer = setTimeout(run, 1400);
+}
 
 	async function ensurePostUnlockSetup() {
 		if (postUnlockSetupPromise) return postUnlockSetupPromise;
@@ -1143,22 +1459,27 @@ if ((serverHas && !localHas) || (serverMs > localMs + 1000)) {
 			async (payload) => {
 				// If deleted, clear locally too
 				if (payload.eventType === "DELETE") {
-					suppressAutoSync = true;
-				season = { playerStats: {}, teamRecords: {}, seasonSubs: [], subStats: {} };
+				suppressAutoSync = true;
+season = { playerStats: {}, teamRecords: {}, seasonSubs: [], subStats: {}, games: [] };
 schedule = { days: [], teamNames: [] };
 persistActiveGameLock(null);
-					try { localStorage.removeItem("wiggleSeason"); } catch (e) {}
-					try { localStorage.removeItem("wiggleSchedule"); } catch (e) {}
-					suppressAutoSync = false;
-					try { update(); } catch (e) {}
-					try { if (!document.getElementById("seasonStatsScreen").classList.contains("hidden")) displaySeasonStats(); } catch (e) {}
-					try { if (!document.getElementById("scheduleScreen").classList.contains("hidden")) renderScheduleUI(); } catch (e) {}
-					return;
+
+try { localStorage.removeItem(SEASON_STORAGE_KEY); } catch (e) {}
+try { localStorage.removeItem(SCHEDULE_STORAGE_KEY); } catch (e) {}
+try { localStorage.removeItem(SYNC_HEAD_KEY); } catch (e) {}
+
+clearSyncConflictState();
+suppressAutoSync = false;
+
+try { update(); } catch (e) {}
+try { if (!document.getElementById("seasonStatsScreen").classList.contains("hidden")) displaySeasonStats(); } catch (e) {}
+try { if (!document.getElementById("scheduleScreen").classList.contains("hidden")) renderScheduleUI(); } catch (e) {}
+return;
 				}
 
 				// For insert/update, pull latest
 				const row = await fetchSeasonRowFromServer({ quiet: true });
-				if (row) applyServerSeasonRow(row);
+				if (row) applyServerSeasonRow(row, { source: "realtime" });
 			}
 		);
 
@@ -1185,47 +1506,135 @@ persistActiveGameLock(null);
 	    updated_at (timestamptz)
 	    updated_by (uuid)
 	==================================*/
-	async function syncSeasonToServer({ quiet = false } = {}) {
-		// Keep local copy always
-		try { saveSeason({ skipServerSync: true }); } catch (e) {}
-		try { saveSchedule({ skipServerSync: true }); } catch (e) {}
 
-		// Only attempt if user is authenticated + league unlocked
-		const ok = await requireLogin();
-		if (!ok) return false;
+async function syncSeasonToServer({ quiet = false } = {}) {
+	if (syncConflictState) {
+		if (!quiet) {
+			alert("This tab is blocked from saving because newer data was detected elsewhere. Load the latest data first.");
+		}
+		return false;
+	}
 
-		try {
-			const { data } = await supabaseClient.auth.getSession();
-			const userId = data?.session?.user?.id || null;
+	try { saveSeason({ skipServerSync: true, touchMeta: false, bumpRevision: false }); } catch (e) {}
+	try { saveSchedule({ skipServerSync: true, touchMeta: false, bumpRevision: false }); } catch (e) {}
 
-			const payload = {
-				league_code: String(LEAGUE_CODE),
-				season_json: season,
-				schedule_json: schedule,
-				updated_at: new Date().toISOString(),
-				updated_by: userId
-			};
+	const ok = await requireLogin();
+	if (!ok) return false;
 
-			const { error } = await supabaseClient
+	try {
+		const { data } = await supabaseClient.auth.getSession();
+		const userId = data?.session?.user?.id || null;
+
+		const latestRow = await fetchSeasonRowFromServer({ quiet: true });
+		const latestInfo = latestRow ? getRowRevisionInfo(latestRow) : null;
+
+		const currentSeasonRev = getSeasonRevisionFrom(season);
+		const currentScheduleRev = getScheduleRevisionFrom(schedule);
+
+		if (latestInfo) {
+			const serverMoved =
+				!!syncState.serverUpdatedAt &&
+				!!latestInfo.updatedAt &&
+				latestInfo.updatedAt !== syncState.serverUpdatedAt;
+
+			const serverNewer =
+				latestInfo.seasonRevision > (syncState.serverSeasonRevision || 0) ||
+				latestInfo.scheduleRevision > (syncState.serverScheduleRevision || 0);
+
+			const localBehind =
+				latestInfo.seasonRevision > currentSeasonRev ||
+				latestInfo.scheduleRevision > currentScheduleRev;
+
+			if ((serverMoved && serverNewer) || localBehind) {
+				scheduleConflictNotice(
+					"The server already has newer season data than this tab, so this save was stopped.",
+					{ source: "server-preflight", row: latestRow }
+				);
+				return false;
+			}
+		}
+
+		const payload = {
+			league_code: String(LEAGUE_CODE),
+			season_json: season,
+			schedule_json: schedule,
+			updated_at: new Date().toISOString(),
+			updated_by: userId
+		};
+
+		let savedRow = null;
+
+		if (latestRow) {
+			let query = supabaseClient
 				.from("season_data")
-				.upsert(payload, { onConflict: "league_code" });
+				.update(payload)
+				.eq("league_code", String(LEAGUE_CODE));
+
+			if (latestInfo?.updatedAt) {
+				query = query.eq("updated_at", latestInfo.updatedAt);
+			}
+
+			const { data: updatedRow, error } = await query
+				.select("season_json,schedule_json,updated_at,active_game_lock,active_game_lock_id")
+				.maybeSingle();
 
 			if (error) throw error;
 
-			if (!quiet) showNotification("✅ Season stats saved to server", 1800);
-			return true;
-		} catch (e) {
-			console.log("season_data upsert failed:", e);
-			if (!quiet) {
-				alert(
-					"Could not save to server.\n\n" +
-					"Local season stats are still saved on this device.\n" +
-					"To enable server backups, create a Supabase table named 'season_data' with a unique 'league_code' column."
+			if (!updatedRow) {
+				const rowAfterMiss = await fetchSeasonRowFromServer({ quiet: true });
+				if (rowAfterMiss) applyServerSeasonRow(rowAfterMiss, { source: "sync-race" });
+
+				scheduleConflictNotice(
+					"A newer save reached the server before this tab finished syncing, so this write was cancelled.",
+					{ source: "server-race" }
 				);
+				return false;
 			}
-			return false;
+
+			savedRow = updatedRow;
+		} else {
+			const { data: insertedRow, error } = await supabaseClient
+				.from("season_data")
+				.upsert(payload, { onConflict: "league_code" })
+				.select("season_json,schedule_json,updated_at,active_game_lock,active_game_lock_id")
+				.maybeSingle();
+
+			if (error) throw error;
+			savedRow = insertedRow;
 		}
+
+		if (savedRow?.updated_at) {
+			season._meta = season._meta || {};
+			schedule._meta = schedule._meta || {};
+			season._meta.updated_at = savedRow.updated_at;
+			schedule._meta.updated_at = savedRow.updated_at;
+
+			try { saveSeason({ skipServerSync: true, touchMeta: false, bumpRevision: false, allowConflictBypass: true }); } catch (e) {}
+			try { saveSchedule({ skipServerSync: true, touchMeta: false, bumpRevision: false, allowConflictBypass: true }); } catch (e) {}
+		}
+
+		adoptServerSyncBaseline(savedRow || {
+			season_json: season,
+			schedule_json: schedule,
+			updated_at: payload.updated_at
+		});
+
+		persistActiveGameLock(savedRow?.active_game_lock || activeGameLock || null);
+
+		if (!quiet) showNotification("✅ Season stats saved to server", 1800);
+		return true;
+	} catch (e) {
+		console.log("season_data sync failed:", e);
+		if (!quiet) {
+			alert(
+				"Could not save to server.\n\n" +
+				"Local season stats are still saved on this device.\n" +
+				"This tab did not overwrite newer server data."
+			);
+		}
+		return false;
 	}
+}
 
 	async function manualResaveAllStats() {
   if (!(await requireLogin())) return;
