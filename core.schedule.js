@@ -737,6 +737,7 @@ function getScheduleGuardState() {
 	const hasSnapshot = Array.isArray(schedule?.days) && schedule.days.length > 0 && snapshotTeamNames.length > 0;
 	const snapshotConfig = getScheduleConfigForTeams(snapshotTeamNames);
 	const snapshotFormatValid = hasSnapshot && !!snapshotConfig && isScheduleCurrentFormat(schedule, snapshotTeamNames.slice());
+	const ignorePublicTeamMismatch = isPublicViewOnlyMode();
 	const teamMismatch = hasSnapshot && snapshotTeamNames.join("|") !== liveTeamNames.join("|");
 	const seasonStarted = hasRecordedSeasonGames();
 
