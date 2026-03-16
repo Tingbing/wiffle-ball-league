@@ -9,9 +9,13 @@ let SUPABASE_READY = false;
 
 function showFatalError(title, msg, details) {
   console.trace("showFatalError called", { title, msg, details });
+
   try { hideAllScreens(); } catch (e) {}
-  try { showGate("login", "Enter your email to get a login link."); } catch (e) {}
- 
+
+  // Do NOT force-open the login gate on startup errors.
+  // A fatal boot problem should look like a fatal screen, not like a login prompt.
+  try { document.getElementById("accessGate")?.classList.add("hidden"); } catch (e) {}
+
   const fs = document.getElementById("fatalScreen");
   if (fs) fs.classList.remove("hidden");
 
