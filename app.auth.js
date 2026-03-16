@@ -370,7 +370,9 @@ function showGate(step, msg) {
 }
 
 async function finishAccessGrant() {
+  try { clearAuthBootFlagsFromUrl(); } catch (e) {}
   document.getElementById("accessGate").classList.add("hidden");
+  setPublicViewOnlyMode(false);
   showMainMenu();
   try { await maybeOfferLiveGameResume(); } catch (e) { console.warn("resume prompt failed:", e); }
 }
@@ -389,7 +391,33 @@ function maybeShowNameBox(_email) {
   return;
 }
 
-async function evaluateAccess() {
+function hasPostAuthBootFlag() {
+  try {
+    const url = new URL(location.href);
+    return url.searchParams.get("postAuth") === "1" || url.searchParams.get("src") === "email";
+  } catch (e) {
+    return false;
+  }
+}
+
+function clearAuthBootFlagsFromUrl() {
+  try {
+    const url = new URL(location.href);
+    const hadFlags = url.searchParams.has("postAuth") || url.searchParams.has("src");
+    url.searchParams.delete("postAuth");
+    url.searchParams.delete("src");
+
+    if (hadFlags) {
+      const nextUrl =
+        url.pathname +
+        (url.search ? url.search : "") +
+        (url.hash ? url.hash : "");
+      history.replaceState({}, document.title, nextUrl);
+    }
+  } catch (e) {}
+}
+
+async function beginFullAccessFlow() {
   const { data } = await supabaseClient.auth.getSession();
   const session = data?.session;
 
@@ -397,11 +425,9 @@ async function evaluateAccess() {
 
   if (!session) {
     setPublicViewOnlyMode(true);
-    document.getElementById("accessGate").classList.add("hidden");
-    try { await refreshPublicViewData({ quiet: true }); } catch (e) {}
-    showPublicMenu();
+    showGate("login", "Sign in with your email for full league access.");
     await updateAuthUI();
-    return;
+    return false;
   }
 
   setPublicViewOnlyMode(false);
@@ -409,10 +435,54 @@ async function evaluateAccess() {
   if (!isLeagueUnlocked()) {
     showGate("code", "Logged in. Now enter the league code.");
     await updateAuthUI();
-    return;
+    return false;
   }
 
   await finishAccessGrant();
+  await updateAuthUI();
+  return true;
+}
+
+async function evaluateAccess() {
+  const { data } = await supabaseClient.auth.getSession();
+  const session = data?.session;
+
+  CURRENT_EMAIL = (session?.user?.email || "").trim();
+
+  if (!session) {
+    setLeagueUnlocked(false);
+    setPublicViewOnlyMode(true);
+    document.getElementById("accessGate").classList.add("hidden");
+    clearAuthBootFlagsFromUrl();
+    try { await refreshPublicViewData({ quiet: true }); } catch (e) {}
+    showPublicMenu();
+    await updateAuthUI();
+    return;
+  }
+
+  // If the user has just returned from the email magic link,
+  // continue the access flow instead of dumping them back to public mode.
+  if (hasPostAuthBootFlag()) {
+    setPublicViewOnlyMode(false);
+
+    if (!isLeagueUnlocked()) {
+      showGate("code", "Logged in. Now enter the league code.");
+      await updateAuthUI();
+      return;
+    }
+
+    await finishAccessGrant();
+    await updateAuthUI();
+    return;
+  }
+
+  // Normal boot behavior:
+  // always land on the public-first screen, even if this browser
+  // still has a remembered Supabase session from earlier.
+  setPublicViewOnlyMode(true);
+  document.getElementById("accessGate").classList.add("hidden");
+  try { await refreshPublicViewData({ quiet: true }); } catch (e) {}
+  showPublicMenu();
   await updateAuthUI();
 }
 	
