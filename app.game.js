@@ -495,53 +495,54 @@ async function emergencyEndGameFromSetup() {
 	alert("The stuck live game was cleared. You can start a new game now.");
 }
 
-	// GAME FUNCTIONS
-	function saveGameState() {
-		return JSON.stringify({
-			team1Score: game.team1Score,
-			team2Score: game.team2Score,
-			outs: game.outs,
-			halfInningRuns: game.halfInningRuns,
-			inning: game.inning,
-halfInning: game.halfInning,
-batterIndex: game.batterIndex,
-batterIndexByTeam: JSON.parse(JSON.stringify(game.batterIndexByTeam || {})),
-currentPitcher: game.currentPitcher,
-			bases: {
-				first: game.bases.first ? {...game.bases.first} : null,
-				second: game.bases.second ? {...game.bases.second} : null,
-				third: game.bases.third ? {...game.bases.third} : null
-			},
-			gameStats: JSON.parse(JSON.stringify(game.gameStats)),
-			batting: game.batting,
-			fielding: game.fielding,
-			currentInningPitchers: {...game.currentInningPitchers},
-			pendingBattingResult: pendingBattingResult
-		});
-	}
+function saveGameState() {
+	return JSON.stringify({
+		team1Score: game.team1Score,
+		team2Score: game.team2Score,
+		outs: game.outs,
+		halfInningRuns: game.halfInningRuns,
+		inning: game.inning,
+		halfInning: game.halfInning,
+		batterIndex: game.batterIndex,
+		batterIndexByTeam: JSON.parse(JSON.stringify(game.batterIndexByTeam || {})),
+		currentPitcher: game.currentPitcher,
+		bases: {
+			first: game.bases.first ? { ...game.bases.first } : null,
+			second: game.bases.second ? { ...game.bases.second } : null,
+			third: game.bases.third ? { ...game.bases.third } : null
+		},
+		gameStats: JSON.parse(JSON.stringify(game.gameStats)),
+		batting: game.batting,
+		fielding: game.fielding,
+		currentInningPitchers: { ...game.currentInningPitchers },
+		pendingBattingResult: pendingBattingResult ? JSON.parse(JSON.stringify(pendingBattingResult)) : null,
+		lastPlay: lastPlay ? JSON.parse(JSON.stringify(lastPlay)) : null
+	});
+}
 
-	function restoreGameState(stateString) {
-		let state = JSON.parse(stateString);
-		game.team1Score = state.team1Score;
-		game.team2Score = state.team2Score;
-		game.halfInningRuns = state.halfInningRuns ?? 0;
-		game.outs = state.outs;
-		game.inning = state.inning;
-game.halfInning = state.halfInning;
-game.batterIndex = state.batterIndex;
-game.batterIndexByTeam = state.batterIndexByTeam || {
-	[game.team1.name]: 0,
-	[game.team2.name]: 0
-};
-game.currentPitcher = state.currentPitcher;
-		game.bases = state.bases;
-		game.gameStats = state.gameStats;
-		game.batting = state.batting;
-		game.fielding = state.fielding;
-		game.currentInningPitchers = state.currentInningPitchers;
-	pendingBattingResult = state.pendingBattingResult;
-game.batterIndex = getCurrentBatterIndex();
-	}
+function restoreGameState(stateString) {
+	let state = JSON.parse(stateString);
+	game.team1Score = state.team1Score;
+	game.team2Score = state.team2Score;
+	game.halfInningRuns = state.halfInningRuns ?? 0;
+	game.outs = state.outs;
+	game.inning = state.inning;
+	game.halfInning = state.halfInning;
+	game.batterIndex = state.batterIndex;
+	game.batterIndexByTeam = state.batterIndexByTeam || {
+		[game.team1.name]: 0,
+		[game.team2.name]: 0
+	};
+	game.currentPitcher = state.currentPitcher;
+	game.bases = state.bases;
+	game.gameStats = state.gameStats;
+	game.batting = state.batting;
+	game.fielding = state.fielding;
+	game.currentInningPitchers = state.currentInningPitchers || {};
+	pendingBattingResult = state.pendingBattingResult || null;
+	lastPlay = state.lastPlay || null;
+	game.batterIndex = getCurrentBatterIndex();
+}
 
 function getCurrentBatterIndex() {
 	if (!game?.batting?.name) return 0;
@@ -573,9 +574,11 @@ function undoLastAction() {
     restoreGameState(previousState);
 
     // Keep undo simple with the new auto-clean batting flow
-    pendingBattingResult = null;
+   pendingBattingResult = null;
+document.getElementById("errorPicker")?.classList.add("hidden");
+document.getElementById("outPicker")?.classList.add("hidden");
 keepLiveGameSectionsEnabled();
-    updatePitcherSelect();
+updatePitcherSelect();
     updateGameScreen();
 
     if (gameHistory.length === 0) {
@@ -773,119 +776,188 @@ updateGameScreen();
 }
 
 function manualScoreFromThird() {
-if (!game) return;
+	if (!game) return;
 
-if (!game.bases.third) {
-showNotification("No runner on 3rd", 1200);
-return;
-}
+	if (!game.bases.third) {
+		showNotification("No runner on 3rd", 1200);
+		return;
+	}
 
-// Save for undo
-gameHistory.push(saveGameState());
-document.getElementById("undoButton").disabled = false;
+	gameHistory.push(saveGameState());
+	document.getElementById("undoButton").disabled = false;
 
-const runner = game.bases.third;
+	const runner = normalizeBaseRunner(game.bases.third, game.batting);
+	game.bases.third = null;
 
-// Remove runner from base
-game.bases.third = null;
+	const pitcherKey = getCurrentPitcherKey();
+	const totals = { runs: 0, earnedRuns: 0, rbis: 0 };
+	scoreExistingRunner(runner, totals, { creditRbi: false });
+	applyHalfInningRuns(totals.runs);
 
-// Add run to batting team score
-if (game.batting === game.team1) game.team1Score += 1;
-else game.team2Score += 1;
+	if (game.gameStats[pitcherKey]) {
+		game.gameStats[pitcherKey].runsAllowed += totals.runs;
+		game.gameStats[pitcherKey].earnedRunsAllowed += totals.earnedRuns;
+	}
 
-// Pitcher stats (runs + earned runs)
-const pitcherKey = getCurrentPitcherKey();
-if (game.gameStats[pitcherKey]) {
-game.gameStats[pitcherKey].runsAllowed += 1;
+	if (game.inning <= 2 && game.halfInningRuns >= 6) {
+		endHalfInning(pitcherKey, "Run rule reached (6). Switching sides.");
+		updateGameScreen();
+		return;
+	}
 
-// earned if runner did NOT reach on error
-if (!runner.reachedOnError) {
-game.gameStats[pitcherKey].earnedRunsAllowed += 1;
-}
-}
-
-showNotification("Run scored!", 1200);
-updateGameScreen();
+	showNotification("Run scored!", 1200);
+	updateGameScreen();
 }
 
 function clearBases() {
-if (!game) return;
+	if (!game) return;
 
-gameHistory.push(saveGameState());
-document.getElementById("undoButton").disabled = false;
+	gameHistory.push(saveGameState());
+	document.getElementById("undoButton").disabled = false;
 
-game.bases.first = null;
-game.bases.second = null;
-game.bases.third = null;
+	game.bases.first = null;
+	game.bases.second = null;
+	game.bases.third = null;
 
-showNotification("Bases cleared", 1200);
-updateGameScreen();
+	showNotification("Bases cleared", 1200);
+	updateGameScreen();
 }
 
-function advanceRunners(bases, currentBatter, reachedOnError = false) {
-let runs = 0;
-let earnedRuns = 0;
-let rbis = 0;
-
-function moveRunner(runner, n) {
-if (!runner) return null;
-return runner; 
+function ensureExtendedStatFields(stats) {
+	if (!stats) return null;
+	if (!Number.isFinite(Number(stats.runsScored))) stats.runsScored = 0;
+	if (!Number.isFinite(Number(stats.hitByPitch))) stats.hitByPitch = 0;
+	return stats;
 }
 
-function scoreRunner(runner) {
-if (!runner) return;
-runs++;
-rbis++;
-if (!runner.reachedOnError) earnedRuns++;
+function normalizeBaseRunner(runner, fallbackTeam = game?.batting) {
+	if (!runner) return null;
+	if (!runner.teamName) runner.teamName = fallbackTeam?.name || "";
+	if (!runner.statsKey && runner.player) {
+		runner.statsKey = getGameStatsKey(runner.teamName || fallbackTeam, runner.player);
+	}
+	if (runner.reachedOnError !== true) runner.reachedOnError = false;
+	return runner;
 }
 
-// Grab current base runners
-let r1 = game.bases.first;
-let r2 = game.bases.second;
-let r3 = game.bases.third;
-
-// Clear bases; we will rebuild them
-game.bases.first = null;
-game.bases.second = null;
-game.bases.third = null;
-
-// Helper: place runner on a base if not scoring
-function place(baseNum, runner) {
-if (!runner) return;
-if (baseNum === 1) game.bases.first = runner;
-if (baseNum === 2) game.bases.second = runner;
-if (baseNum === 3) game.bases.third = runner;
+function createBaseRunner(playerName, reachedOnError = false, teamObj = game?.batting) {
+	const runner = {
+		player: playerName,
+		teamName: teamObj?.name || "",
+		statsKey: getGameStatsKey(teamObj, playerName),
+		reachedOnError: !!reachedOnError
+	};
+	return normalizeBaseRunner(runner, teamObj);
 }
 
-// Advance existing runners:
-// For each runner, compute where they end up after `bases` advancement.
-// Starting base: 1 for r1, 2 for r2, 3 for r3.
-function advanceExistingRunner(startBase, runner) {
-if (!runner) return;
+function getRunnerGameStats(runner, fallbackTeam = game?.batting) {
+	const normalized = normalizeBaseRunner(runner, fallbackTeam);
+	if (!normalized?.statsKey || !game?.gameStats) return null;
 
-let end = startBase + bases; // e.g. start 2 + double(2) = 4 means scores
-if (end >= 4) {
-scoreRunner(runner);
-} else {
-place(end, runner);
-}
-}
-
-advanceExistingRunner(3, r3);
-advanceExistingRunner(2, r2);
-advanceExistingRunner(1, r1);
-
-// Put batter on correct base (unless HR)
-if (bases >= 4) {
-// Batter scores too
-runs++;
-rbis++;
-if (!reachedOnError) earnedRuns++;
-} else {
-place(bases, { player: currentBatter, reachedOnError });
+	if (!game.gameStats[normalized.statsKey]) {
+		game.gameStats[normalized.statsKey] = createEmptyStats(
+			normalized.teamName || fallbackTeam?.name || "",
+			normalized.player,
+			{ isSub: isSubKey(normalized.statsKey) }
+		);
+	}
+	return ensureExtendedStatFields(game.gameStats[normalized.statsKey]);
 }
 
-return { runs, earnedRuns, rbis };
+function scoreExistingRunner(runner, totals, options = {}) {
+	const normalized = normalizeBaseRunner(runner, game?.batting);
+	if (!normalized) return;
+
+	const runnerStats = getRunnerGameStats(normalized, game?.batting);
+	if (runnerStats) runnerStats.runsScored += 1;
+
+	totals.runs += 1;
+	if (!normalized.reachedOnError) totals.earnedRuns += 1;
+	if (options.creditRbi !== false) totals.rbis += 1;
+}
+
+function applyHalfInningRuns(runs) {
+	const runCount = Number(runs || 0);
+	if (runCount <= 0 || !game) return;
+
+	if (game.batting === game.team1) game.team1Score += runCount;
+	else game.team2Score += runCount;
+
+	game.halfInningRuns += runCount;
+}
+
+function advanceRunnersOnContact(bases, currentBatter, reachedOnError = false) {
+	const totals = { runs: 0, earnedRuns: 0, rbis: 0 };
+
+	const r1 = normalizeBaseRunner(game.bases.first, game.batting);
+	const r2 = normalizeBaseRunner(game.bases.second, game.batting);
+	const r3 = normalizeBaseRunner(game.bases.third, game.batting);
+
+	game.bases.first = null;
+	game.bases.second = null;
+	game.bases.third = null;
+
+	function place(baseNum, runner) {
+		const normalized = normalizeBaseRunner(runner, game.batting);
+		if (!normalized) return;
+		if (baseNum === 1) game.bases.first = normalized;
+		if (baseNum === 2) game.bases.second = normalized;
+		if (baseNum === 3) game.bases.third = normalized;
+	}
+
+	function advanceExistingRunner(startBase, runner) {
+		if (!runner) return;
+		const endBase = startBase + bases;
+		if (endBase >= 4) scoreExistingRunner(runner, totals, { creditRbi: true });
+		else place(endBase, runner);
+	}
+
+	advanceExistingRunner(3, r3);
+	advanceExistingRunner(2, r2);
+	advanceExistingRunner(1, r1);
+
+	if (bases >= 4) {
+		scoreExistingRunner(createBaseRunner(currentBatter, reachedOnError), totals, { creditRbi: true });
+	} else {
+		place(bases, createBaseRunner(currentBatter, reachedOnError));
+	}
+
+	return totals;
+}
+
+function advanceRunnersOnAwardedFirst(currentBatter) {
+	const totals = { runs: 0, earnedRuns: 0, rbis: 0 };
+
+	const r1 = normalizeBaseRunner(game.bases.first, game.batting);
+	const r2 = normalizeBaseRunner(game.bases.second, game.batting);
+	const r3 = normalizeBaseRunner(game.bases.third, game.batting);
+
+	const firstOccupied = !!r1;
+	const secondOccupied = !!r2;
+	const thirdOccupied = !!r3;
+
+	game.bases.first = null;
+	game.bases.second = null;
+	game.bases.third = null;
+
+	if (firstOccupied && secondOccupied && thirdOccupied) {
+		scoreExistingRunner(r3, totals, { creditRbi: true });
+	} else if (thirdOccupied) {
+		game.bases.third = r3;
+	}
+
+	if (firstOccupied && secondOccupied) {
+		game.bases.third = r2;
+	} else if (secondOccupied) {
+		game.bases.second = r2;
+	}
+
+	if (firstOccupied) {
+		game.bases.second = r1;
+	}
+
+	game.bases.first = createBaseRunner(currentBatter, false);
+	return totals;
 }
 
 	function checkAndConvertToGhostie(currentBatter) {
@@ -955,10 +1027,19 @@ function showErrorPicker() {
 		return;
 	}
 
+	const fielders = Array.isArray(lastPlay.fieldingPlayers) && lastPlay.fieldingPlayers.length
+		? lastPlay.fieldingPlayers
+		: (game?.fielding?.players || []);
+
+	if (!fielders.length) {
+		alert("No fielders available for that play.");
+		return;
+	}
+
 	let sel = document.getElementById("errorPlayerSelect");
 	sel.innerHTML = "";
 
-	(game.fielding?.players || []).forEach((p, i) => {
+	fielders.forEach((p, i) => {
 		let opt = document.createElement("option");
 		opt.value = i;
 		opt.text = p;
@@ -975,41 +1056,74 @@ function cancelError() {
 }
 
 function confirmError() {
-  if (!lastPlay) return;
+	if (!lastPlay) return;
 
-  let idx = parseInt(document.getElementById("errorPlayerSelect").value);
-  document.getElementById("errorPicker").classList.add("hidden");
+	const fielders = Array.isArray(lastPlay.fieldingPlayers) && lastPlay.fieldingPlayers.length
+		? lastPlay.fieldingPlayers
+		: (game?.fielding?.players || []);
 
-  let fieldingTeam = game?.fielding;
-  let fielderName = fieldingTeam?.players?.[idx];
-  let fielderKey = getGameStatsKey(fieldingTeam, fielderName);
+	let idx = parseInt(document.getElementById("errorPlayerSelect").value, 10);
+	if (!Number.isInteger(idx) || idx < 0) idx = 0;
 
-  if (game?.gameStats?.[fielderKey]) game.gameStats[fielderKey].fieldingErrors++;
+	gameHistory.push(saveGameState());
+	document.getElementById("undoButton").disabled = false;
+	document.getElementById("errorPicker").classList.add("hidden");
 
-  const batterName = lastPlay.batterName;
-  ["first", "second", "third"].forEach(base => {
-    if (game.bases[base] && game.bases[base].player === batterName) {
-      game.bases[base].reachedOnError = true;
-    }
-  });
+	const fielderName = fielders[idx] || null;
+	const fielderKey = fielderName
+		? getGameStatsKey(lastPlay.fieldingTeamName || game?.fielding, fielderName)
+		: null;
 
-  const batterKey = lastPlay.batterKey;
-  if (game?.gameStats?.[batterKey]) {
-    if (lastPlay.result === "single") {
-      game.gameStats[batterKey].hits = Math.max(0, game.gameStats[batterKey].hits - 1);
-      game.gameStats[batterKey].singles = Math.max(0, game.gameStats[batterKey].singles - 1);
-    } else if (lastPlay.result === "double") {
-      game.gameStats[batterKey].hits = Math.max(0, game.gameStats[batterKey].hits - 1);
-      game.gameStats[batterKey].doubles = Math.max(0, game.gameStats[batterKey].doubles - 1);
-    } else if (lastPlay.result === "triple") {
-      game.gameStats[batterKey].hits = Math.max(0, game.gameStats[batterKey].hits - 1);
-      game.gameStats[batterKey].triples = Math.max(0, game.gameStats[batterKey].triples - 1);
-    }
-  }
+	if (fielderKey && game?.gameStats?.[fielderKey]) {
+		game.gameStats[fielderKey].fieldingErrors++;
+	}
 
-  showNotification("Error charged to " + fielderName, 1500);
-  lastPlay = null;
-  updateGameScreen();
+	const battingTeamNameForPlay = lastPlay.battingTeamName || game?.batting?.name || "";
+	const batterName = lastPlay.batterName;
+
+	["first", "second", "third"].forEach(base => {
+		const runner = game?.bases?.[base];
+		if (runner && runner.player === batterName) {
+			runner.reachedOnError = true;
+			if (!runner.teamName) runner.teamName = battingTeamNameForPlay;
+			if (!runner.statsKey) runner.statsKey = getGameStatsKey(runner.teamName || battingTeamNameForPlay, runner.player);
+		}
+	});
+
+	const batterKey = lastPlay.batterKey;
+	const pitcherKey = lastPlay.pitcherKey;
+	const batterStats = batterKey && game?.gameStats?.[batterKey] ? game.gameStats[batterKey] : null;
+	const pitcherStats = pitcherKey && game?.gameStats?.[pitcherKey] ? game.gameStats[pitcherKey] : null;
+	const reversibleHit = ["single", "double", "triple"].includes(lastPlay.result);
+
+	if (batterStats && reversibleHit) {
+		if (lastPlay.result === "single") {
+			batterStats.hits = Math.max(0, Number(batterStats.hits || 0) - 1);
+			batterStats.singles = Math.max(0, Number(batterStats.singles || 0) - 1);
+		} else if (lastPlay.result === "double") {
+			batterStats.hits = Math.max(0, Number(batterStats.hits || 0) - 1);
+			batterStats.doubles = Math.max(0, Number(batterStats.doubles || 0) - 1);
+		} else if (lastPlay.result === "triple") {
+			batterStats.hits = Math.max(0, Number(batterStats.hits || 0) - 1);
+			batterStats.triples = Math.max(0, Number(batterStats.triples || 0) - 1);
+		}
+
+		batterStats.rbis = Math.max(
+			0,
+			Number(batterStats.rbis || 0) - Number(lastPlay.creditedRbis || 0)
+		);
+	}
+
+	if (pitcherStats && reversibleHit) {
+		pitcherStats.earnedRunsAllowed = Math.max(
+			0,
+			Number(pitcherStats.earnedRunsAllowed || 0) - Number(lastPlay.creditedEarnedRuns || 0)
+		);
+	}
+
+	showNotification("Error charged to " + (fielderName || "selected fielder"), 1500);
+	lastPlay = null;
+	updateGameScreen();
 }
 
 async function finalizeCompletedGame() {
@@ -1064,166 +1178,172 @@ showNotification(reasonText || ("Inning " + game.inning + " starting! " + game.b
 }
 
 function recordPitchingResult(pitchResult, errorFielderIndex = null) {
-if (!pendingBattingResult) return;
+	if (!pendingBattingResult) return;
 
-const reachedOnError = (pitchResult === "error");
+	const reachedOnError = (pitchResult === "error");
 
-// Save state for undo BEFORE any changes
-gameHistory.push(saveGameState());
-document.getElementById("undoButton").disabled = false;
+	gameHistory.push(saveGameState());
+	document.getElementById("undoButton").disabled = false;
 
-let pitcherIndex = parseInt(document.getElementById("pitcherSelect").value);
-let pitcher = game.fielding.players[pitcherIndex];
-let pitcherKey = getGameStatsKey(game.fielding, pitcher);
+	let pitcherIndex = parseInt(document.getElementById("pitcherSelect").value, 10);
+	if (!Number.isInteger(pitcherIndex) || pitcherIndex < 0) pitcherIndex = 0;
 
-let halfInningKey = game.inning + "-" + game.halfInning;
-game.currentInningPitchers[halfInningKey] = pitcherIndex;
+	const pitcher = game.fielding.players[pitcherIndex];
+	const pitcherKey = getGameStatsKey(game.fielding, pitcher);
+	const pitcherStats = ensureExtendedStatFields(game.gameStats[pitcherKey]);
 
-// Process batting result
-let result = pendingBattingResult.result;
-let batterKey = pendingBattingResult.batterKey;
-let currentBatter = pendingBattingResult.batter;
+	const halfInningKey = game.inning + "-" + game.halfInning;
+	game.currentInningPitchers[halfInningKey] = pitcherIndex;
 
-let runs = 0;
-let earnedRuns = 0;
-let rbis = 0;
+	const result = pendingBattingResult.result;
+	const batterKey = pendingBattingResult.batterKey;
+	const currentBatter = pendingBattingResult.batter;
+	const batterStats = ensureExtendedStatFields(game.gameStats[batterKey]);
+	const fieldingPlayersSnapshot = Array.isArray(game.fielding?.players) ? game.fielding.players.slice() : [];
 
-// AB rule: error still counts as an AB (unless it's a walk)
-if (result !== "walk") {
-game.gameStats[batterKey].atBats++;
-}
+	let runs = 0;
+	let earnedRuns = 0;
+	let rbis = 0;
 
-if (result === "out" || result === "K") {
-game.outs++;
-if (result === "K") {
-game.gameStats[batterKey].strikeouts++;
-game.gameStats[pitcherKey].pitchStrikeouts++;
-} else {
-game.gameStats[batterKey].outs++;
-}
-game.gameStats[pitcherKey].pitchOuts++;
-
-} else if (result === "doublePlay") {
-const runnerCount = countBaseRunners();
-if (runnerCount < 2) {
-  showNotification("Need 2+ runners for a double play", 1500);
-} else {
-  game.outs += 2;
-  game.gameStats[batterKey].outs++;
-  game.gameStats[pitcherKey].pitchOuts += 2;
-
-  let removedBase = game.bases.first ? 'first' : (game.bases.second ? 'second' : 'third');
-  let removedRunner = game.bases[removedBase];
-  game.bases[removedBase] = null;
-
-  runs = 0; earnedRuns = 0; rbis = 0;
-
-  showNotification("Double play!" + (removedRunner?.player ? (" (" + removedRunner.player + " out)") : ""), 1500);
-}
-
-} else if (result === "single") {
-let res = advanceRunners(1, currentBatter, reachedOnError);
-runs = res.runs;
-earnedRuns = res.earnedRuns;
-rbis = res.rbis;
-
-if (!reachedOnError) {
-game.gameStats[batterKey].hits++;
-game.gameStats[batterKey].singles++;
-}
-game.gameStats[batterKey].rbis += rbis;
-
-} else if (result === "double") {
-let res = advanceRunners(2, currentBatter, reachedOnError);
-runs = res.runs;
-earnedRuns = res.earnedRuns;
-rbis = res.rbis;
-
-if (!reachedOnError) {
-game.gameStats[batterKey].hits++;
-game.gameStats[batterKey].doubles++;
-}
-game.gameStats[batterKey].rbis += rbis;
-
-} else if (result === "triple") {
-let res = advanceRunners(3, currentBatter, reachedOnError);
-runs = res.runs;
-earnedRuns = res.earnedRuns;
-rbis = res.rbis;
-
-if (!reachedOnError) {
-game.gameStats[batterKey].hits++;
-game.gameStats[batterKey].triples++;
-}
-game.gameStats[batterKey].rbis += rbis;
-
-} else if (result === "HR") {
-let res = advanceRunners(4, currentBatter, false);
-runs = res.runs;
-earnedRuns = res.earnedRuns;
-rbis = res.rbis;
-
-game.gameStats[batterKey].hits++;
-game.gameStats[batterKey].homeRuns++;
-game.gameStats[batterKey].rbis += rbis;
-
-} else if (result === "walk") {
-let res = advanceRunners(1, currentBatter, false);
-runs = res.runs;
-earnedRuns = res.earnedRuns;
-rbis = res.rbis;
-
-game.gameStats[batterKey].walks++;
-game.gameStats[batterKey].rbis += rbis;
-}
-
-// Fielding error credit
-if (pitchResult === "error") {
-let fielderIdx = (errorFielderIndex !== null)
-? errorFielderIndex
-: parseInt(document.getElementById("pitcherSelect").value);
-
-let fielder = game.fielding.players[fielderIdx];
-let fielderKey = getGameStatsKey(game.fielding, fielder);
-game.gameStats[fielderKey].fieldingErrors++;
-}
-
-// Add runs to score
-if (game.batting === game.team1) game.team1Score += runs;
-else game.team2Score += runs;
-
-// Track half inning runs for run rule
-game.halfInningRuns += runs;
-
-// Pitcher runs/earned runs
-game.gameStats[pitcherKey].runsAllowed += runs;
-game.gameStats[pitcherKey].earnedRunsAllowed += earnedRuns;
-
-// Next batter
-const nextBatterIndex = setCurrentBatterIndex(getCurrentBatterIndex() + 1);
-checkAndConvertToGhostie(game.batting.players[nextBatterIndex]);
-
-// ✅ Run rule: innings 1-2 only
-if (game.inning <= 2 && game.halfInningRuns>= 6) {
-	endHalfInning(pitcherKey, "Run rule reached (6). Switching sides.");
-	pendingBattingResult = null;
-keepLiveGameSectionsEnabled();
-	updateGameScreen();
-	return;
+	if (result !== "walk" && result !== "HBP") {
+		batterStats.atBats++;
 	}
 
-	// ✅ Normal end of half-inning on 2 outs
+	if (result === "out" || result === "K") {
+		game.outs++;
+		if (result === "K") {
+			batterStats.strikeouts++;
+			pitcherStats.pitchStrikeouts++;
+		} else {
+			batterStats.outs++;
+		}
+		pitcherStats.pitchOuts++;
+	} else if (result === "doublePlay") {
+		const runnerCount = countBaseRunners();
+		if (runnerCount < 2) {
+			showNotification("Need 2+ runners for a double play", 1500);
+		} else {
+			game.outs += 2;
+			batterStats.outs++;
+			pitcherStats.pitchOuts += 2;
+
+			const removedBase = game.bases.first ? "first" : (game.bases.second ? "second" : "third");
+			const removedRunner = game.bases[removedBase];
+			game.bases[removedBase] = null;
+
+			showNotification("Double play!" + (removedRunner?.player ? (" (" + removedRunner.player + " out)") : ""), 1500);
+		}
+	} else if (result === "single") {
+		const res = advanceRunnersOnContact(1, currentBatter, reachedOnError);
+		runs = res.runs;
+		earnedRuns = res.earnedRuns;
+		rbis = res.rbis;
+
+		if (!reachedOnError) {
+			batterStats.hits++;
+			batterStats.singles++;
+		}
+		batterStats.rbis += rbis;
+	} else if (result === "double") {
+		const res = advanceRunnersOnContact(2, currentBatter, reachedOnError);
+		runs = res.runs;
+		earnedRuns = res.earnedRuns;
+		rbis = res.rbis;
+
+		if (!reachedOnError) {
+			batterStats.hits++;
+			batterStats.doubles++;
+		}
+		batterStats.rbis += rbis;
+	} else if (result === "triple") {
+		const res = advanceRunnersOnContact(3, currentBatter, reachedOnError);
+		runs = res.runs;
+		earnedRuns = res.earnedRuns;
+		rbis = res.rbis;
+
+		if (!reachedOnError) {
+			batterStats.hits++;
+			batterStats.triples++;
+		}
+		batterStats.rbis += rbis;
+	} else if (result === "HR") {
+		const res = advanceRunnersOnContact(4, currentBatter, false);
+		runs = res.runs;
+		earnedRuns = res.earnedRuns;
+		rbis = res.rbis;
+
+		batterStats.hits++;
+		batterStats.homeRuns++;
+		batterStats.rbis += rbis;
+	} else if (result === "walk") {
+		const res = advanceRunnersOnAwardedFirst(currentBatter);
+		runs = res.runs;
+		earnedRuns = res.earnedRuns;
+		rbis = res.rbis;
+
+		batterStats.walks++;
+		batterStats.rbis += rbis;
+	} else if (result === "HBP") {
+		const res = advanceRunnersOnAwardedFirst(currentBatter);
+		runs = res.runs;
+		earnedRuns = res.earnedRuns;
+		rbis = res.rbis;
+
+		batterStats.hitByPitch++;
+		batterStats.rbis += rbis;
+	}
+
+	if (pitchResult === "error") {
+		let fielderIdx = (errorFielderIndex !== null)
+			? errorFielderIndex
+			: parseInt(document.getElementById("pitcherSelect").value, 10);
+
+		if (!Number.isInteger(fielderIdx) || fielderIdx < 0) fielderIdx = 0;
+
+		const fielder = game.fielding.players[fielderIdx];
+		const fielderKey = getGameStatsKey(game.fielding, fielder);
+		if (game.gameStats[fielderKey]) game.gameStats[fielderKey].fieldingErrors++;
+	}
+
+	applyHalfInningRuns(runs);
+	pitcherStats.runsAllowed += runs;
+	pitcherStats.earnedRunsAllowed += earnedRuns;
+
+	lastPlay = {
+		battingTeamName: game.batting.name,
+		fieldingTeamName: game.fielding.name,
+		fieldingPlayers: fieldingPlayersSnapshot,
+		pitcherIndex,
+		pitcherKey,
+		batterKey,
+		batterName: currentBatter,
+		result,
+		creditedRbis: rbis,
+		creditedRuns: runs,
+		creditedEarnedRuns: earnedRuns
+	};
+
+	const nextBatterIndex = setCurrentBatterIndex(getCurrentBatterIndex() + 1);
+	checkAndConvertToGhostie(game.batting.players[nextBatterIndex]);
+
+	if (game.inning <= 2 && game.halfInningRuns >= 6) {
+		endHalfInning(pitcherKey, "Run rule reached (6). Switching sides.");
+		pendingBattingResult = null;
+		keepLiveGameSectionsEnabled();
+		updateGameScreen();
+		return;
+	}
+
 	if (game.outs >= 2) {
-	endHalfInning(pitcherKey, null);
-	pendingBattingResult = null;
-keepLiveGameSectionsEnabled();
-	updateGameScreen();
-	return;
+		endHalfInning(pitcherKey, null);
+		pendingBattingResult = null;
+		keepLiveGameSectionsEnabled();
+		updateGameScreen();
+		return;
 	}
 
-	// Reset for next play
 	pendingBattingResult = null;
-keepLiveGameSectionsEnabled();
+	keepLiveGameSectionsEnabled();
 	updateGameScreen();
 }
 
