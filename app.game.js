@@ -2471,11 +2471,14 @@ isEligible: stats => getPitchingInningsValue(stats) > 0,
 	}));
 
 	pitchingGrid.appendChild(createRankingsTable("ERA", players, {
-		getValue: stats => stats.inningsPitched > 0 ? (stats.earnedRunsAllowed / stats.inningsPitched) * 3 : NaN,
-		isEligible: stats => Number(stats.inningsPitched || 0) > 0,
-		lowerIsBetter: true,
-		formatValue: value => value.toFixed(2)
-	}));
+	getValue: stats => {
+		const innings = getPitchingInningsValue(stats);
+		return innings > 0 ? (stats.earnedRunsAllowed / innings) * 3 : NaN;
+	},
+	isEligible: stats => getPitchingInningsValue(stats) > 0,
+	lowerIsBetter: true,
+	formatValue: value => value.toFixed(2)
+}));
 
 	pitchingGrid.appendChild(createRankingsTable("Errors Made", players, {
 		getValue: stats => Number(stats.fieldingErrors || 0),
