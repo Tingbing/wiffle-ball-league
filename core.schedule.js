@@ -247,9 +247,17 @@ function getFiveTeamLayoutKeyForDay(dayObj, teamNames = schedule?.teamNames || [
 
 function canEditFiveTeamScheduleFromDay(dayIndex) {
 	if (!Number.isInteger(dayIndex)) return false;
-	if (hasRecordedSeasonGames()) return false;
+
+	const teamNames = Array.isArray(schedule?.teamNames) ? schedule.teamNames.filter(Boolean) : [];
+	const config = getScheduleConfigForTeams(teamNames);
+	if (!config || config.id !== SCHEDULE_FORMAT_SINGLE_ROUND_ROBIN_5) return false;
+
+	const guard = getScheduleGuardState();
+	if (!guard.ok) return false;
+
 	return !(schedule?.days || []).slice(dayIndex).some(dayObj =>
 		(dayObj?.games || []).some(seriesEntry =>
+			!!seriesEntry?.result ||
 			(seriesEntry?.gamesInSeries || []).some(seriesGame => !!seriesGame?.result)
 		)
 	);
@@ -349,12 +357,10 @@ function refreshChangeScheduleControls() {
 		.map((dayObj, idx) => canEditFiveTeamScheduleFromDay(idx) ? idx : null)
 		.filter(idx => Number.isInteger(idx));
 
-	if (!editableDayIndexes.length) {
+if (!editableDayIndexes.length) {
 	daySelect.innerHTML = `<option value="">No editable days</option>`;
 	byeSelect.innerHTML = `<option value="">Bye Team Locked</option>`;
-	status.innerText = hasRecordedSeasonGames()
-		? "Schedule editing is locked because this season already has recorded games. The saved schedule is frozen to protect history."
-		: "Schedule changes lock once the selected day or later days already have recorded games.";
+	status.innerText = "You can only change a bye for a day when that day and all later days are still unplayed. Earlier recorded days stay frozen.";
 	applyBtn.disabled = true;
 	return;
 }
@@ -386,6 +392,13 @@ function refreshChangeScheduleControls() {
 }
 
 function applySelectedScheduleChange() {
+	const guard = getScheduleGuardState();
+	if (!guard.ok) {
+		alert("Schedule editing is unavailable because the saved schedule is out of sync with the current season setup.");
+		renderScheduleUI();
+		return;
+	}
+
 	const config = getScheduleConfigForTeams(schedule?.teamNames || []);
 	if (!config || config.id !== SCHEDULE_FORMAT_SINGLE_ROUND_ROBIN_5) {
 		alert("Schedule editing is only available for the 5-team single round robin schedule.");
@@ -404,9 +417,9 @@ function applySelectedScheduleChange() {
 		return;
 	}
 	if (!canEditFiveTeamScheduleFromDay(dayIndex)) {
-		alert("You can only change a day when that day and all later days are still unplayed.");
-		return;
-	}
+	alert("You can only change a bye for a day when that day and all later days are still unplayed. Earlier recorded days stay frozen.");
+	return;
+}
 
 	const selectedOption = getBestFiveTeamByeEditOption(dayIndex, byeTeam);
 	if (!selectedOption) {
@@ -1058,7 +1071,7 @@ function renderScheduleUI() {
 			: "";
 
 		const dayLockedNote = guard.ok && activeConfigId === SCHEDULE_FORMAT_SINGLE_ROUND_ROBIN_5 && hasFullAppAccess() && !canEditFiveTeamScheduleFromDay(dayIndex)
-			? `<div style="margin:6px 0 12px; color:#aaa; font-size:13px;">Schedule editing is locked for this day because this season already has recorded games or this day/later days already have recorded results.</div>`
+			? `<div style="margin:6px 0 12px; color:#aaa; font-size:13px;">Schedule editing is locked for this day because this day or a later day already has recorded results. Earlier recorded days stay frozen, but future unplayed days can still be changed if the round robin remains valid.</div>`
 			: "";
 
 		dayCard.innerHTML = `
