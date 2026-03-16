@@ -377,6 +377,33 @@ async function finishAccessGrant() {
   try { await maybeOfferLiveGameResume(); } catch (e) { console.warn("resume prompt failed:", e); }
 }
 
+function refreshVisibleReadOnlyScreens() {
+  try {
+    const seasonStatsScreen = document.getElementById("seasonStatsScreen");
+    const scheduleScreen = document.getElementById("scheduleScreen");
+    const rankingsScreen = document.getElementById("rankingsScreen");
+    const pastGameLogScreen = document.getElementById("pastGameLogScreen");
+
+    if (seasonStatsScreen && !seasonStatsScreen.classList.contains("hidden")) displaySeasonStats();
+    if (scheduleScreen && !scheduleScreen.classList.contains("hidden")) renderScheduleUI();
+    if (rankingsScreen && !rankingsScreen.classList.contains("hidden")) displayRankings();
+    if (pastGameLogScreen && !pastGameLogScreen.classList.contains("hidden")) displayPastGameLog();
+  } catch (e) {
+    console.warn("visible screen refresh failed:", e);
+  }
+}
+
+function refreshPublicViewInBackground() {
+  setTimeout(async () => {
+    try {
+      await refreshPublicViewData({ quiet: true });
+      refreshVisibleReadOnlyScreens();
+    } catch (e) {
+      console.warn("public view refresh failed:", e);
+    }
+  }, 0);
+}
+
 async function closeGate() {
   await finishAccessGrant();
 }
@@ -454,9 +481,9 @@ async function evaluateAccess() {
     setPublicViewOnlyMode(true);
     document.getElementById("accessGate").classList.add("hidden");
     clearAuthBootFlagsFromUrl();
-    try { await refreshPublicViewData({ quiet: true }); } catch (e) {}
     showPublicMenu();
     await updateAuthUI();
+    refreshPublicViewInBackground();
     return;
   }
 
@@ -481,9 +508,9 @@ async function evaluateAccess() {
   // still has a remembered Supabase session from earlier.
   setPublicViewOnlyMode(true);
   document.getElementById("accessGate").classList.add("hidden");
-  try { await refreshPublicViewData({ quiet: true }); } catch (e) {}
   showPublicMenu();
   await updateAuthUI();
+  refreshPublicViewInBackground();
 }
 	
 async function submitLeagueCode() {
@@ -697,17 +724,18 @@ if (mainEmailEl && !mainEmailEl.dataset.wired) {
       await updateAuthUI();
     });
 
-    await safeInitStep("load teams", async () => { await load(); });
-    await safeInitStep("load schedule", async () => { loadSchedule(); });
+      await safeInitStep("load schedule", async () => { loadSchedule(); });
     await safeInitStep("load season", async () => { loadSeason(); });
+    await safeInitStep("evaluate access", async () => { await evaluateAccess(); });
+    await safeInitStep("update auth UI", async () => { await updateAuthUI(); });
+
+    await safeInitStep("load teams", async () => { await load(); });
     await safeInitStep("sync team records", async () => { syncTeamRecordsWithLeague(); });
 await safeInitStep("save season", async () => {
   saveSeason({ skipServerSync: true, touchMeta: false });
 });
     await safeInitStep("update UI", async () => { update(); });
-
-    await safeInitStep("evaluate access", async () => { await evaluateAccess(); });
-    await safeInitStep("update auth UI", async () => { await updateAuthUI(); });
+    await safeInitStep("refresh visible screens", async () => { refreshVisibleReadOnlyScreens(); });
 
     hideFatalError();
   } catch (err) {
