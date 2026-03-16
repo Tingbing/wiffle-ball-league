@@ -247,6 +247,7 @@ function getFiveTeamLayoutKeyForDay(dayObj, teamNames = schedule?.teamNames || [
 
 function canEditFiveTeamScheduleFromDay(dayIndex) {
 	if (!Number.isInteger(dayIndex)) return false;
+	if (hasRecordedSeasonGames()) return false;
 	return !(schedule?.days || []).slice(dayIndex).some(dayObj =>
 		(dayObj?.games || []).some(seriesEntry =>
 			(seriesEntry?.gamesInSeries || []).some(seriesGame => !!seriesGame?.result)
@@ -349,12 +350,14 @@ function refreshChangeScheduleControls() {
 		.filter(idx => Number.isInteger(idx));
 
 	if (!editableDayIndexes.length) {
-		daySelect.innerHTML = `<option value="">No editable days</option>`;
-		byeSelect.innerHTML = `<option value="">Bye Team Locked</option>`;
-		status.innerText = "Schedule changes lock once the selected day or later days already have recorded games.";
-		applyBtn.disabled = true;
-		return;
-	}
+	daySelect.innerHTML = `<option value="">No editable days</option>`;
+	byeSelect.innerHTML = `<option value="">Bye Team Locked</option>`;
+	status.innerText = hasRecordedSeasonGames()
+		? "Schedule editing is locked because this season already has recorded games. The saved schedule is frozen to protect history."
+		: "Schedule changes lock once the selected day or later days already have recorded games.";
+	applyBtn.disabled = true;
+	return;
+}
 
 	const previousDayValue = daySelect.value;
 	daySelect.innerHTML = editableDayIndexes.map(dayIndex => {
@@ -690,45 +693,263 @@ function buildActiveTeamForGame(teamObj, scheduleRef = null) {
 /* ================================
    SCHEDULE SCREEN RENDERING
 ================================== */
-function forceRegenerateSchedule() {
+function formatScheduleTeamList(teamNames) {
+	const names = Array.isArray(teamNames) ? teamNames.filter(Boolean) : [];
+	return names.length ? names.join(", ") : "none";
+}
+
+function hasRecordedScheduleResults(scheduleObj = schedule) {
+	return (scheduleObj?.days || []).some(dayObj =>
+		(dayObj?.games || []).some(seriesEntry =>
+			!!seriesEntry?.result ||
+			(seriesEntry?.gamesInSeries || []).some(seriesGame => !!seriesGame?.result)
+		)
+	);
+}
+
+function hasRecordedSeasonGames() {
+	return hasRecordedScheduleResults(schedule)
+		|| ((season?.games || []).some(entry => !!entry));
+}
+
+function getScheduleGuardState() {
 	const validTeams = getValidTeamsForSchedule();
-	const config = getScheduleConfigForTeams(validTeams);
+	const liveConfig = getScheduleConfigForTeams(validTeams);
+	const liveTeamNames = validTeams.map(t => String(t?.name || "").trim()).filter(Boolean).sort();
+
+	const snapshotTeamNames = Array.isArray(schedule?.teamNames)
+		? schedule.teamNames.map(name => String(name || "").trim()).filter(Boolean).sort()
+		: [];
+
+	const hasSnapshot = Array.isArray(schedule?.days) && schedule.days.length > 0 && snapshotTeamNames.length > 0;
+	const snapshotConfig = getScheduleConfigForTeams(snapshotTeamNames);
+	const snapshotFormatValid = hasSnapshot && !!snapshotConfig && isScheduleCurrentFormat(schedule, snapshotTeamNames.slice());
+	const teamMismatch = hasSnapshot && snapshotTeamNames.join("|") !== liveTeamNames.join("|");
+	const seasonStarted = hasRecordedSeasonGames();
+
+	let ok = false;
+	let status = "missing";
+	let scheduleMessage = "";
+	let selectionMessage = "";
+	let canExplicitRebuild = false;
+	let showScheduledCard = false;
+
+	if (!hasSnapshot) {
+		status = liveConfig ? "missing" : "unsupported";
+		scheduleMessage = liveConfig
+			? "No season schedule has been generated yet. The app will not auto-build one anymore."
+			: "Scheduled seasons require either 4 or 5 teams with at least one player on each team.";
+		selectionMessage = liveConfig
+			? "No season schedule has been published yet. Use the Season Schedule screen to build one before recording scheduled games."
+			: "Scheduled game selection requires either 4 or 5 teams with players.";
+		canExplicitRebuild = !!liveConfig && !seasonStarted;
+		showScheduledCard = !!liveConfig;
+	} else if (!snapshotFormatValid) {
+		status = "invalid_snapshot";
+		scheduleMessage = seasonStarted
+			? "The saved season schedule no longer matches the current supported format. It was left untouched to protect recorded history."
+			: "The saved season schedule is out of sync with the current supported format. It was left untouched instead of being auto-rebuilt.";
+		selectionMessage = seasonStarted
+			? "Scheduled game selection is disabled because the saved schedule is frozen and no longer matches the supported format."
+			: "Scheduled game selection is disabled until an admin explicitly rebuilds the saved schedule.";
+		canExplicitRebuild = !!liveConfig && !seasonStarted;
+		showScheduledCard = true;
+	} else if (teamMismatch) {
+		status = "team_mismatch";
+		scheduleMessage = seasonStarted
+			? "The current team list no longer matches the frozen season schedule. The app will not rebuild it automatically because games have already been recorded."
+			: "The current team list no longer matches the saved season schedule. The app will not rebuild it automatically.";
+		selectionMessage = seasonStarted
+			? "Scheduled game selection is disabled because the current team list does not match the frozen schedule."
+			: "Scheduled game selection is disabled until an admin rebuilds the saved schedule from the current teams.";
+		canExplicitRebuild = !!liveConfig && !seasonStarted;
+		showScheduledCard = true;
+	} else {
+		ok = true;
+		status = "ready";
+		showScheduledCard = true;
+	}
+
+	return {
+		ok,
+		status,
+		validTeams,
+		liveConfig,
+		liveTeamNames,
+		snapshotTeamNames,
+		snapshotConfig,
+		hasSnapshot,
+		snapshotFormatValid,
+		teamMismatch,
+		seasonStarted,
+		canExplicitRebuild,
+		showScheduledCard,
+		scheduleMessage,
+		selectionMessage
+	};
+}
+
+function renderScheduleGuardNotice(guard = getScheduleGuardState()) {
+	const notice = document.getElementById("scheduleGuardNotice");
+	if (!notice) return;
+
+	if (guard.ok) {
+		notice.innerHTML = "";
+		return;
+	}
+
+	const canRebuildHere = hasFullAppAccess() && guard.canExplicitRebuild;
+	const savedTeamsText = formatScheduleTeamList(guard.snapshotTeamNames);
+	const currentTeamsText = formatScheduleTeamList(guard.liveTeamNames);
+
+	let actionHtml = "";
+	if (canRebuildHere) {
+		actionHtml = `
+			<div style="display:flex; gap:10px; flex-wrap:wrap; margin-top:12px;">
+				<button type="button" onclick="forceRegenerateSchedule()">Rebuild Schedule from Current Teams</button>
+			</div>
+			<p style="color:#aaa; font-size:13px; margin:10px 0 0;">
+				This only works before any games have been recorded.
+			</p>
+		`;
+	} else if (guard.seasonStarted) {
+		actionHtml = `
+			<p style="color:#aaa; font-size:13px; margin:10px 0 0;">
+				Rebuild is blocked because this season already has recorded games. Keep the frozen schedule, or use a future migration/restore workflow instead.
+			</p>
+		`;
+	}
+
+	notice.innerHTML = `
+		<div class="card">
+			<h3 style="margin-top:0;">⚠️ Schedule Warning</h3>
+			<p style="color:#ffcccc; margin-top:0;">${guard.scheduleMessage}</p>
+			<p style="color:#aaa; font-size:13px; margin:0;">
+				<b style="color:white;">Saved schedule teams:</b> ${savedTeamsText}<br>
+				<b style="color:white;">Current eligible teams:</b> ${currentTeamsText}
+			</p>
+			${actionHtml}
+		</div>
+	`;
+}
+
+function setScheduledGameSelectionUnavailable(message) {
+	const warning = document.getElementById("scheduleSelectionWarning");
+	const daySelect = document.getElementById("scheduleDaySelect");
+	const seriesSelect = document.getElementById("scheduleSeriesSelect");
+	const gameSelect = document.getElementById("scheduleGameSelect");
+	const hint = document.getElementById("schedulePickHint");
+	const startBtn = document.getElementById("startScheduledGameBtn");
+	const subBtn = document.getElementById("openSubAssignBtn");
+
+	const unavailableText = message || "Scheduled game selection is currently unavailable.";
+
+	if (warning) {
+		warning.innerText = unavailableText;
+		warning.classList.remove("hidden");
+	}
+
+	[
+		{ el: daySelect, label: "Schedule unavailable" },
+		{ el: seriesSelect, label: "Schedule unavailable" },
+		{ el: gameSelect, label: "Schedule unavailable" }
+	].forEach(({ el, label }) => {
+		if (!el) return;
+		el.innerHTML = `<option value="">${label}</option>`;
+		el.disabled = true;
+	});
+
+	if (startBtn) startBtn.disabled = true;
+	if (subBtn) subBtn.disabled = true;
+	if (hint) hint.innerText = unavailableText;
+	toggleSubAssignCard(false);
+}
+
+function refreshGameSetupScheduleCards() {
+	const schedCard = document.getElementById("scheduledGameCard");
+	const manualCard = document.getElementById("manualTeamCard");
+	const warning = document.getElementById("scheduleSelectionWarning");
+	const subBtn = document.getElementById("openSubAssignBtn");
+	const guard = ensureScheduleUpToDateForSelection();
+
+	if (!schedCard || !manualCard) return guard;
+
+	if (guard.ok) {
+		schedCard.style.display = "block";
+		manualCard.style.display = "none";
+		if (warning) {
+			warning.innerText = "";
+			warning.classList.add("hidden");
+		}
+		if (subBtn) subBtn.disabled = false;
+		populateScheduleDaySelect();
+	} else {
+		schedCard.style.display = guard.showScheduledCard ? "block" : "none";
+		manualCard.style.display = "block";
+		setScheduledGameSelectionUnavailable(guard.selectionMessage);
+		updateGameSetupSelects();
+	}
+
+	refreshGameLockUI();
+	return guard;
+}
+
+function forceRegenerateSchedule() {
+	const guard = getScheduleGuardState();
+	const validTeams = guard.validTeams;
+	const config = guard.liveConfig;
+
 	if (!config) {
 		alert("You need either 4 or 5 teams with players to generate a schedule.");
 		return;
 	}
+
+	if (guard.seasonStarted) {
+		alert(
+			"This season already has recorded games.\n\n" +
+			"Schedule rebuild is blocked to protect schedule history.\n\n" +
+			"Keep the frozen schedule for now, or use a future migration/restore workflow instead."
+		);
+		return;
+	}
+
+	const actionWord = guard.hasSnapshot ? "replace" : "build";
+	const teamListText = formatScheduleTeamList(validTeams.map(team => team.name));
+	const ok = confirm(
+		`This will ${actionWord} the saved season schedule using the current teams:\n\n${teamListText}\n\nContinue?`
+	);
+	if (!ok) return;
+
 	schedule = generateScheduleForTeams(validTeams);
 	saveSchedule();
 	renderScheduleUI();
+	refreshGameSetupScheduleCards();
+	showNotification("✅ Schedule rebuilt from current team list", 1600);
 }
 
 function renderScheduleUI() {
 	const container = document.getElementById("scheduleContainer");
 	const summaryText = document.getElementById("scheduleSummaryText");
+	if (!container) return;
+
 	container.innerHTML = "";
 
-	const validTeams = getValidTeamsForSchedule();
-	const liveConfig = getScheduleConfigForTeams(validTeams);
+	const guard = getScheduleGuardState();
+	renderScheduleGuardNotice(guard);
+
 	const snapshotTeamNames = Array.isArray(schedule?.teamNames) ? schedule.teamNames.filter(Boolean) : [];
-	const canRenderSnapshot = Array.isArray(schedule?.days) && schedule.days.length > 0 && snapshotTeamNames.length > 0 && isScheduleCurrentFormat(schedule, snapshotTeamNames.slice().sort());
+	const activeConfig = getScheduleConfigForTeams(snapshotTeamNames) || guard.liveConfig;
 
-	if (!canRenderSnapshot && liveConfig) {
-		schedule = generateScheduleForTeams(validTeams);
-		saveSchedule();
-	}
-
-	const activeTeamNames = Array.isArray(schedule?.teamNames) ? schedule.teamNames.filter(Boolean) : [];
-	const activeConfig = getScheduleConfigForTeams(activeTeamNames) || liveConfig;
 	if (summaryText) {
 		summaryText.innerText = activeConfig?.description || "Season schedule will appear here once teams are ready.";
 	}
 
 	if (!Array.isArray(schedule?.days) || schedule.days.length === 0) {
-		container.innerHTML = liveConfig
+		container.innerHTML = guard.liveConfig
 			? `
 			<div class="card">
 				<h3>No schedule yet</h3>
-				<p style="color:#aaa;">Generate or sync a season schedule first.</p>
+				<p style="color:#aaa;">The app will not auto-build the season schedule anymore. Use the rebuild button above once you are ready.</p>
 			</div>
 			`
 			: `
@@ -742,31 +963,31 @@ function renderScheduleUI() {
 
 	const activeConfigId = activeConfig?.id || "";
 
-if (activeConfigId === SCHEDULE_FORMAT_SINGLE_ROUND_ROBIN_5 && hasFullAppAccess()) {
-	const editCard = document.createElement("div");
-	editCard.className = "card";
-	editCard.innerHTML = `
-		<div class="section-header">Change Schedule</div>
-		<div id="changeSchedulePanel">
-			<div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(170px, 1fr)); gap:10px; align-items:end;">
-				<div>
-					<div style="font-size:13px; color:#aaa; margin-bottom:6px;">Day</div>
-					<select id="changeScheduleDaySelect" onchange="refreshChangeScheduleControls()"></select>
+	if (guard.ok && activeConfigId === SCHEDULE_FORMAT_SINGLE_ROUND_ROBIN_5 && hasFullAppAccess()) {
+		const editCard = document.createElement("div");
+		editCard.className = "card";
+		editCard.innerHTML = `
+			<div class="section-header">Change Schedule</div>
+			<div id="changeSchedulePanel">
+				<div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(170px, 1fr)); gap:10px; align-items:end;">
+					<div>
+						<div style="font-size:13px; color:#aaa; margin-bottom:6px;">Day</div>
+						<select id="changeScheduleDaySelect" onchange="refreshChangeScheduleControls()"></select>
+					</div>
+					<div>
+						<div style="font-size:13px; color:#aaa; margin-bottom:6px;">Bye Team</div>
+						<select id="changeScheduleByeSelect" onchange="refreshChangeScheduleControls()"></select>
+					</div>
 				</div>
-				<div>
-					<div style="font-size:13px; color:#aaa; margin-bottom:6px;">Bye Team</div>
-					<select id="changeScheduleByeSelect" onchange="refreshChangeScheduleControls()"></select>
+				<div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-top:12px;">
+					<button id="applyScheduleChangeBtn" type="button" onclick="applySelectedScheduleChange()">Update Schedule</button>
+					<span id="changeScheduleStatus" style="color:#aaa; font-size:13px;"></span>
 				</div>
 			</div>
-			<div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-top:12px;">
-				<button id="applyScheduleChangeBtn" type="button" onclick="applySelectedScheduleChange()">Update Schedule</button>
-				<span id="changeScheduleStatus" style="color:#aaa; font-size:13px;"></span>
-			</div>
-		</div>
-	`;
-	container.appendChild(editCard);
-	setTimeout(refreshChangeScheduleControls, 0);
-}
+		`;
+		container.appendChild(editCard);
+		setTimeout(refreshChangeScheduleControls, 0);
+	}
 
 	schedule.days.forEach((dayObj, dayIndex) => {
 		const dayCard = document.createElement("div");
@@ -807,11 +1028,11 @@ if (activeConfigId === SCHEDULE_FORMAT_SINGLE_ROUND_ROBIN_5 && hasFullAppAccess(
 		}).join("");
 
 		const byeTeam = activeConfigId === SCHEDULE_FORMAT_SINGLE_ROUND_ROBIN_5
-			? getByeTeamForDay(dayObj, activeTeamNames)
+			? getByeTeamForDay(dayObj, snapshotTeamNames)
 			: "";
 
-		const dayLockedNote = activeConfigId === SCHEDULE_FORMAT_SINGLE_ROUND_ROBIN_5 && hasFullAppAccess() && !canEditFiveTeamScheduleFromDay(dayIndex)
-			? `<div style="margin:6px 0 12px; color:#aaa; font-size:13px;">Schedule editing is locked for this day because this day or a later day already has recorded games.</div>`
+		const dayLockedNote = guard.ok && activeConfigId === SCHEDULE_FORMAT_SINGLE_ROUND_ROBIN_5 && hasFullAppAccess() && !canEditFiveTeamScheduleFromDay(dayIndex)
+			? `<div style="margin:6px 0 12px; color:#aaa; font-size:13px;">Schedule editing is locked for this day because this season already has recorded games or this day/later days already have recorded results.</div>`
 			: "";
 
 		dayCard.innerHTML = `
@@ -865,20 +1086,7 @@ function updateGameSetupSelects() {
 }
 
 function ensureScheduleUpToDateForSelection() {
-	const validTeams = getValidTeamsForSchedule();
-	const config = getScheduleConfigForTeams(validTeams);
-	if (!config) {
-		return { ok: false, reason: "Schedule requires either 4 or 5 teams with players." };
-	}
-
-	const teamNames = validTeams.map(t => t.name).sort();
-
-	if (!isScheduleCurrentFormat(schedule, teamNames)) {
-		schedule = generateScheduleForTeams(validTeams);
-		saveSchedule();
-	}
-
-	return { ok: true, validTeams };
+	return getScheduleGuardState();
 }
 
 function populateScheduleDaySelect() {
