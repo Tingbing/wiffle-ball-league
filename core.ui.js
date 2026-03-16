@@ -131,6 +131,23 @@ function hideAllScreens() {
 /* ================================
    TEAM CONFIGURATION
 ================================== */
+function confirmMidSeasonStructureChange(actionLabel) {
+	if (typeof hasRecordedSeasonGames !== "function" || !hasRecordedSeasonGames()) {
+		return true;
+	}
+
+	return confirm(
+		"⚠️ Mid-season team/roster change\n\n" +
+		"This season already has recorded games.\n\n" +
+		"Changing teams or players now can:\n" +
+		"• put the saved schedule out of sync\n" +
+		"• disable scheduled game selection\n" +
+		"• make recorded season history harder to trust\n\n" +
+		"Recommended: cancel this change and use Reset Season Data first if you want to start a new season.\n\n" +
+		`Do you still want to ${actionLabel}?`
+	);
+}
+
 async function addTeam() {
   if (!(await requireLogin())) return;
 
@@ -151,12 +168,14 @@ if (duplicateTeamExists) {
   return;
 }
 
-  if ((league?.teams?.length || 0) >= MAX_TEAMS) {
-    alert(`⚠️ Max ${MAX_TEAMS} teams reached.\nRemove a team before adding another.`);
-    return;
-  }
+if ((league?.teams?.length || 0) >= MAX_TEAMS) {
+	alert(`⚠️ Max ${MAX_TEAMS} teams reached.\nRemove a team before adding another.`);
+	return;
+}
 
-  const { error } = await supabaseClient.from("teams").insert([{ name }]);
+if (!confirmMidSeasonStructureChange(`add team "${name}"`)) return;
+
+const { error } = await supabaseClient.from("teams").insert([{ name }]);
   if (error) return alert(error.message);
 
   document.getElementById("teamName").value = "";
@@ -220,15 +239,17 @@ try { await load(); } catch (e) {}
   const currentPlayers = (teamObj?.players || []).length;
 
   if (currentPlayers >= MAX_PLAYERS_PER_TEAM) {
-    alert(`⚠️ ${selectedTeamName} already has ${MAX_PLAYERS_PER_TEAM} players.\nRemove a player before adding another.`);
-    return;
-  }
+	alert(`⚠️ ${selectedTeamName} already has ${MAX_PLAYERS_PER_TEAM} players.\nRemove a player before adding another.`);
+	return;
+}
 
-  const { data: teamRow, error: tErr } = await supabaseClient
-    .from("teams")
-    .select("id")
-    .eq("name", selectedTeamName)
-    .single();
+if (!confirmMidSeasonStructureChange(`add player "${player}" to ${selectedTeamName}`)) return;
+
+const { data: teamRow, error: tErr } = await supabaseClient
+	.from("teams")
+	.select("id")
+	.eq("name", selectedTeamName)
+	.single();
 
   if (tErr) return alert(tErr.message);
 
@@ -253,7 +274,16 @@ try { await load(); } catch (e) {}
 		const teamName = league.teams?.[teamIndex]?.name;
 		if (!teamName) return;
 
-		if (!confirm("Remove this team? This will delete it for everyone.")) return;
+	const removeTeamMsg = hasRecordedSeasonGames()
+	? (
+		"⚠️ This season already has recorded games.\n\n" +
+		"Removing a team now can break schedule matching and season history.\n\n" +
+		"Recommended: clear/reset season stats first if you want to start a new season.\n\n" +
+		`Remove team "${teamName}" anyway? This will delete it for everyone.`
+	)
+	: "Remove this team? This will delete it for everyone.";
+
+if (!confirm(removeTeamMsg)) return;
 
 		try {
 			// Look up team id
@@ -298,7 +328,16 @@ try { await load(); } catch (e) {}
 		const playerName = league.teams?.[teamIndex]?.players?.[playerIndex];
 		if (!teamName || !playerName) return;
 
-		if (!confirm("Remove this player? This will delete them for everyone.")) return;
+	const removePlayerMsg = hasRecordedSeasonGames()
+	? (
+		"⚠️ This season already has recorded games.\n\n" +
+		"Removing a player now can put season history and schedule data out of sync.\n\n" +
+		"Recommended: clear/reset season stats first if you want to start a new season.\n\n" +
+		`Remove player "${playerName}" anyway? This will delete them for everyone.`
+	)
+	: "Remove this player? This will delete them for everyone.";
+
+if (!confirm(removePlayerMsg)) return;
 
 		try {
 			const { data: teamRow, error: tErr } = await supabaseClient
