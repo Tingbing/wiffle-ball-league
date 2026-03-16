@@ -444,16 +444,56 @@ function clearAuthBootFlagsFromUrl() {
   } catch (e) {}
 }
 
-async function beginFullAccessFlow() {
-  const { data } = await supabaseClient.auth.getSession();
-  const session = data?.session;
+async function getSessionSafe({ timeoutMs = 2000 } = {}) {
+  if (!SUPABASE_READY || !supabaseClient) {
+    const ok = await initializeSupabaseClient();
+    if (!ok || !supabaseClient) {
+      return { ready: false, session: null, timedOut: false };
+    }
+  }
 
+  try {
+    const result = await Promise.race([
+      supabaseClient.auth.getSession(),
+      new Promise((_, reject) => setTimeout(() => reject(new Error("session-timeout")), timeoutMs))
+    ]);
+
+    return {
+      ready: true,
+      session: result?.data?.session || null,
+      timedOut: false
+    };
+  } catch (e) {
+    console.warn("getSessionSafe failed:", e);
+    return {
+      ready: true,
+      session: null,
+      timedOut: true,
+      error: e
+    };
+  }
+}
+
+async function beginFullAccessFlow() {
+  const authState = await getSessionSafe({ timeoutMs: 2000 });
+
+  if (!authState.ready) {
+    alert("Login is still starting up. Please wait a second and tap again.");
+    return false;
+  }
+
+  const session = authState.session;
   CURRENT_EMAIL = (session?.user?.email || "").trim();
 
   if (!session) {
     setPublicViewOnlyMode(true);
-    showGate("login", "Sign in with your email for full league access.");
-    await updateAuthUI();
+
+    const msg = authState.timedOut
+      ? "Saved login check took too long. Sign in with your email for full league access."
+      : "Sign in with your email for full league access.";
+
+    showGate("login", msg);
+    try { await updateAuthUI(); } catch (e) {}
     return false;
   }
 
@@ -461,12 +501,12 @@ async function beginFullAccessFlow() {
 
   if (!isLeagueUnlocked()) {
     showGate("code", "Logged in. Now enter the league code.");
-    await updateAuthUI();
+    try { await updateAuthUI(); } catch (e) {}
     return false;
   }
 
   await finishAccessGrant();
-  await updateAuthUI();
+  try { await updateAuthUI(); } catch (e) {}
   return true;
 }
 
