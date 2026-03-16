@@ -812,6 +812,13 @@ function renderScheduleGuardNotice(guard = getScheduleGuardState()) {
 	const notice = document.getElementById("scheduleGuardNotice");
 	if (!notice) return;
 
+	// Public viewers should be able to read the schedule without seeing
+	// admin-only schedule guard warnings.
+	if (typeof isPublicViewOnlyMode === "function" && isPublicViewOnlyMode()) {
+		notice.innerHTML = "";
+		return;
+	}
+
 	if (guard.ok) {
 		notice.innerHTML = "";
 		return;
