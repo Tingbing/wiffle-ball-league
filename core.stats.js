@@ -45,34 +45,7 @@ function loadSchedule() {
 	✅ TEAM SOURCE: pulls from Configure Teams
 	- uses only teams that have players
 	==========================================*/
-	function getValidTeamsForSchedule() {
-	return league.teams.filter(t => Array.isArray(t.players) && t.players.length > 0);
-	}
-	
-	/* ================================
-	✅ RANDOM HELPERS
-	==================================*/
-	function shuffleArray(arr) {
-	for (let i = arr.length - 1; i > 0; i--) {
-	const j = Math.floor(Math.random() * (i + 1));
-	[arr[i], arr[j]] = [arr[j], arr[i]];
-	}
-	return arr;
-	}
-	
-/* ==========================================================
-	✅ BALANCED RANDOM SCHEDULE (4 teams, 6 days, 2 series/day)
-	- Each pair plays exactly 2 best-of-3 series
-==========================================================*/
 
-/* ==========================================================
-	✅ SCHEDULE HELPERS
-	- 4 teams: double round robin (existing behavior)
-	- 5 teams: single round robin with one bye each day
-==========================================================*/
-
-const SCHEDULE_FORMAT_DOUBLE_ROUND_ROBIN_4 = "double_round_robin_4";
-const SCHEDULE_FORMAT_SINGLE_ROUND_ROBIN_5 = "single_round_robin_5";
 
 function saveSeason({ skipServerSync = false, touchMeta = true, bumpRevision = touchMeta, allowConflictBypass = false } = {}) {
 	try {
