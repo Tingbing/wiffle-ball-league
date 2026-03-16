@@ -47,36 +47,39 @@ function keepLiveGameSectionsEnabled() {
 }
 
 function confirmRunnerOut() {
-if (!game) return;
+	if (!game) return;
 
-const base = document.getElementById("outBaseSelect").value;
-if (!base || !game.bases[base]) {
-showNotification("No runner there", 1200);
-cancelRunnerOut();
-return;
-}
+	const base = document.getElementById("outBaseSelect").value;
+	if (!base || !game.bases[base]) {
+		showNotification("No runner there", 1200);
+		cancelRunnerOut();
+		return;
+	}
 
-// Save for undo
-gameHistory.push(saveGameState());
-document.getElementById("undoButton").disabled = false;
+	gameHistory.push(saveGameState());
+	document.getElementById("undoButton").disabled = false;
 
-// Remove runner + add out
-const removed = game.bases[base];
-game.bases[base] = null;
-game.outs++;
+	const removed = normalizeBaseRunner(game.bases[base], game.batting);
+	game.bases[base] = null;
+	game.outs++;
 
-cancelRunnerOut();
-showNotification(removed.player + " thrown out!", 1200);
+	const pitcherKey = getCurrentPitcherKey();
+	const pitcherStats = ensureExtendedStatFields(game?.gameStats?.[pitcherKey]);
+	if (pitcherStats) {
+		pitcherStats.pitchOuts += 1;
+		syncPitchingInnings(pitcherStats);
+	}
 
-// If that makes 2 outs, end the half-inning using the SAME logic as normal outs
-if (game.outs >= 2) {
-const pitcherKey = getCurrentPitcherKey();
-endHalfInning(pitcherKey, "Runner thrown out — side over!");
-updateGameScreen();
-return;
-}
+	cancelRunnerOut();
+	showNotification(removed.player + " thrown out!", 1200);
 
-updateGameScreen();
+	if (game.outs >= 2) {
+		endHalfInning(pitcherKey, "Runner thrown out — side over!");
+		updateGameScreen();
+		return;
+	}
+
+	updateGameScreen();
 }
 
 // LIVE GAME ENGINE
@@ -790,14 +793,9 @@ function manualScoreFromThird() {
 	game.bases.third = null;
 
 	const pitcherKey = getCurrentPitcherKey();
-	const totals = { runs: 0, earnedRuns: 0, rbis: 0 };
+	const totals = { runs: 0, earnedRuns: 0, rbis: 0, pitcherCharges: {} };
 	scoreExistingRunner(runner, totals, { creditRbi: false });
 	applyHalfInningRuns(totals.runs);
-
-	if (game.gameStats[pitcherKey]) {
-		game.gameStats[pitcherKey].runsAllowed += totals.runs;
-		game.gameStats[pitcherKey].earnedRunsAllowed += totals.earnedRuns;
-	}
 
 	if (game.inning <= 2 && game.halfInningRuns >= 6) {
 		endHalfInning(pitcherKey, "Run rule reached (6). Switching sides.");
@@ -827,7 +825,61 @@ function ensureExtendedStatFields(stats) {
 	if (!stats) return null;
 	if (!Number.isFinite(Number(stats.runsScored))) stats.runsScored = 0;
 	if (!Number.isFinite(Number(stats.hitByPitch))) stats.hitByPitch = 0;
+	if (!Number.isFinite(Number(stats.pitchOuts))) stats.pitchOuts = 0;
+	if (!Number.isFinite(Number(stats.pitchStrikeouts))) stats.pitchStrikeouts = 0;
+	if (!Number.isFinite(Number(stats.runsAllowed))) stats.runsAllowed = 0;
+	if (!Number.isFinite(Number(stats.earnedRunsAllowed))) stats.earnedRunsAllowed = 0;
+	syncPitchingInnings(stats);
 	return stats;
+}
+
+function getPitchingInningsValue(stats) {
+	const outs = Number(stats?.pitchOuts || 0);
+	return outs / 2;
+}
+
+function syncPitchingInnings(stats) {
+	if (!stats) return 0;
+	stats.inningsPitched = getPitchingInningsValue(stats);
+	return stats.inningsPitched;
+}
+
+function getCurrentPitcherResponsibility() {
+	if (!game?.fielding?.players?.length) {
+		return { pitcherKey: null, pitcherName: null, teamName: game?.fielding?.name || "" };
+	}
+
+	let pitcherIndex = parseInt(document.getElementById("pitcherSelect")?.value, 10);
+	if (!Number.isInteger(pitcherIndex) || pitcherIndex < 0) pitcherIndex = 0;
+
+	const pitcherName = game.fielding.players[pitcherIndex] || null;
+
+	return {
+		pitcherKey: pitcherName ? getGameStatsKey(game.fielding, pitcherName) : null,
+		pitcherName,
+		teamName: game.fielding?.name || ""
+	};
+}
+
+function chargeRunToResponsiblePitcher(runner, chargeLog = null) {
+	const normalized = normalizeBaseRunner(runner, game?.batting);
+	if (!normalized) return;
+
+	const pitcherKey = normalized.responsiblePitcherKey || null;
+	if (!pitcherKey || !game?.gameStats?.[pitcherKey]) return;
+
+	const pitcherStats = ensureExtendedStatFields(game.gameStats[pitcherKey]);
+	pitcherStats.runsAllowed += 1;
+
+	if (chargeLog) {
+		chargeLog[pitcherKey] = chargeLog[pitcherKey] || { runs: 0, earnedRuns: 0 };
+		chargeLog[pitcherKey].runs += 1;
+	}
+
+	if (!normalized.reachedOnError) {
+		pitcherStats.earnedRunsAllowed += 1;
+		if (chargeLog) chargeLog[pitcherKey].earnedRuns += 1;
+	}
 }
 
 function normalizeBaseRunner(runner, fallbackTeam = game?.batting) {
@@ -837,16 +889,28 @@ function normalizeBaseRunner(runner, fallbackTeam = game?.batting) {
 		runner.statsKey = getGameStatsKey(runner.teamName || fallbackTeam, runner.player);
 	}
 	if (runner.reachedOnError !== true) runner.reachedOnError = false;
+
+	if (!runner.responsiblePitcherKey && runner.player) {
+		const responsibility = getCurrentPitcherResponsibility();
+		runner.responsiblePitcherKey = responsibility.pitcherKey || null;
+		runner.responsiblePitcherName = responsibility.pitcherName || null;
+	}
+
 	return runner;
 }
 
-function createBaseRunner(playerName, reachedOnError = false, teamObj = game?.batting) {
+function createBaseRunner(playerName, reachedOnError = false, teamObj = game?.batting, pitcherResponsibility = null) {
+	const responsibility = pitcherResponsibility || getCurrentPitcherResponsibility();
+
 	const runner = {
 		player: playerName,
 		teamName: teamObj?.name || "",
 		statsKey: getGameStatsKey(teamObj, playerName),
-		reachedOnError: !!reachedOnError
+		reachedOnError: !!reachedOnError,
+		responsiblePitcherKey: responsibility.pitcherKey || null,
+		responsiblePitcherName: responsibility.pitcherName || null
 	};
+
 	return normalizeBaseRunner(runner, teamObj);
 }
 
@@ -874,6 +938,9 @@ function scoreExistingRunner(runner, totals, options = {}) {
 	totals.runs += 1;
 	if (!normalized.reachedOnError) totals.earnedRuns += 1;
 	if (options.creditRbi !== false) totals.rbis += 1;
+
+	totals.pitcherCharges = totals.pitcherCharges || {};
+	chargeRunToResponsiblePitcher(normalized, totals.pitcherCharges);
 }
 
 function applyHalfInningRuns(runs) {
@@ -886,8 +953,8 @@ function applyHalfInningRuns(runs) {
 	game.halfInningRuns += runCount;
 }
 
-function advanceRunnersOnContact(bases, currentBatter, reachedOnError = false) {
-	const totals = { runs: 0, earnedRuns: 0, rbis: 0 };
+function advanceRunnersOnContact(bases, currentBatter, reachedOnError = false, pitcherResponsibility = null) {
+	const totals = { runs: 0, earnedRuns: 0, rbis: 0, pitcherCharges: {} };
 
 	const r1 = normalizeBaseRunner(game.bases.first, game.batting);
 	const r2 = normalizeBaseRunner(game.bases.second, game.batting);
@@ -917,16 +984,20 @@ function advanceRunnersOnContact(bases, currentBatter, reachedOnError = false) {
 	advanceExistingRunner(1, r1);
 
 	if (bases >= 4) {
-		scoreExistingRunner(createBaseRunner(currentBatter, reachedOnError), totals, { creditRbi: true });
+		scoreExistingRunner(
+			createBaseRunner(currentBatter, reachedOnError, game.batting, pitcherResponsibility),
+			totals,
+			{ creditRbi: true }
+		);
 	} else {
-		place(bases, createBaseRunner(currentBatter, reachedOnError));
+		place(bases, createBaseRunner(currentBatter, reachedOnError, game.batting, pitcherResponsibility));
 	}
 
 	return totals;
 }
 
-function advanceRunnersOnAwardedFirst(currentBatter) {
-	const totals = { runs: 0, earnedRuns: 0, rbis: 0 };
+function advanceRunnersOnAwardedFirst(currentBatter, pitcherResponsibility = null) {
+	const totals = { runs: 0, earnedRuns: 0, rbis: 0, pitcherCharges: {} };
 
 	const r1 = normalizeBaseRunner(game.bases.first, game.batting);
 	const r2 = normalizeBaseRunner(game.bases.second, game.batting);
@@ -956,7 +1027,7 @@ function advanceRunnersOnAwardedFirst(currentBatter) {
 		game.bases.second = r1;
 	}
 
-	game.bases.first = createBaseRunner(currentBatter, false);
+	game.bases.first = createBaseRunner(currentBatter, false, game.batting, pitcherResponsibility);
 	return totals;
 }
 
@@ -1091,10 +1162,11 @@ function confirmError() {
 	});
 
 	const batterKey = lastPlay.batterKey;
-	const pitcherKey = lastPlay.pitcherKey;
-	const batterStats = batterKey && game?.gameStats?.[batterKey] ? game.gameStats[batterKey] : null;
-	const pitcherStats = pitcherKey && game?.gameStats?.[pitcherKey] ? game.gameStats[pitcherKey] : null;
-	const reversibleHit = ["single", "double", "triple"].includes(lastPlay.result);
+const batterStats = batterKey && game?.gameStats?.[batterKey] ? game.gameStats[batterKey] : null;
+const reversibleHit = ["single", "double", "triple"].includes(lastPlay.result);
+const pitcherCharges = (lastPlay.pitcherCharges && typeof lastPlay.pitcherCharges === "object")
+	? lastPlay.pitcherCharges
+	: null;
 
 	if (batterStats && reversibleHit) {
 		if (lastPlay.result === "single") {
@@ -1114,12 +1186,30 @@ function confirmError() {
 		);
 	}
 
-	if (pitcherStats && reversibleHit) {
-		pitcherStats.earnedRunsAllowed = Math.max(
-			0,
-			Number(pitcherStats.earnedRunsAllowed || 0) - Number(lastPlay.creditedEarnedRuns || 0)
-		);
+	if (reversibleHit) {
+	if (pitcherCharges) {
+		Object.keys(pitcherCharges).forEach(chargePitcherKey => {
+			const charge = pitcherCharges[chargePitcherKey] || {};
+			const stats = game?.gameStats?.[chargePitcherKey];
+			if (!stats) return;
+
+			stats.earnedRunsAllowed = Math.max(
+				0,
+				Number(stats.earnedRunsAllowed || 0) - Number(charge.earnedRuns || 0)
+			);
+		});
+	} else {
+		const pitcherKey = lastPlay.pitcherKey;
+		const pitcherStats = pitcherKey && game?.gameStats?.[pitcherKey] ? game.gameStats[pitcherKey] : null;
+
+		if (pitcherStats) {
+			pitcherStats.earnedRunsAllowed = Math.max(
+				0,
+				Number(pitcherStats.earnedRunsAllowed || 0) - Number(lastPlay.creditedEarnedRuns || 0)
+			);
+		}
 	}
+}
 
 	showNotification("Error charged to " + (fielderName || "selected fielder"), 1500);
 	lastPlay = null;
@@ -1135,46 +1225,40 @@ async function finalizeCompletedGame() {
 }
 
 function endHalfInning(pitcherKey, reasonText) {
-// credit pitcher with 1 inning pitched for this completed half-inning
-if (pitcherKey && game?.gameStats?.[pitcherKey]) {
-game.gameStats[pitcherKey].inningsPitched += 1;
-}
+	// innings pitched are derived from pitchOuts, so side changes should not hand out extra IP
 
-// clear inning state
-game.bases.first = null;
-game.bases.second = null;
-game.bases.third = null;
-game.outs = 0;
-game.halfInningRuns = 0; // ✅ reset for next half
+	game.bases.first = null;
+	game.bases.second = null;
+	game.bases.third = null;
+	game.outs = 0;
+	game.halfInningRuns = 0;
 
-// switch sides / inning
-if (game.halfInning === "top") {
-game.halfInning = "bottom";
-let temp = game.batting;
-game.batting = game.fielding;
-game.fielding = temp;
-setCurrentBatterIndex(getCurrentBatterIndex());
+	if (game.halfInning === "top") {
+		game.halfInning = "bottom";
+		let temp = game.batting;
+		game.batting = game.fielding;
+		game.fielding = temp;
+		setCurrentBatterIndex(getCurrentBatterIndex());
 
-updatePitcherSelect();
-showNotification(reasonText || ("Side change! " + game.batting.name + " now batting."), 1500);
-} else {
-game.halfInning = "top";
-let temp = game.batting;
-game.batting = game.fielding;
-game.fielding = temp;
-setCurrentBatterIndex(getCurrentBatterIndex());
+		updatePitcherSelect();
+		showNotification(reasonText || ("Side change! " + game.batting.name + " now batting."), 1500);
+	} else {
+		game.halfInning = "top";
+		let temp = game.batting;
+		game.batting = game.fielding;
+		game.fielding = temp;
+		setCurrentBatterIndex(getCurrentBatterIndex());
 
-game.inning++;
+		game.inning++;
 
-// ✅ your game ends after bottom of 3rd
-if (game.inning > 3) {
-finalizeCompletedGame();
-return;
-}
+		if (game.inning > 3) {
+			finalizeCompletedGame();
+			return;
+		}
 
-updatePitcherSelect();
-showNotification(reasonText || ("Inning " + game.inning + " starting! " + game.batting.name + " batting."), 1500);
-}
+		updatePitcherSelect();
+		showNotification(reasonText || ("Inning " + game.inning + " starting! " + game.batting.name + " batting."), 1500);
+	}
 }
 
 function recordPitchingResult(pitchResult, errorFielderIndex = null) {
@@ -1192,6 +1276,12 @@ function recordPitchingResult(pitchResult, errorFielderIndex = null) {
 	const pitcherKey = getGameStatsKey(game.fielding, pitcher);
 	const pitcherStats = ensureExtendedStatFields(game.gameStats[pitcherKey]);
 
+	const playPitcherResponsibility = {
+		pitcherKey,
+		pitcherName: pitcher,
+		teamName: game.fielding?.name || ""
+	};
+
 	const halfInningKey = game.inning + "-" + game.halfInning;
 	game.currentInningPitchers[halfInningKey] = pitcherIndex;
 
@@ -1204,6 +1294,7 @@ function recordPitchingResult(pitchResult, errorFielderIndex = null) {
 	let runs = 0;
 	let earnedRuns = 0;
 	let rbis = 0;
+	let pitcherCharges = {};
 
 	if (result !== "walk" && result !== "HBP") {
 		batterStats.atBats++;
@@ -1211,21 +1302,27 @@ function recordPitchingResult(pitchResult, errorFielderIndex = null) {
 
 	if (result === "out" || result === "K") {
 		game.outs++;
+
 		if (result === "K") {
 			batterStats.strikeouts++;
 			pitcherStats.pitchStrikeouts++;
 		} else {
 			batterStats.outs++;
 		}
+
 		pitcherStats.pitchOuts++;
+		syncPitchingInnings(pitcherStats);
+
 	} else if (result === "doublePlay") {
 		const runnerCount = countBaseRunners();
+
 		if (runnerCount < 2) {
 			showNotification("Need 2+ runners for a double play", 1500);
 		} else {
 			game.outs += 2;
 			batterStats.outs++;
 			pitcherStats.pitchOuts += 2;
+			syncPitchingInnings(pitcherStats);
 
 			const removedBase = game.bases.first ? "first" : (game.bases.second ? "second" : "third");
 			const removedRunner = game.bases[removedBase];
@@ -1233,61 +1330,73 @@ function recordPitchingResult(pitchResult, errorFielderIndex = null) {
 
 			showNotification("Double play!" + (removedRunner?.player ? (" (" + removedRunner.player + " out)") : ""), 1500);
 		}
+
 	} else if (result === "single") {
-		const res = advanceRunnersOnContact(1, currentBatter, reachedOnError);
+		const res = advanceRunnersOnContact(1, currentBatter, reachedOnError, playPitcherResponsibility);
 		runs = res.runs;
 		earnedRuns = res.earnedRuns;
 		rbis = res.rbis;
+		pitcherCharges = res.pitcherCharges || {};
 
 		if (!reachedOnError) {
 			batterStats.hits++;
 			batterStats.singles++;
 		}
 		batterStats.rbis += rbis;
+
 	} else if (result === "double") {
-		const res = advanceRunnersOnContact(2, currentBatter, reachedOnError);
+		const res = advanceRunnersOnContact(2, currentBatter, reachedOnError, playPitcherResponsibility);
 		runs = res.runs;
 		earnedRuns = res.earnedRuns;
 		rbis = res.rbis;
+		pitcherCharges = res.pitcherCharges || {};
 
 		if (!reachedOnError) {
 			batterStats.hits++;
 			batterStats.doubles++;
 		}
 		batterStats.rbis += rbis;
+
 	} else if (result === "triple") {
-		const res = advanceRunnersOnContact(3, currentBatter, reachedOnError);
+		const res = advanceRunnersOnContact(3, currentBatter, reachedOnError, playPitcherResponsibility);
 		runs = res.runs;
 		earnedRuns = res.earnedRuns;
 		rbis = res.rbis;
+		pitcherCharges = res.pitcherCharges || {};
 
 		if (!reachedOnError) {
 			batterStats.hits++;
 			batterStats.triples++;
 		}
 		batterStats.rbis += rbis;
+
 	} else if (result === "HR") {
-		const res = advanceRunnersOnContact(4, currentBatter, false);
+		const res = advanceRunnersOnContact(4, currentBatter, false, playPitcherResponsibility);
 		runs = res.runs;
 		earnedRuns = res.earnedRuns;
 		rbis = res.rbis;
+		pitcherCharges = res.pitcherCharges || {};
 
 		batterStats.hits++;
 		batterStats.homeRuns++;
 		batterStats.rbis += rbis;
+
 	} else if (result === "walk") {
-		const res = advanceRunnersOnAwardedFirst(currentBatter);
+		const res = advanceRunnersOnAwardedFirst(currentBatter, playPitcherResponsibility);
 		runs = res.runs;
 		earnedRuns = res.earnedRuns;
 		rbis = res.rbis;
+		pitcherCharges = res.pitcherCharges || {};
 
 		batterStats.walks++;
 		batterStats.rbis += rbis;
+
 	} else if (result === "HBP") {
-		const res = advanceRunnersOnAwardedFirst(currentBatter);
+		const res = advanceRunnersOnAwardedFirst(currentBatter, playPitcherResponsibility);
 		runs = res.runs;
 		earnedRuns = res.earnedRuns;
 		rbis = res.rbis;
+		pitcherCharges = res.pitcherCharges || {};
 
 		batterStats.hitByPitch++;
 		batterStats.rbis += rbis;
@@ -1306,8 +1415,7 @@ function recordPitchingResult(pitchResult, errorFielderIndex = null) {
 	}
 
 	applyHalfInningRuns(runs);
-	pitcherStats.runsAllowed += runs;
-	pitcherStats.earnedRunsAllowed += earnedRuns;
+	syncPitchingInnings(pitcherStats);
 
 	lastPlay = {
 		battingTeamName: game.batting.name,
@@ -1320,7 +1428,8 @@ function recordPitchingResult(pitchResult, errorFielderIndex = null) {
 		result,
 		creditedRbis: rbis,
 		creditedRuns: runs,
-		creditedEarnedRuns: earnedRuns
+		creditedEarnedRuns: earnedRuns,
+		pitcherCharges: JSON.parse(JSON.stringify(pitcherCharges || {}))
 	};
 
 	const nextBatterIndex = setCurrentBatterIndex(getCurrentBatterIndex() + 1);
@@ -1440,7 +1549,7 @@ for (let key in game.gameStats) {
 	seasonStats.pitchOuts = Number(seasonStats.pitchOuts || 0) + Number(gameStats.pitchOuts || 0);
 	seasonStats.pitchStrikeouts = Number(seasonStats.pitchStrikeouts || 0) + Number(gameStats.pitchStrikeouts || 0);
 	seasonStats.fieldingErrors = Number(seasonStats.fieldingErrors || 0) + Number(gameStats.fieldingErrors || 0);
-	seasonStats.inningsPitched = Number(seasonStats.inningsPitched || 0) + Number(gameStats.inningsPitched || 0);
+syncPitchingInnings(seasonStats);
 	seasonStats.runsAllowed = Number(seasonStats.runsAllowed || 0) + Number(gameStats.runsAllowed || 0);
 	seasonStats.earnedRunsAllowed = Number(seasonStats.earnedRunsAllowed || 0) + Number(gameStats.earnedRunsAllowed || 0);
 }
@@ -1591,17 +1700,18 @@ function createPitchingStatsTable(team, isSeason) {
 			if (!isSeason && game?.gameStats) game.gameStats[key] = stats;
 		}
 
-		const era = stats.inningsPitched > 0
-			? ((stats.earnedRunsAllowed / stats.inningsPitched) * 3).toFixed(2)
-			: "-";
+const innings = getPitchingInningsValue(stats);
+const era = innings > 0
+	? ((stats.earnedRunsAllowed / innings) * 3).toFixed(2)
+	: "-";
 
-		const kPer3 = stats.inningsPitched > 0
-			? ((stats.pitchStrikeouts / stats.inningsPitched) * 3).toFixed(2)
-			: "-";
+const kPer3 = innings > 0
+	? ((stats.pitchStrikeouts / innings) * 3).toFixed(2)
+	: "-";
 
-		const values = [
-			getDisplayNameForPlayer(team, player, isSeason),
-			Number(stats.inningsPitched).toFixed(1),
+const values = [
+	getDisplayNameForPlayer(team, player, isSeason),
+	innings.toFixed(1),
 			stats.pitchStrikeouts,
 			kPer3,
 			stats.pitchOuts,
@@ -1676,12 +1786,13 @@ function createSubPitchingStatsTable(subEntries) {
 
 	const tbody = document.createElement("tbody");
 	(subEntries || []).forEach(stats => {
-		const era = stats.inningsPitched > 0 ? ((stats.earnedRunsAllowed / stats.inningsPitched) * 3).toFixed(2) : "-";
-		const kPer3 = stats.inningsPitched > 0 ? ((stats.pitchStrikeouts / stats.inningsPitched) * 3).toFixed(2) : "-";
+		const innings = getPitchingInningsValue(stats);
+const era = innings > 0 ? ((stats.earnedRunsAllowed / innings) * 3).toFixed(2) : "-";
+const kPer3 = innings > 0 ? ((stats.pitchStrikeouts / innings) * 3).toFixed(2) : "-";
 
-		const values = [
-			stats.playerName,
-			Number(stats.inningsPitched).toFixed(1),
+const values = [
+	stats.playerName,
+	innings.toFixed(1),
 			stats.pitchStrikeouts,
 			kPer3,
 			stats.pitchOuts,
@@ -1894,9 +2005,10 @@ function createSeasonPlayerDetails(option) {
 	}
 
 	const stats = getSeasonPlayerStatsForOption(option);
-	const battingAvg = stats.atBats > 0 ? (stats.hits / stats.atBats).toFixed(3) : ".000";
-	const era = stats.inningsPitched > 0 ? ((stats.earnedRunsAllowed / stats.inningsPitched) * 3).toFixed(2) : "-";
-	const kPer3 = stats.inningsPitched > 0 ? ((stats.pitchStrikeouts / stats.inningsPitched) * 3).toFixed(2) : "-";
+const battingAvg = stats.atBats > 0 ? (stats.hits / stats.atBats).toFixed(3) : ".000";
+const innings = getPitchingInningsValue(stats);
+const era = innings > 0 ? ((stats.earnedRunsAllowed / innings) * 3).toFixed(2) : "-";
+const kPer3 = innings > 0 ? ((stats.pitchStrikeouts / innings) * 3).toFixed(2) : "-";
 
 	const header = document.createElement("div");
 	header.className = "season-stats-selection-header";
@@ -1927,7 +2039,7 @@ function createSeasonPlayerDetails(option) {
 	pitchingCard.className = "card";
 	pitchingCard.innerHTML = '<h4>Pitching Stats</h4>';
 	pitchingCard.appendChild(buildSeasonStatsMetricGrid([
-		{ label: "IP", value: Number(stats.inningsPitched || 0).toFixed(1) },
+		{ label: "IP", value: innings.toFixed(1) },
 		{ label: "Outs", value: stats.pitchOuts },
 		{ label: "K's", value: stats.pitchStrikeouts },
 		{ label: "K/3", value: kPer3 },
@@ -2350,8 +2462,11 @@ function displayRankings() {
 	pitchingGrid.className = "rankings-grid";
 
 	pitchingGrid.appendChild(createRankingsTable("K/3", players, {
-		getValue: stats => stats.inningsPitched > 0 ? (stats.pitchStrikeouts / stats.inningsPitched) * 3 : NaN,
-		isEligible: stats => Number(stats.inningsPitched || 0) > 0,
+getValue: stats => {
+	const innings = getPitchingInningsValue(stats);
+	return innings > 0 ? (stats.pitchStrikeouts / innings) * 3 : NaN;
+},
+isEligible: stats => getPitchingInningsValue(stats) > 0,
 		formatValue: value => value.toFixed(2)
 	}));
 
@@ -2364,14 +2479,14 @@ function displayRankings() {
 
 	pitchingGrid.appendChild(createRankingsTable("Errors Made", players, {
 		getValue: stats => Number(stats.fieldingErrors || 0),
-		isEligible: stats => Number(stats.inningsPitched || 0) > 0 || Number(stats.fieldingErrors || 0) > 0,
+		isEligible: stats => getPitchingInningsValue(stats) > 0 || Number(stats.fieldingErrors || 0) > 0,
 		lowerIsBetter: true,
 		formatValue: value => String(value)
 	}));
 
 	pitchingGrid.appendChild(createRankingsTable("Total Innings Pitched", players, {
-		getValue: stats => Number(stats.inningsPitched || 0),
-		isEligible: stats => Number(stats.inningsPitched || 0) > 0,
+		getValue: stats => getPitchingInningsValue(stats),
+isEligible: stats => getPitchingInningsValue(stats) > 0,
 		formatValue: value => value.toFixed(1)
 	}));
 
@@ -2643,7 +2758,7 @@ function createPastGamePitchingTable(entry, teamName) {
 	const headers = ["Player", "IP", "K's", "K/3", "R", "ER", "ERA", "Errors"];
 
 	const rows = teamStats.map(stats => {
-		const innings = Number(stats.inningsPitched || 0);
+const innings = getPitchingInningsValue(stats);
 		const kPer3 = innings > 0 ? ((Number(stats.pitchStrikeouts || 0) / innings) * 3).toFixed(2) : "-";
 		const era = innings > 0 ? ((Number(stats.earnedRunsAllowed || 0) / innings) * 3).toFixed(2) : "-";
 
