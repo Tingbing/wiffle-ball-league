@@ -71,21 +71,7 @@ async function showGameSetup() {
 
 	document.getElementById("gameSetupScreen").classList.remove("hidden");
 
-	const schedCard = document.getElementById("scheduledGameCard");
-	const manualCard = document.getElementById("manualTeamCard");
-
-	const info = ensureScheduleUpToDateForSelection();
-	if (info.ok) {
-		schedCard.style.display = "block";
-		manualCard.style.display = "none";
-		populateScheduleDaySelect();
-	} else {
-		schedCard.style.display = "none";
-		manualCard.style.display = "block";
-		updateGameSetupSelects();
-	}
-
-	refreshGameLockUI();
+	refreshGameSetupScheduleCards();
 }
 
 async function showSeasonStats() {
