@@ -76,32 +76,56 @@ async function showGameSetup() {
 
 async function showSeasonStats() {
 	hideAllScreens();
-	if (isPublicViewOnlyMode()) {
-		try { await refreshPublicViewData({ quiet: true }); } catch (e) {}
-	}
 	document.getElementById("seasonStatsScreen").classList.remove("hidden");
 	updatePublicAccessUI();
-	displaySeasonStats();
+	try { displaySeasonStats(); } catch (e) { console.warn("displaySeasonStats failed:", e); }
+
+	if (isPublicViewOnlyMode()) {
+		try {
+			refreshPublicViewData({ quiet: true })
+				.then(() => {
+					const screen = document.getElementById("seasonStatsScreen");
+					if (screen && !screen.classList.contains("hidden")) displaySeasonStats();
+				})
+				.catch((e) => console.warn("public stats refresh failed:", e));
+		} catch (e) {}
+	}
 }
 
 async function showRankings() {
 	hideAllScreens();
-	if (isPublicViewOnlyMode()) {
-		try { await refreshPublicViewData({ quiet: true }); } catch (e) {}
-	}
 	document.getElementById("rankingsScreen").classList.remove("hidden");
 	updatePublicAccessUI();
-	displayRankings();
+	try { displayRankings(); } catch (e) { console.warn("displayRankings failed:", e); }
+
+	if (isPublicViewOnlyMode()) {
+		try {
+			refreshPublicViewData({ quiet: true })
+				.then(() => {
+					const screen = document.getElementById("rankingsScreen");
+					if (screen && !screen.classList.contains("hidden")) displayRankings();
+				})
+				.catch((e) => console.warn("public rankings refresh failed:", e));
+		} catch (e) {}
+	}
 }
 
 async function showPastGameLog() {
 	hideAllScreens();
-	if (isPublicViewOnlyMode()) {
-		try { await refreshPublicViewData({ quiet: true }); } catch (e) {}
-	}
 	document.getElementById("pastGameLogScreen").classList.remove("hidden");
 	updatePublicAccessUI();
-	displayPastGameLog();
+	try { displayPastGameLog(); } catch (e) { console.warn("displayPastGameLog failed:", e); }
+
+	if (isPublicViewOnlyMode()) {
+		try {
+			refreshPublicViewData({ quiet: true })
+				.then(() => {
+					const screen = document.getElementById("pastGameLogScreen");
+					if (screen && !screen.classList.contains("hidden")) displayPastGameLog();
+				})
+				.catch((e) => console.warn("public game log refresh failed:", e));
+		} catch (e) {}
+	}
 }
 
 function hideAllScreens() {
@@ -674,9 +698,18 @@ function confirmSubAssignment() {
 ================================== */
 async function showSchedule() {
   hideAllScreens();
-  if (isPublicViewOnlyMode()) {
-	  try { await refreshPublicViewData({ quiet: true }); } catch (e) {}
-  }
   document.getElementById("scheduleScreen").classList.remove("hidden");
-  renderScheduleUI();
+  updatePublicAccessUI();
+  try { renderScheduleUI(); } catch (e) { console.warn("renderScheduleUI failed:", e); }
+
+  if (isPublicViewOnlyMode()) {
+    try {
+      refreshPublicViewData({ quiet: true })
+        .then(() => {
+          const screen = document.getElementById("scheduleScreen");
+          if (screen && !screen.classList.contains("hidden")) renderScheduleUI();
+        })
+        .catch((e) => console.warn("public schedule refresh failed:", e));
+    } catch (e) {}
+  }
 }
