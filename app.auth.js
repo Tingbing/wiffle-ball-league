@@ -1,7 +1,7 @@
 const SUPABASE_URL = "https://hunqtklytyorvmztgpqt.supabase.co";
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imh1bnF0a2x5dHlvcnZtenRncHF0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzA4NDc0MzcsImV4cCI6MjA4NjQyMzQzN30.ONu6M24_vhaeN-YlqKr-mtNjRuLLMfMeMfdTDMUllfA";
 // 🔁 Bump this each time you publish (any new value works)
-	
+	 
 const BUILD_LABEL = location.pathname.split("/").pop(); // shows app.v2026-...html
 
 let supabaseClient = null;
