@@ -281,51 +281,6 @@ try {
 	activeGameLock = null;
 }
 
-let publicViewOnlyMode = false;
-
-/* ================================
-   STORAGE EVENT LISTENERS
-================================== */
-window.addEventListener("storage", (event) => {
-	if (event.key === ACTIVE_GAME_LOCK_KEY) {
-		try {
-			activeGameLock = event.newValue ? JSON.parse(event.newValue) : null;
-		} catch (e) {
-			activeGameLock = null;
-		}
-		try { refreshGameLockUI(); } catch (e) {}
-		return;
-	}
-
-	if (event.key !== SYNC_HEAD_KEY || !event.newValue) return;
-
-	let head = null;
-	try { head = JSON.parse(event.newValue); } catch (e) { head = null; }
-	if (!head || head.lastWriterTabId === APP_TAB_ID) return;
-
-	if (Number(head.serverSeasonRevision || 0) > (syncState.serverSeasonRevision || 0)) {
-		syncState.serverSeasonRevision = Number(head.serverSeasonRevision || 0) || 0;
-	}
-	if (Number(head.serverScheduleRevision || 0) > (syncState.serverScheduleRevision || 0)) {
-		syncState.serverScheduleRevision = Number(head.serverScheduleRevision || 0) || 0;
-	}
-	if (head.serverUpdatedAt) syncState.serverUpdatedAt = head.serverUpdatedAt;
-
-	if (
-		Number(head.seasonRevision || 0) > getSeasonRevisionFrom(season) ||
-		Number(head.scheduleRevision || 0) > getScheduleRevisionFrom(schedule)
-	) {
-		scheduleConflictNotice("Another tab on this browser saved newer data than the copy open in this tab.", { source: "storage", head });
-	}
-});
-
-syncStateFromHead();
-try {
-	activeGameLock = JSON.parse(localStorage.getItem(ACTIVE_GAME_LOCK_KEY) || "null");
-} catch (e) {
-	activeGameLock = null;
-}
-
 /* ================================
    PUBLIC VIEW SERVER REFRESH
 ================================== */
@@ -335,10 +290,6 @@ async function refreshPublicViewData({ quiet = true } = {}) {
 	return row;
 }
 
-	/* ================================
-	✅ SCHEDULE DATA (persisted)
-	==================================*/
-	let schedule = { days: [], teamNames: [] };
 
 /* ================================
    SYNC / REALTIME RUNTIME STATE
