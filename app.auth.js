@@ -9,11 +9,7 @@ let SUPABASE_READY = false;
 
 function showFatalError(title, msg, details) {
   console.trace("showFatalError called", { title, msg, details });
-
   try { hideAllScreens(); } catch (e) {}
-
-  // Do NOT force-open the login gate on startup errors.
-  // A fatal boot problem should look like a fatal screen, not like a login prompt.
   try { document.getElementById("accessGate")?.classList.add("hidden"); } catch (e) {}
 
   const fs = document.getElementById("fatalScreen");
@@ -674,10 +670,14 @@ function buildEmailRedirectUrl() {
 console.log("INIT STARTED");
 window.__INIT_STARTED = true;
 
-  // Always start hidden until boot finishes (prevents UI flash / partial state)
+  // Force a safe public-first UI immediately,
+  // before any async startup work can stall.
   try { hideAllScreens(); } catch (e) {}
+  try { document.getElementById("accessGate")?.classList.add("hidden"); } catch (e) {}
+  try { setPublicViewOnlyMode(true); } catch (e) {}
+  try { showPublicMenu(); } catch (e) {}
 
-  // Ensure Supabase is initialized before any startup logic runs.
+  // Ensure Supabase is initialized before any protected startup logic runs.
   if (!(await initializeSupabaseClient())) return;
 	// ✅ wipe any old remembered fields from older versions
 try {
