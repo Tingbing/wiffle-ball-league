@@ -833,7 +833,23 @@ function renderScheduleGuardNotice(guard = getScheduleGuardState()) {
 	`;
 }
 
-function setScheduledGameSelectionUnavailable(message) {
+function setScheduleRecoveryActionsVisible(show, noteText = "") {
+	const box = document.getElementById("scheduleRecoveryActions");
+	const note = document.getElementById("scheduleRecoveryNote");
+	if (!box) return;
+
+	const shouldShow = !!show && hasFullAppAccess();
+	box.classList.toggle("hidden", !shouldShow);
+
+	if (note) {
+		note.innerText = noteText || (
+			"If this season is no longer usable, reset season data first. " +
+			"That clears recorded stats and schedule results so you can safely start over."
+		);
+	}
+}
+
+function setScheduledGameSelectionUnavailable(message, guard = null) {
 	const warning = document.getElementById("scheduleSelectionWarning");
 	const daySelect = document.getElementById("scheduleDaySelect");
 	const seriesSelect = document.getElementById("scheduleSeriesSelect");
@@ -862,6 +878,12 @@ function setScheduledGameSelectionUnavailable(message) {
 	if (startBtn) startBtn.disabled = true;
 	if (subBtn) subBtn.disabled = true;
 	if (hint) hint.innerText = unavailableText;
+
+	const recoveryNote = guard?.seasonStarted
+		? "This season already has recorded games. If the team list was changed by mistake, use Reset Season Data first, then rebuild the schedule from the current teams."
+		: "";
+
+	setScheduleRecoveryActionsVisible(!!guard?.seasonStarted, recoveryNote);
 	toggleSubAssignCard(false);
 }
 
@@ -877,16 +899,20 @@ function refreshGameSetupScheduleCards() {
 	if (guard.ok) {
 		schedCard.style.display = "block";
 		manualCard.style.display = "none";
+
 		if (warning) {
 			warning.innerText = "";
 			warning.classList.add("hidden");
 		}
+
+		setScheduleRecoveryActionsVisible(false);
+
 		if (subBtn) subBtn.disabled = false;
 		populateScheduleDaySelect();
 	} else {
 		schedCard.style.display = guard.showScheduledCard ? "block" : "none";
 		manualCard.style.display = "block";
-		setScheduledGameSelectionUnavailable(guard.selectionMessage);
+		setScheduledGameSelectionUnavailable(guard.selectionMessage, guard);
 		updateGameSetupSelects();
 	}
 
