@@ -87,12 +87,9 @@ function refreshAfterSnapshotChange() {
 	try { if (!document.getElementById("seasonStatsScreen")?.classList.contains("hidden")) displaySeasonStats(); } catch (e) {}
 	try { if (!document.getElementById("scheduleScreen")?.classList.contains("hidden")) renderScheduleUI(); } catch (e) {}
 	try {
-		if (!document.getElementById("gameSetupScreen")?.classList.contains("hidden")) {
-			const info = ensureScheduleUpToDateForSelection();
-			if (info.ok) populateScheduleDaySelect();
-			else updateGameSetupSelects();
-			refreshGameLockUI();
-		}
+	if (!document.getElementById("gameSetupScreen")?.classList.contains("hidden")) {
+	refreshGameSetupScheduleCards();
+}
 	} catch (e) {}
 }
 
