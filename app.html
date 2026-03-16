@@ -152,12 +152,13 @@
 	<h2>📅 Season Schedule</h2>
 
 <div class="card">
-		<p id="scheduleSummaryText" style="color:#aaa; margin-top:0;">
-			Season schedule will appear here once teams are ready.
-		</p>
-	</div>
+	<p id="scheduleSummaryText" style="color:#aaa; margin-top:0;">
+		Season schedule will appear here once teams are ready.
+	</p>
+</div>
 
-	<div id="scheduleContainer"></div>
+<div id="scheduleGuardNotice"></div>
+<div id="scheduleContainer"></div>
 </div>
 
 
@@ -222,6 +223,7 @@
 
 <div class="card" id="scheduledGameCard">
 	<h3>Record Scheduled Game</h3>
+	<p id="scheduleSelectionWarning" class="hidden" style="color:#ffb3b3; font-size:13px; margin-top:6px;"></p>
 
 	<p>Which day?</p>
 	<select id="scheduleDaySelect" onchange="populateScheduleSeriesSelect()"></select>
