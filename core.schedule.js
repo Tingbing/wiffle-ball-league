@@ -1231,6 +1231,13 @@ refreshGameLockUI();
 }
 
 async function startSelectedScheduledGame() {
+	const guard = ensureScheduleUpToDateForSelection();
+	if (!guard.ok) {
+		alert(guard.selectionMessage || "Scheduled game selection is currently unavailable.");
+		refreshGameSetupScheduleCards();
+		return;
+	}
+
 	const gameSelect = document.getElementById("scheduleGameSelect");
 	if (!gameSelect || !gameSelect.value) return;
 
