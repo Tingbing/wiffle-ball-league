@@ -242,9 +242,17 @@
 
 	<div id="subAssignmentSummary" style="margin-top:10px;"></div>
 
-	<button class="menu-button" id="startScheduledGameBtn" onclick="startSelectedScheduledGame()">
-		Start Selected Game
+<button class="menu-button" id="startScheduledGameBtn" onclick="startSelectedScheduledGame()">
+	Start Selected Game
+</button>
+
+<div id="scheduleRecoveryActions" class="hidden" style="margin-top:12px;">
+	<button type="button" onclick="resetSeason()" style="background:#a44; color:white;">
+		Reset Season Data
 	</button>
+	<p id="scheduleRecoveryNote" style="color:#aaa; font-size:13px; margin-top:8px; margin-bottom:0;">
+	</p>
+</div>
 </div>
 
 <div class="card hidden" id="subAssignCard">
