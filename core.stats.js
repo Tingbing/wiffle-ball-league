@@ -326,18 +326,8 @@ function refreshStatsBackupViews() {
 		const manualCard = document.getElementById("manualTeamCard");
 
 		if (gameSetupScreen && !gameSetupScreen.classList.contains("hidden") && schedCard && manualCard) {
-			const info = ensureScheduleUpToDateForSelection();
-
-			if (info.ok) {
-				schedCard.style.display = "block";
-				manualCard.style.display = "none";
-				populateScheduleDaySelect();
-			} else {
-				schedCard.style.display = "none";
-				manualCard.style.display = "block";
-				updateGameSetupSelects();
-			}
-		}
+	refreshGameSetupScheduleCards();
+}
 	} catch (e) {}
 }
 
