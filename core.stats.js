@@ -91,28 +91,6 @@ function loadSeason() {
 	- Auto-sync season/schedule to Supabase (if season_data table exists)
 	- Realtime subscribe so all devices see updates quickly
 	==================================*/
-	let autoSyncEnabled = false;          // turns on after post-unlock setup
-	let suppressAutoSync = false;         // prevents sync loops when applying server data
-	let postUnlockSetupPromise = null;
-
-	let realtimeChannel = null;
-	let teamsReloadTimer = null;
-
-	let serverSyncTimer = null;
-
-	function setSyncButtonEnabled(enabled) {
-		const btn = document.getElementById("resaveStatsBtn");
-		if (!btn) return;
-		btn.disabled = !enabled;
-		btn.style.opacity = enabled ? "1" : "0.6";
-		btn.style.pointerEvents = enabled ? "auto" : "none";
-	}
-
-	function getLocalUpdatedAtMs() {
-		const s = Date.parse(season?._meta?.updated_at || "") || 0;
-		const sch = Date.parse(schedule?._meta?.updated_at || "") || 0;
-		return Math.max(s, sch);
-	}
 
 /* ================================
    TEAM RECORD HELPERS
