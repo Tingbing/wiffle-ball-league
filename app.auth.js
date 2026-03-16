@@ -606,14 +606,20 @@ if (mainLogoutBtn && !mainLogoutBtn.dataset.wired) {
   mainLogoutBtn.dataset.wired = "1";
   mainLogoutBtn.addEventListener("click", logout);
 }
-    const mainEmailEl = document.getElementById("loginEmail");
-    if (mainEmailEl) {
-      mainEmailEl.addEventListener("change", (e) => {
-        const email = (e.target.value || "").trim();
-        if (email) setStoredEmail(email);
-        if (email && !getStoredName()) showGate("login");
-      });
+const mainEmailEl = document.getElementById("loginEmail");
+if (mainEmailEl && !mainEmailEl.dataset.wired) {
+  mainEmailEl.dataset.wired = "1";
+  mainEmailEl.addEventListener("change", () => {
+    const email = (mainEmailEl.value || "").trim();
+
+    // Keep the gate email box in sync for convenience,
+    // but do NOT force-open the login gate from a field change.
+    const gateEmailEl = document.getElementById("gateLoginEmail");
+    if (gateEmailEl && email && !gateEmailEl.value) {
+      gateEmailEl.value = email;
     }
+  });
+}
 
     // React to login/logout automatically
     supabaseClient.auth.onAuthStateChange(async (_event, _session) => {
