@@ -762,34 +762,24 @@ if (mainEmailEl && !mainEmailEl.dataset.wired) {
   });
 }
 
+    // React to login/logout automatically
+    supabaseClient.auth.onAuthStateChange(async (_event, _session) => {
+      await evaluateAccess();
+      await updateAuthUI();
+    });
+
     await safeInitStep("load schedule", async () => { loadSchedule(); });
     await safeInitStep("load season", async () => { loadSeason(); });
+    await safeInitStep("evaluate access", async () => { await evaluateAccess(); });
+    await safeInitStep("update auth UI", async () => { await updateAuthUI(); });
 
-    // Finish the initial team load before auth/setup work can hydrate or sync anything.
     await safeInitStep("load teams", async () => { await load(); });
     await safeInitStep("sync team records", async () => { syncTeamRecordsWithLeague(); });
-
-    // Do one explicit startup access evaluation.
-    // evaluateAccess already updates the auth UI internally.
-    await safeInitStep("evaluate access", async () => { await evaluateAccess(); });
-
     await safeInitStep("save season", async () => {
       saveSeason({ skipServerSync: true, touchMeta: false });
     });
     await safeInitStep("update UI", async () => { update(); });
     await safeInitStep("refresh visible screens", async () => { refreshVisibleReadOnlyScreens(); });
-
-    // Register auth listener after the one-time startup evaluation so startup does not
-    // immediately run evaluateAccess a second time in parallel.
-    let skipInitialAuthStateEcho = true;
-    supabaseClient.auth.onAuthStateChange(async (event, _session) => {
-      if (skipInitialAuthStateEcho && event === "INITIAL_SESSION") {
-        skipInitialAuthStateEcho = false;
-        return;
-      }
-      skipInitialAuthStateEcho = false;
-      await evaluateAccess();
-    });
 
     hideFatalError();
   } catch (err) {
