@@ -71,42 +71,31 @@ function updatePublicAccessUI() {
 /* ================================
    TEAM / LEAGUE STORAGE
 ================================== */
-let teamsLoadPromise = null;
 function save() {	
 		localStorage.setItem("wiggleLeague", JSON.stringify(league));
 	}
 
 async function load() {
-	if (teamsLoadPromise) return teamsLoadPromise;
+	// load teams + players from Supabase
+	const { data: teams, error: teamErr } = await supabaseClient
+		.from("teams")
+		.select("id, name, players:players(id, name)")
+		.order("name", { ascending: true });
 
-	teamsLoadPromise = (async () => {
-		// load teams + players from Supabase
-		const { data: teams, error: teamErr } = await supabaseClient
-			.from("teams")
-			.select("id, name, players:players(id, name)")
-			.order("name", { ascending: true });
-
-		if (teamErr) {
-			console.log(teamErr);
-			// fallback to localStorage if you want:
-			const local = localStorage.getItem("wiggleLeague");
-			if (local) league = JSON.parse(local);
-			return league;
-		}
-
-		league.teams = (teams || []).map(t => ({
-			name: t.name,
-			players: (t.players || []).map(p => p.name)
-		}));
-
+	if (teamErr) {
+		console.log(teamErr);
+		// fallback to localStorage if you want:
+		const local = localStorage.getItem("wiggleLeague");
+		if (local) league = JSON.parse(local);
 		return league;
-	})();
-
-	try {
-		return await teamsLoadPromise;
-	} finally {
-		teamsLoadPromise = null;
 	}
+
+	league.teams = (teams || []).map(t => ({
+		name: t.name,
+		players: (t.players || []).map(p => p.name)
+	}));
+
+	return league;
 }
 
 /* ================================
