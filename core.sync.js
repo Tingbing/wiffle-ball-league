@@ -612,24 +612,34 @@ function queueServerSync(reason, { immediate = false } = {}) {
 	else serverSyncTimer = setTimeout(run, 1400);
 }
 
-	async function ensurePostUnlockSetup() {
-		if (postUnlockSetupPromise) return postUnlockSetupPromise;
+async function ensurePostUnlockSetup() {
+	if (postUnlockSetupPromise) return postUnlockSetupPromise;
 
-		postUnlockSetupPromise = (async () => {
-			setSyncButtonEnabled(false);
+	postUnlockSetupPromise = (async () => {
+		setSyncButtonEnabled(false);
 
-			// Best effort: pull down newer server snapshot before enabling autosync
-			try { await hydrateFromServerIfNewer(); } catch (e) {}
+		// Make startup deterministic:
+		// do not hydrate/start realtime/autosync until teams have finished loading.
+		try { await load(); } catch (e) {}
 
-			// Start realtime listeners
-			try { await startRealtime(); } catch (e) {}
+		// Best effort: pull down newer server snapshot before enabling autosync
+		try { await hydrateFromServerIfNewer(); } catch (e) {}
 
-			autoSyncEnabled = true;
-			setSyncButtonEnabled(true);
-		})();
+		// Start realtime listeners only after the initial team load is settled
+		try { await startRealtime(); } catch (e) {}
 
-		return postUnlockSetupPromise;
-	}
+		autoSyncEnabled = true;
+		setSyncButtonEnabled(true);
+		return true;
+	})().catch((err) => {
+		postUnlockSetupPromise = null;
+		autoSyncEnabled = false;
+		setSyncButtonEnabled(false);
+		throw err;
+	});
+
+	return postUnlockSetupPromise;
+}
 
 	function scheduleTeamsReload() {
 		if (teamsReloadTimer) clearTimeout(teamsReloadTimer);
