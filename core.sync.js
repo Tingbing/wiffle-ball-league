@@ -496,10 +496,41 @@ function applyServerSeasonRow(row, { force = false, source = "server" } = {}) {
 	if (!row) return false;
 
 	const info = getRowRevisionInfo(row);
-	const localDirty = hasUnsyncedLocalChanges();
+	const localSeasonSnapshot = ensureSeasonShape(deepCloneJson(readJsonStorage(SEASON_STORAGE_KEY, season)));
+	const localScheduleSnapshot = ensureScheduleShape(deepCloneJson(readJsonStorage(SCHEDULE_STORAGE_KEY, schedule)));
+	normalizeSnapshotMeta(localSeasonSnapshot, "season");
+	normalizeSnapshotMeta(localScheduleSnapshot, "schedule");
+
+	const localSeasonRevision = getSeasonRevisionFrom(localSeasonSnapshot);
+	const localScheduleRevision = getScheduleRevisionFrom(localScheduleSnapshot);
+	const localDirty =
+		localSeasonRevision > (syncState.serverSeasonRevision || 0) ||
+		localScheduleRevision > (syncState.serverScheduleRevision || 0);
+
+	const localSnapshotAheadOfIncoming =
+		localSeasonRevision > info.seasonRevision ||
+		localScheduleRevision > info.scheduleRevision;
+
+	const localSnapshotMs = Math.max(
+		Date.parse(localSeasonSnapshot?._meta?.updated_at || "") || 0,
+		Date.parse(localScheduleSnapshot?._meta?.updated_at || "") || 0
+	);
+	const incomingSnapshotMs = Date.parse(info.updatedAt || "") || 0;
+	const localSnapshotWinsTimestampTie =
+		localSeasonRevision === info.seasonRevision &&
+		localScheduleRevision === info.scheduleRevision &&
+		localSnapshotMs > incomingSnapshotMs;
+
 	const sameOrOlderData =
 		info.seasonRevision <= (syncState.serverSeasonRevision || 0) &&
 		info.scheduleRevision <= (syncState.serverScheduleRevision || 0);
+
+	// Public/read-only refresh must never overwrite a newer dirty local editable snapshot.
+	// Keep public refresh working normally in all safe cases, but silently refuse the apply
+	// when the local saved snapshot is ahead.
+	if (source === "public-view" && localDirty && (localSnapshotAheadOfIncoming || localSnapshotWinsTimestampTie)) {
+		return false;
+	}
 
 	if (!force && localDirty && !sameOrOlderData) {
 		persistActiveGameLock(row.active_game_lock || null);
