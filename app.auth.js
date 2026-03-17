@@ -483,31 +483,28 @@ async function beginFullAccessFlow() {
   }
 
   const session = authState.session;
-  CURRENT_EMAIL = (session?.user?.email || "").trim();
+  CURRENT_EMAIL = "";
 
-  if (!session) {
-    setPublicViewOnlyMode(true);
-
-    const msg = authState.timedOut
-      ? "Saved login check took too long. Sign in with your email for full league access."
-      : "Sign in with your email for full league access.";
-
-    showGate("login", msg);
-    try { await updateAuthUI(); } catch (e) {}
-    return false;
+  // Always require email first before league code.
+  // If a remembered Supabase session exists, clear it now so the user must
+  // go through the email step again.
+  if (session) {
+    try {
+      await supabaseClient.auth.signOut();
+    } catch (e) {
+      console.warn("Could not clear remembered session before login flow:", e);
+    }
   }
 
-  setPublicViewOnlyMode(false);
+  setLeagueUnlocked(false);
+  setPublicViewOnlyMode(true);
 
-  if (!isLeagueUnlocked()) {
-    showGate("code", "Logged in. Now enter the league code.");
-    try { await updateAuthUI(); } catch (e) {}
-    return false;
-  }
+  const gateEmailEl = document.getElementById("gateLoginEmail");
+  if (gateEmailEl) gateEmailEl.value = "";
 
-  await finishAccessGrant();
+  showGate("login", "Sign in with your email for full league access.");
   try { await updateAuthUI(); } catch (e) {}
-  return true;
+  return false;
 }
 
 async function evaluateAccess() {
