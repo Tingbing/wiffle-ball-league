@@ -618,14 +618,10 @@ async function ensurePostUnlockSetup() {
 	postUnlockSetupPromise = (async () => {
 		setSyncButtonEnabled(false);
 
-		// Make startup deterministic:
-		// do not hydrate/start realtime/autosync until teams have finished loading.
-		try { await load(); } catch (e) {}
-
 		// Best effort: pull down newer server snapshot before enabling autosync
 		try { await hydrateFromServerIfNewer(); } catch (e) {}
 
-		// Start realtime listeners only after the initial team load is settled
+		// Start realtime listeners
 		try { await startRealtime(); } catch (e) {}
 
 		autoSyncEnabled = true;
