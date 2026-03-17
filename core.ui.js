@@ -291,110 +291,112 @@ const { data: teamRow, error: tErr } = await supabaseClient
 }
 
 
+async function removeTeam(teamIndex) {
+	if (!(await requireLogin())) return;
 
-	async function removeTeam(teamIndex) {
-		if (!(await requireLogin())) return;
+	const teamName = league.teams?.[teamIndex]?.name;
+	if (!teamName) return;
 
-		const teamName = league.teams?.[teamIndex]?.name;
-		if (!teamName) return;
-
-	const removeTeamMsg = hasRecordedSeasonGames()
-	? (
-		"⚠️ This season already has recorded games.\n\n" +
-		"Removing a team now can break schedule matching and season history.\n\n" +
-		"Recommended: clear/reset season stats first if you want to start a new season.\n\n" +
-		`Remove team "${teamName}" anyway? This will delete it for everyone.`
-	)
-	: "Remove this team? This will delete it for everyone.";
-
-if (!confirm(removeTeamMsg)) return;
-
-		try {
-			// Look up team id
-			const { data: teamRow, error: tErr } = await supabaseClient
-				.from("teams")
-				.select("id")
-				.eq("name", teamName)
-				.single();
-
-			if (tErr) throw tErr;
-
-			// Delete players first (safe even if FK cascade exists)
-			await supabaseClient.from("players").delete().eq("team_id", teamRow.id);
-			const { error: delErr } = await supabaseClient.from("teams").delete().eq("id", teamRow.id);
-			if (delErr) throw delErr;
-
-			// Remove that team's season stats locally too (prevents ghost rows)
-			try {
-				if (season?.playerStats) {
-					Object.keys(season.playerStats).forEach(k => {
-						if (k.startsWith(teamName + "|")) delete season.playerStats[k];
-					});
-				}
-				if (season?.teamRecords) delete season.teamRecords[teamName];
-				saveSeason();
-			} catch (e) {}
-
-			await load();
-			syncTeamRecordsWithLeague();
-			update();
-			showNotification("✅ Team deleted", 1400);
-		} catch (e) {
-			console.log(e);
-			alert(e.message || "Could not delete team.");
-		}
+	if (hasRecordedSeasonGames()) {
+		alert(
+			"⚠️ Team deletion blocked\n\n" +
+			"This season already has recorded games.\n\n" +
+			`Removing team "${teamName}" now would erase season history and break the frozen schedule.\n\n` +
+			"To change teams safely, use Reset Season Data first and then rebuild the season."
+		);
+		return;
 	}
 
-	async function removePlayer(teamIndex, playerIndex) {
-		if (!(await requireLogin())) return;
+	if (!confirm(`Remove team "${teamName}"? This will delete it for everyone.`)) return;
 
-		const teamName = league.teams?.[teamIndex]?.name;
-		const playerName = league.teams?.[teamIndex]?.players?.[playerIndex];
-		if (!teamName || !playerName) return;
+	try {
+		// Look up team id
+		const { data: teamRow, error: tErr } = await supabaseClient
+			.from("teams")
+			.select("id")
+			.eq("name", teamName)
+			.single();
 
-	const removePlayerMsg = hasRecordedSeasonGames()
-	? (
-		"⚠️ This season already has recorded games.\n\n" +
-		"Removing a player now can put season history and schedule data out of sync.\n\n" +
-		"Recommended: clear/reset season stats first if you want to start a new season.\n\n" +
-		`Remove player "${playerName}" anyway? This will delete them for everyone.`
-	)
-	: "Remove this player? This will delete them for everyone.";
+		if (tErr) throw tErr;
 
-if (!confirm(removePlayerMsg)) return;
+		// Delete players first (safe even if FK cascade exists)
+		await supabaseClient.from("players").delete().eq("team_id", teamRow.id);
+		const { error: delErr } = await supabaseClient.from("teams").delete().eq("id", teamRow.id);
+		if (delErr) throw delErr;
 
+		// Remove that team's season stats locally too (prevents ghost rows)
 		try {
-			const { data: teamRow, error: tErr } = await supabaseClient
-				.from("teams")
-				.select("id")
-				.eq("name", teamName)
-				.single();
-			if (tErr) throw tErr;
+			if (season?.playerStats) {
+				Object.keys(season.playerStats).forEach(k => {
+					if (k.startsWith(teamName + "|")) delete season.playerStats[k];
+				});
+			}
+			if (season?.teamRecords) delete season.teamRecords[teamName];
+			saveSeason();
+		} catch (e) {}
 
-			const { error: pErr } = await supabaseClient
-				.from("players")
-				.delete()
-				.eq("team_id", teamRow.id)
-				.eq("name", playerName);
-
-			if (pErr) throw pErr;
-
-			// Remove player's season stats locally too
-			try {
-				const key = getPlayerKey(teamName, playerName);
-				if (season?.playerStats) delete season.playerStats[key];
-				saveSeason();
-			} catch (e) {}
-
-			await load();
-			syncTeamRecordsWithLeague();
-			update();
-			showNotification("✅ Player deleted", 1400);
-		} catch (e) {
-			console.log(e);
-			alert(e.message || "Could not delete player.");
-		}
+		await load();
+		syncTeamRecordsWithLeague();
+		update();
+		showNotification("✅ Team deleted", 1400);
+	} catch (e) {
+		console.log(e);
+		alert(e.message || "Could not delete team.");
 	}
+}
+
+
+async function removePlayer(teamIndex, playerIndex) {
+	if (!(await requireLogin())) return;
+
+	const teamName = league.teams?.[teamIndex]?.name;
+	const playerName = league.teams?.[teamIndex]?.players?.[playerIndex];
+	if (!teamName || !playerName) return;
+
+	if (hasRecordedSeasonGames()) {
+		alert(
+			"⚠️ Player deletion blocked\n\n" +
+			"This season already has recorded games.\n\n" +
+			`Removing player "${playerName}" from ${teamName} now would erase historical season stats and put the frozen schedule out of sync.\n\n` +
+			"To change players safely, use Reset Season Data first and then rebuild the season."
+		);
+		return;
+	}
+
+	if (!confirm(`Remove player "${playerName}"? This will delete them for everyone.`)) return;
+
+	try {
+		const { data: teamRow, error: tErr } = await supabaseClient
+			.from("teams")
+			.select("id")
+			.eq("name", teamName)
+			.single();
+		if (tErr) throw tErr;
+
+		const { error: pErr } = await supabaseClient
+			.from("players")
+			.delete()
+			.eq("team_id", teamRow.id)
+			.eq("name", playerName);
+
+		if (pErr) throw pErr;
+
+		// Remove player's season stats locally too
+		try {
+			const key = getPlayerKey(teamName, playerName);
+			if (season?.playerStats) delete season.playerStats[key];
+			saveSeason();
+		} catch (e) {}
+
+		await load();
+		syncTeamRecordsWithLeague();
+		update();
+		showNotification("✅ Player deleted", 1400);
+	} catch (e) {
+		console.log(e);
+		alert(e.message || "Could not delete player.");
+	}
+}
 
 /* ================================
    GENERAL UI REFRESH
