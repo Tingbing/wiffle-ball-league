@@ -423,7 +423,7 @@ async function acquireGameLock(lockDetails) {
 
 		const latestRow = await fetchSeasonRowFromServer({ quiet: true });
 		if (latestRow) {
-			applyServerSeasonRow(latestRow);
+			applyServerSeasonRow(latestRow, { source: "lock-acquire" });
 			if (latestRow.active_game_lock) {
 				return { ok: false, reason: "locked", lock: latestRow.active_game_lock, row: latestRow };
 			}
@@ -434,11 +434,11 @@ async function acquireGameLock(lockDetails) {
 
 	if (!row) {
 		const latestRow = await fetchSeasonRowFromServer({ quiet: true });
-		if (latestRow) applyServerSeasonRow(latestRow);
+				if (latestRow) applyServerSeasonRow(latestRow, { source: "lock-acquire" });
 		return { ok: false, reason: "locked", lock: latestRow?.active_game_lock || activeGameLock, row: latestRow || null };
 	}
 
-	applyServerSeasonRow(row);
+		applyServerSeasonRow(row, { source: "lock-acquire" });
 	return { ok: true, lock: row.active_game_lock || lockPayload, lockId, row };
 }
 
@@ -525,10 +525,23 @@ function applyServerSeasonRow(row, { force = false, source = "server" } = {}) {
 		info.seasonRevision <= (syncState.serverSeasonRevision || 0) &&
 		info.scheduleRevision <= (syncState.serverScheduleRevision || 0);
 
-	// Public/read-only refresh must never overwrite a newer dirty local editable snapshot.
+		// Public/read-only refresh must never overwrite a newer dirty local editable snapshot.
 	// Keep public refresh working normally in all safe cases, but silently refuse the apply
 	// when the local saved snapshot is ahead.
 	if (source === "public-view" && localDirty && (localSnapshotAheadOfIncoming || localSnapshotWinsTimestampTie)) {
+		return false;
+	}
+
+	// Lock acquisition updates only lock fields on the server row.
+	// If this tab has newer unsynced local season/schedule data, do not re-apply the
+	// older/equal server snapshot just to pick up the lock. Keep the local snapshot and
+	// only persist the lock state locally.
+	if (
+		source === "lock-acquire" &&
+		localDirty &&
+		(sameOrOlderData || localSnapshotAheadOfIncoming || localSnapshotWinsTimestampTie)
+	) {
+		persistActiveGameLock(row.active_game_lock || null);
 		return false;
 	}
 
