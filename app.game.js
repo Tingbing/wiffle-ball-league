@@ -425,7 +425,7 @@ async function beginLockedGame(t1, t2, scheduleRef = null, extraLockDetails = {}
 		const freshSeriesGame = serverSchedule?.days?.[scheduleRef.dayIndex]?.games?.[scheduleRef.seriesIndex]?.gamesInSeries?.[scheduleRef.seriesGameIndex];
 		if (freshSeriesGame?.result) {
 			await releaseGameLock(attempt.lockId, { quiet: true });
-			applyServerSeasonRow(attempt.row);
+						applyServerSeasonRow(attempt.row, { source: "lock-acquire" });
 			alert("That game was already recorded on another device.");
 			return false;
 		}
