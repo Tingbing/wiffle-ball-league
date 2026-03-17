@@ -1443,29 +1443,47 @@ async function resetSeason() {
 	if (!confirm(msg)) return;
 
 	try {
-		await clearCurrentStatsOnly({ skipConfirm: true, quiet: true, syncToServer: false });
+		const leagueCode = (typeof LEAGUE_CODE !== "undefined" ? String(LEAGUE_CODE) : "").trim();
+		if (!leagueCode) {
+			throw new Error("Missing league code.");
+		}
 
-		if (typeof supabaseClient !== "undefined") {
-			const { data: { user } = {} } = await supabaseClient.auth.getUser();
-			const leagueCode = (typeof LEAGUE_CODE !== "undefined" ? String(LEAGUE_CODE) : "").trim();
+		if (typeof supabaseClient === "undefined" || !supabaseClient) {
+			throw new Error("Supabase client is not available.");
+		}
 
-			if (user && leagueCode) {
-				const { error } = await supabaseClient
-					.from("season_data")
-					.delete()
-					.eq("league_code", leagueCode);
+		const { data: { user } = {}, error: userErr } = await supabaseClient.auth.getUser();
+		if (userErr) throw userErr;
+		if (!user) {
+			throw new Error("You must be signed in with full access before resetting the season.");
+		}
 
-				if (error) {
-					console.warn("Season reset: server delete failed:", error);
-				}
-			}
+		const { error: deleteErr } = await supabaseClient
+			.from("season_data")
+			.delete()
+			.eq("league_code", leagueCode);
+
+		if (deleteErr) throw deleteErr;
+
+		const cleared = await clearCurrentStatsOnly({
+			skipConfirm: true,
+			quiet: true,
+			syncToServer: false
+		});
+
+		if (!cleared) {
+			throw new Error("Local reset step did not complete.");
 		}
 
 		refreshStatsBackupViews();
 		showNotification("✅ Season reset complete.", 1800);
 	} catch (err) {
-		console.error(err);
-		alert("❌ Reset failed. Check console for details.");
+		console.error("Season reset failed before completion:", err);
+		alert(
+			"❌ Reset failed.\n\n" +
+			"The server backup could not be fully deleted, so the season was NOT cleared locally.\n\n" +
+			"Your current local data was left unchanged."
+		);
 	}
 }
 
