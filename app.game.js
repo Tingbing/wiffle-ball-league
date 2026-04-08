@@ -1517,9 +1517,49 @@ async function saveGameStats() {
 	const completedEntryId = completedEntry?.id || null;
 	const existingEntry = findCompletedGameLogEntry(completedEntryId);
 
+	const scheduledRef =
+		game?._scheduleRef &&
+		Number.isInteger(game._scheduleRef.dayIndex) &&
+		Number.isInteger(game._scheduleRef.seriesIndex) &&
+		Number.isInteger(game._scheduleRef.seriesGameIndex)
+			? {
+				dayIndex: game._scheduleRef.dayIndex,
+				seriesIndex: game._scheduleRef.seriesIndex,
+				seriesGameIndex: game._scheduleRef.seriesGameIndex
+			}
+			: null;
+
+	if (scheduledRef) {
+		const scheduledSeriesEntry = schedule?.days?.[scheduledRef.dayIndex]?.games?.[scheduledRef.seriesIndex];
+		const scheduledSeriesGame = scheduledSeriesEntry?.gamesInSeries?.[scheduledRef.seriesGameIndex];
+		const teamsMatch =
+			!!scheduledSeriesEntry &&
+			(
+				(scheduledSeriesEntry.away === game?.team1?.name && scheduledSeriesEntry.home === game?.team2?.name) ||
+				(scheduledSeriesEntry.away === game?.team2?.name && scheduledSeriesEntry.home === game?.team1?.name)
+			);
+
+		if (!scheduledSeriesEntry || !scheduledSeriesGame || !teamsMatch) {
+			alert(
+				"This scheduled game could not be matched back to its exact season slot. Nothing was saved, so the schedule could not be corrupted. Refresh the season data before trying again."
+			);
+			return false;
+		}
+
+		if (scheduledSeriesGame.result && !existingEntry) {
+			alert("That scheduled game was already recorded. Nothing new was saved.");
+			clearLiveGameAutosave();
+			return await releaseGameLock(game?._lockId || activeGameLock?.lockId || null, { quiet: true });
+		}
+	}
+
 	if (existingEntry) {
 		if (!existingEntry.outcomeApplied) {
-			applyGameOutcomeOnce();
+			const outcomeApplied = applyGameOutcomeOnce();
+			if (!outcomeApplied) {
+				alert("This completed game could not be linked back to the exact scheduled slot, so its result was not applied.");
+				return false;
+			}
 			markCompletedGameOutcomeApplied(completedEntryId);
 			saveSeason();
 		}
@@ -1528,35 +1568,41 @@ async function saveGameStats() {
 		return await releaseGameLock(game?._lockId || activeGameLock?.lockId || null, { quiet: true });
 	}
 
-for (let key in game.gameStats) {
-	const gameStats = ensureExtendedStatFields(game.gameStats[key]);
-	const seasonStats = ensureExtendedStatFields(
-		getOrCreateSeasonStatsByKey(key, gameStats.teamName, gameStats.playerName)
-	);
+	for (let key in game.gameStats) {
+		const gameStats = ensureExtendedStatFields(game.gameStats[key]);
+		const seasonStats = ensureExtendedStatFields(
+			getOrCreateSeasonStatsByKey(key, gameStats.teamName, gameStats.playerName)
+		);
 
-	seasonStats.atBats = Number(seasonStats.atBats || 0) + Number(gameStats.atBats || 0);
-	seasonStats.hits = Number(seasonStats.hits || 0) + Number(gameStats.hits || 0);
-	seasonStats.singles = Number(seasonStats.singles || 0) + Number(gameStats.singles || 0);
-	seasonStats.doubles = Number(seasonStats.doubles || 0) + Number(gameStats.doubles || 0);
-	seasonStats.triples = Number(seasonStats.triples || 0) + Number(gameStats.triples || 0);
-	seasonStats.homeRuns = Number(seasonStats.homeRuns || 0) + Number(gameStats.homeRuns || 0);
-	seasonStats.walks = Number(seasonStats.walks || 0) + Number(gameStats.walks || 0);
-	seasonStats.hitByPitch = Number(seasonStats.hitByPitch || 0) + Number(gameStats.hitByPitch || 0);
-	seasonStats.strikeouts = Number(seasonStats.strikeouts || 0) + Number(gameStats.strikeouts || 0);
-	seasonStats.outs = Number(seasonStats.outs || 0) + Number(gameStats.outs || 0);
-	seasonStats.rbis = Number(seasonStats.rbis || 0) + Number(gameStats.rbis || 0);
-	seasonStats.runsScored = Number(seasonStats.runsScored || 0) + Number(gameStats.runsScored || 0);
-	seasonStats.pitchOuts = Number(seasonStats.pitchOuts || 0) + Number(gameStats.pitchOuts || 0);
-	seasonStats.pitchStrikeouts = Number(seasonStats.pitchStrikeouts || 0) + Number(gameStats.pitchStrikeouts || 0);
-	seasonStats.fieldingErrors = Number(seasonStats.fieldingErrors || 0) + Number(gameStats.fieldingErrors || 0);
-syncPitchingInnings(seasonStats);
-	seasonStats.runsAllowed = Number(seasonStats.runsAllowed || 0) + Number(gameStats.runsAllowed || 0);
-	seasonStats.earnedRunsAllowed = Number(seasonStats.earnedRunsAllowed || 0) + Number(gameStats.earnedRunsAllowed || 0);
-}
+		seasonStats.atBats = Number(seasonStats.atBats || 0) + Number(gameStats.atBats || 0);
+		seasonStats.hits = Number(seasonStats.hits || 0) + Number(gameStats.hits || 0);
+		seasonStats.singles = Number(seasonStats.singles || 0) + Number(gameStats.singles || 0);
+		seasonStats.doubles = Number(seasonStats.doubles || 0) + Number(gameStats.doubles || 0);
+		seasonStats.triples = Number(seasonStats.triples || 0) + Number(gameStats.triples || 0);
+		seasonStats.homeRuns = Number(seasonStats.homeRuns || 0) + Number(gameStats.homeRuns || 0);
+		seasonStats.walks = Number(seasonStats.walks || 0) + Number(gameStats.walks || 0);
+		seasonStats.hitByPitch = Number(seasonStats.hitByPitch || 0) + Number(gameStats.hitByPitch || 0);
+		seasonStats.strikeouts = Number(seasonStats.strikeouts || 0) + Number(gameStats.strikeouts || 0);
+		seasonStats.outs = Number(seasonStats.outs || 0) + Number(gameStats.outs || 0);
+		seasonStats.rbis = Number(seasonStats.rbis || 0) + Number(gameStats.rbis || 0);
+		seasonStats.runsScored = Number(seasonStats.runsScored || 0) + Number(gameStats.runsScored || 0);
+		seasonStats.pitchOuts = Number(seasonStats.pitchOuts || 0) + Number(gameStats.pitchOuts || 0);
+		seasonStats.pitchStrikeouts = Number(seasonStats.pitchStrikeouts || 0) + Number(gameStats.pitchStrikeouts || 0);
+		seasonStats.fieldingErrors = Number(seasonStats.fieldingErrors || 0) + Number(gameStats.fieldingErrors || 0);
+		syncPitchingInnings(seasonStats);
+		seasonStats.runsAllowed = Number(seasonStats.runsAllowed || 0) + Number(gameStats.runsAllowed || 0);
+		seasonStats.earnedRunsAllowed = Number(seasonStats.earnedRunsAllowed || 0) + Number(gameStats.earnedRunsAllowed || 0);
+	}
 
 	saveCompletedGameLog({ outcomeApplied: false });
 	saveSeason({ skipServerSync: true });
-	applyGameOutcomeOnce();
+
+	const outcomeApplied = applyGameOutcomeOnce();
+	if (!outcomeApplied) {
+		alert("This completed game could not be linked back to the exact scheduled slot, so its result was not applied.");
+		return false;
+	}
+
 	markCompletedGameOutcomeApplied(completedEntryId);
 	saveSeason();
 	clearLiveGameAutosave();
