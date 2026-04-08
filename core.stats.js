@@ -740,6 +740,25 @@ function validateScheduleStructure(scheduleObj, rosterLookup, errors, warnings) 
 			warnings.push("Backup roster snapshot could not be normalized cleanly.");
 		}
 	}
+
+	const config = getScheduleConfigForTeams(normalizedTeamNames);
+	if (!config) {
+		errors.push("Backup schedule uses an unsupported team count. Saved schedules must be for exactly 4 or 5 teams.");
+		return;
+	}
+
+	const normalizedSchedule = ensureScheduleShape(deepCloneJson(scheduleObj) || { days: [], teamNames: [] });
+	normalizedSchedule.teamNames = normalizedTeamNames.slice();
+
+	if (!isScheduleCurrentFormat(normalizedSchedule, normalizedTeamNames.slice())) {
+		if (config.id === SCHEDULE_FORMAT_DOUBLE_ROUND_ROBIN_4) {
+			errors.push("Backup schedule is not a valid 4-team double round robin.");
+		} else if (config.id === SCHEDULE_FORMAT_SINGLE_ROUND_ROBIN_5) {
+			errors.push("Backup schedule is not a valid 5-team single round robin.");
+		} else {
+			errors.push("Backup schedule does not match a supported season format.");
+		}
+	}
 }
 
 function validateSeasonGameLogs(seasonObj, scheduleObj, rosterLookup, errors, warnings) {
