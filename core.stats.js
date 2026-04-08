@@ -116,7 +116,7 @@ function loadSeason() {
 	}
 
 function updateScheduleForCompletedGame(teamA, teamB, resultObj) {
-	if (!schedule?.days?.length) return;
+	if (!schedule?.days?.length) return false;
 
 	const applySeriesWinLoss = (seriesEntry) => {
 		if (!seriesEntry || seriesEntry._seriesStandingsApplied || !seriesEntry.result) return;
@@ -129,60 +129,42 @@ function updateScheduleForCompletedGame(teamA, teamB, resultObj) {
 		seriesEntry._seriesStandingsApplied = true;
 	};
 
-	// exact scheduled slot
 	const ref = game?._scheduleRef;
-	if (ref && Number.isInteger(ref.dayIndex) && Number.isInteger(ref.seriesIndex) && Number.isInteger(ref.seriesGameIndex)) {
-		const day = schedule.days[ref.dayIndex];
-		const seriesEntry = day?.games?.[ref.seriesIndex];
-		const seriesGame = seriesEntry?.gamesInSeries?.[ref.seriesGameIndex];
+	const hasExactRef =
+		ref &&
+		Number.isInteger(ref.dayIndex) &&
+		Number.isInteger(ref.seriesIndex) &&
+		Number.isInteger(ref.seriesGameIndex);
 
-		if (seriesEntry && seriesGame) {
-			if (seriesGame.result) return; // already recorded
+	if (!hasExactRef) return false;
 
-			seriesGame.result = resultObj;
+	const day = schedule.days[ref.dayIndex];
+	const seriesEntry = day?.games?.[ref.seriesIndex];
+	const seriesGame = seriesEntry?.gamesInSeries?.[ref.seriesGameIndex];
 
-			if (!seriesEntry.result) {
-				seriesEntry.result = computeSeriesResult(seriesEntry);
-				applySeriesWinLoss(seriesEntry);
-			}
+	if (!seriesEntry || !seriesGame) return false;
 
-			saveSchedule();
-			return;
-		}
-	}
+	const teamsMatch =
+		(seriesEntry.away === teamA && seriesEntry.home === teamB) ||
+		(seriesEntry.away === teamB && seriesEntry.home === teamA);
 
-	// fallback
-	for (const day of schedule.days) {
-		for (const seriesEntry of (day.games || [])) {
-			const match =
-				(seriesEntry.away === teamA && seriesEntry.home === teamB) ||
-				(seriesEntry.away === teamB && seriesEntry.home === teamA);
+	if (!teamsMatch) return false;
+	if (seriesGame.result) return true; // idempotent retry; do not double-apply
 
-			if (!match) continue;
-
-			const openGame = (seriesEntry.gamesInSeries || []).find(seriesGame => !seriesGame.result);
-			if (!openGame) continue;
-
-			openGame.result = resultObj;
-
-			if (!seriesEntry.result) {
-				seriesEntry.result = computeSeriesResult(seriesEntry);
-				applySeriesWinLoss(seriesEntry);
-			}
-
-			saveSchedule();
-			return;
-		}
-	}
+	seriesGame.result = resultObj;
+	seriesEntry.result = computeSeriesResult(seriesEntry);
+	applySeriesWinLoss(seriesEntry);
+	saveSchedule();
+	return true;
 }
 
 function applyGameOutcomeOnce() {
-	if (!game || game._resultSaved) return;
-	game._resultSaved = true;
+	if (!game) return false;
+	if (game._resultSaved) return true;
 
 	const t1 = game.team1?.name;
 	const t2 = game.team2?.name;
-	if (!t1 || !t2) return;
+	if (!t1 || !t2) return false;
 
 	const s1 = Number(game.team1Score || 0);
 	const s2 = Number(game.team2Score || 0);
@@ -216,12 +198,16 @@ function applyGameOutcomeOnce() {
 		};
 	}
 
-	// scheduled series game -> store game result, series result happens after all 3
-	if (game?._scheduleRef &&
+	let outcomeApplied = true;
+
+	// scheduled series game -> store exact game result, then series result after all 3
+	if (
+		game?._scheduleRef &&
 		Number.isInteger(game._scheduleRef.dayIndex) &&
-		Number.isInteger(game._scheduleRef.seriesIndex)
+		Number.isInteger(game._scheduleRef.seriesIndex) &&
+		Number.isInteger(game._scheduleRef.seriesGameIndex)
 	) {
-		updateScheduleForCompletedGame(t1, t2, resultObj);
+		outcomeApplied = updateScheduleForCompletedGame(t1, t2, resultObj);
 	}
 	// manual game -> old single-game win/loss behavior
 	else if (s1 !== s2) {
@@ -231,7 +217,11 @@ function applyGameOutcomeOnce() {
 		getTeamRecord(loser).losses += 1;
 	}
 
+	if (!outcomeApplied) return false;
+
+	game._resultSaved = true;
 	saveSeason();
+	return true;
 }
 
 const STATS_BACKUP_KIND = "wbl_stats_backup";
