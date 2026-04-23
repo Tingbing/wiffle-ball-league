@@ -229,6 +229,13 @@
     background: #1b1b1b;
   }
 
+.season-stats-hub-buttons {
+	display: grid;
+	grid-template-columns: repeat(2, minmax(0, 1fr));
+	gap: 10px;
+	margin-bottom: 10px;
+}
+
 .season-stats-layout {
 	display: grid;
 	grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -471,20 +478,22 @@
 	color: #888;
 }
 
-  /* Mobile-friendly stats tables (prevents cutoff on small screens) */
+    /* Mobile-friendly stats tables (prevents cutoff on small screens) */
   @media (max-width: 720px) {
 	.past-game-browser-grid,
 	.past-game-team-grid {
 		grid-template-columns: 1fr;
 	}
-	  
-	  	.season-stats-layout {
+
+	.season-stats-hub-buttons,
+	.season-stats-layout {
 		grid-template-columns: 1fr;
 	}
-	  	.rankings-grid {
+
+	.rankings-grid {
 		grid-template-columns: 1fr;
 	}
-	  	.rankings-table {
+	.rankings-table {
 		font-size: 13px;
 	}
 	.rankings-col-rank {
