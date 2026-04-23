@@ -1456,6 +1456,7 @@ let scoringEvents = [];
 		earnedRuns = res.earnedRuns;
 		rbis = res.rbis;
 		pitcherCharges = res.pitcherCharges || {};
+		scoringEvents = res.scoringEvents || [];
 
 		if (!reachedOnError) {
 			batterStats.hits++;
@@ -1469,6 +1470,7 @@ let scoringEvents = [];
 		earnedRuns = res.earnedRuns;
 		rbis = res.rbis;
 		pitcherCharges = res.pitcherCharges || {};
+		scoringEvents = res.scoringEvents || [];
 
 		if (!reachedOnError) {
 			batterStats.hits++;
@@ -1482,6 +1484,7 @@ let scoringEvents = [];
 		earnedRuns = res.earnedRuns;
 		rbis = res.rbis;
 		pitcherCharges = res.pitcherCharges || {};
+		scoringEvents = res.scoringEvents || [];
 
 		if (!reachedOnError) {
 			batterStats.hits++;
@@ -1495,6 +1498,7 @@ let scoringEvents = [];
 		earnedRuns = res.earnedRuns;
 		rbis = res.rbis;
 		pitcherCharges = res.pitcherCharges || {};
+		scoringEvents = res.scoringEvents || [];
 
 		batterStats.hits++;
 		batterStats.homeRuns++;
@@ -1506,6 +1510,7 @@ let scoringEvents = [];
 		earnedRuns = res.earnedRuns;
 		rbis = res.rbis;
 		pitcherCharges = res.pitcherCharges || {};
+		scoringEvents = res.scoringEvents || [];
 
 		batterStats.walks++;
 		batterStats.rbis += rbis;
@@ -1516,6 +1521,7 @@ let scoringEvents = [];
 		earnedRuns = res.earnedRuns;
 		rbis = res.rbis;
 		pitcherCharges = res.pitcherCharges || {};
+		scoringEvents = res.scoringEvents || [];
 
 		batterStats.hitByPitch++;
 		batterStats.rbis += rbis;
@@ -1533,7 +1539,7 @@ let scoringEvents = [];
 		if (game.gameStats[fielderKey]) game.gameStats[fielderKey].fieldingErrors++;
 	}
 
-	applyHalfInningRuns(runs);
+	applyHalfInningRuns(runs, scoringEvents || []);
 	syncPitchingInnings(pitcherStats);
 
 	lastPlay = {
@@ -1595,6 +1601,19 @@ function buildCompletedGameLogEntry() {
 			? `scheduled-${scheduleRef.dayIndex}-${scheduleRef.seriesIndex}-${scheduleRef.seriesGameIndex}`
 			: `manual-${game._lockId || playedAt}-${game.team1.name}-${game.team2.name}`);
 
+	const subsUsed = [game.team1, game.team2].flatMap(teamObj => {
+		const meta = teamObj?._playerMeta || {};
+		return (teamObj?.players || []).map(playerName => {
+			const playerMeta = meta[playerName] || null;
+			if (!playerMeta?.isSub) return null;
+			return {
+				teamName: teamObj.name,
+				subName: playerName,
+				replacedPlayer: playerMeta.originalPlayer || null
+			};
+		}).filter(Boolean);
+	});
+
 	return {
 		id,
 		playedAt,
@@ -1603,10 +1622,20 @@ function buildCompletedGameLogEntry() {
 		team1Score: Number(game.team1Score || 0),
 		team2Score: Number(game.team2Score || 0),
 		scheduleRef,
+		scheduleMeta: game?._lockInfo ? {
+			type: game._lockInfo.type || (scheduleRef ? "scheduled" : "manual"),
+			dayNumber: Number(game._lockInfo.dayNumber || 0) || null,
+			seriesNumber: Number(game._lockInfo.seriesNumber || 0) || null,
+			seriesGameNumber: Number(game._lockInfo.seriesGameNumber || 0) || null
+		} : null,
 		lineups: {
 			[game.team1.name]: Array.isArray(game.team1.players) ? game.team1.players.slice() : [],
 			[game.team2.name]: Array.isArray(game.team2.players) ? game.team2.players.slice() : []
 		},
+		lineScore: deepCloneJson(game.lineScore || {}),
+		winningPitcher: deepCloneJson(game?.pitcherDecisions?.winningPitcher || null),
+		losingPitcher: deepCloneJson(game?.pitcherDecisions?.losingPitcher || null),
+		subsUsed,
 		lockId: game._lockId || null,
 		gameInstanceId: game._gameInstanceId || null,
 		playerStats: Object.values(game.gameStats || {}).map(stats => ({ ...stats })),
@@ -2776,18 +2805,35 @@ function buildLegacyPastGameEntry(dayObj, seriesEntry, seriesGame, dayIndex, ser
 		hasDetailedStats: false,
 		playerStats: [],
 		lineups: {},
+		lineScore: null,
+		winningPitcher: null,
+		losingPitcher: null,
+		subsUsed: [],
 		scheduleRef: { dayIndex, seriesIndex, seriesGameIndex },
+		scheduleMeta: {
+			type: "scheduled",
+			dayNumber: Number(dayObj?.day || (dayIndex + 1)),
+			seriesNumber: Number(seriesEntry?.gameNumber || (seriesIndex + 1)),
+			seriesGameNumber: Number(seriesGame?.gameNumber || (seriesGameIndex + 1))
+		},
 		scheduleLabel: `Game Day ${Number(dayObj?.day || (dayIndex + 1))}`
 	};
 }
 
 function normalizePastGameEntry(entry) {
 	if (!entry) return null;
+	const lineScore = entry.lineScore && typeof entry.lineScore === "object" ? deepCloneJson(entry.lineScore) : null;
+	const subsUsed = Array.isArray(entry.subsUsed) ? entry.subsUsed.map(item => ({ ...item })) : [];
 	return {
 		...entry,
 		playedAt: Number(entry.playedAt || 0),
 		playerStats: Array.isArray(entry.playerStats) ? entry.playerStats.map(stats => ({ ...stats })) : [],
 		lineups: entry.lineups && typeof entry.lineups === "object" ? { ...entry.lineups } : {},
+		lineScore,
+		winningPitcher: entry?.winningPitcher ? { ...entry.winningPitcher } : null,
+		losingPitcher: entry?.losingPitcher ? { ...entry.losingPitcher } : null,
+		subsUsed,
+		scheduleMeta: entry?.scheduleMeta && typeof entry.scheduleMeta === "object" ? { ...entry.scheduleMeta } : null,
 		hasDetailedStats: Array.isArray(entry.playerStats) && entry.playerStats.length > 0
 	};
 }
@@ -2812,6 +2858,11 @@ function getPastGameLogEntries() {
 	});
 
 	return Array.from(entriesById.values()).sort((a, b) => Number(b.playedAt || 0) - Number(a.playedAt || 0));
+}
+
+function getPastGameEntryForScheduleSlot(dayIndex, seriesIndex, seriesGameIndex) {
+	const entryId = `scheduled-${dayIndex}-${seriesIndex}-${seriesGameIndex}`;
+	return getPastGameLogEntries().find(entry => entry.id === entryId) || null;
 }
 
 function getPastGameBrowserMeta(entry) {
@@ -2987,11 +3038,18 @@ function createPastGameBattingTable(entry, teamName) {
 }
 
 function createPastGamePitchingTable(entry, teamName) {
-	const teamStats = getPastGameStatsForTeam(entry, teamName);
+	const allTeamStats = getPastGameStatsForTeam(entry, teamName);
+	const teamStats = allTeamStats.filter(stats =>
+		Number(stats.pitchOuts || 0) > 0 ||
+		Number(stats.pitchStrikeouts || 0) > 0 ||
+		Number(stats.runsAllowed || 0) > 0 ||
+		Number(stats.earnedRunsAllowed || 0) > 0
+	);
+	const rowsSource = teamStats.length ? teamStats : allTeamStats;
 	const headers = ["Player", "IP", "K's", "K/3", "R", "ER", "ERA", "Errors"];
 
-	const rows = teamStats.map(stats => {
-const innings = getPitchingInningsValue(stats);
+	const rows = rowsSource.map(stats => {
+		const innings = getPitchingInningsValue(stats);
 		const kPer3 = innings > 0 ? ((Number(stats.pitchStrikeouts || 0) / innings) * 3).toFixed(2) : "-";
 		const era = innings > 0 ? ((Number(stats.earnedRunsAllowed || 0) / innings) * 3).toFixed(2) : "-";
 
@@ -3008,6 +3066,121 @@ const innings = getPitchingInningsValue(stats);
 	});
 
 	return createPastGameStatsTable(headers, rows);
+}
+
+function getPastGameTeamErrorTotal(entry, teamName) {
+	return getPastGameStatsForTeam(entry, teamName).reduce((sum, stats) => sum + Number(stats.fieldingErrors || 0), 0);
+}
+
+function getPastGameScheduleSlotLabel(entry) {
+	const meta = entry?.scheduleMeta || null;
+	if (meta?.dayNumber && meta?.seriesNumber && meta?.seriesGameNumber) {
+		return `Day ${meta.dayNumber} • Series ${meta.seriesNumber} • Game ${meta.seriesGameNumber}`;
+	}
+	if (entry?.scheduleLabel) return entry.scheduleLabel;
+	return entry?.scheduleRef ? "Scheduled game" : "Manual game";
+}
+
+function getPastGameDetailLevelLabel(entry) {
+	if (!entry?.hasDetailedStats) return "Score only";
+	if (entry?.lineScore && typeof entry.lineScore === "object") return "Full box score";
+	return "Detailed lines only";
+}
+
+function createPastGameLineScoreCard(entry) {
+	const card = document.createElement("div");
+	card.className = "card";
+	card.innerHTML = `<h4>Line Score</h4>`;
+
+	const lineScore = entry?.lineScore && typeof entry.lineScore === "object" ? entry.lineScore : null;
+	const team1Runs = Array.isArray(lineScore?.[entry.team1Name]) ? lineScore[entry.team1Name] : [];
+	const team2Runs = Array.isArray(lineScore?.[entry.team2Name]) ? lineScore[entry.team2Name] : [];
+	const inningCount = lineScore ? Math.max(team1Runs.length, team2Runs.length, 3) : 0;
+
+	if (!inningCount) {
+		const note = document.createElement("p");
+		note.className = "season-stats-note";
+		note.textContent = entry?.hasDetailedStats
+			? "Inning-by-inning line score was not stored for this older saved game."
+			: "Full inning-by-inning line score was not stored for this older game.";
+		card.appendChild(note);
+		return card;
+	}
+
+	const table = document.createElement("table");
+	table.className = "stats-table responsive past-game-line-score-table";
+	const thead = document.createElement("thead");
+	const headRow = document.createElement("tr");
+	["Team", ...Array.from({ length: inningCount }, (_, index) => String(index + 1)), "R", "E"].forEach(label => {
+		const th = document.createElement("th");
+		th.textContent = label;
+		headRow.appendChild(th);
+	});
+	thead.appendChild(headRow);
+	table.appendChild(thead);
+
+	const tbody = document.createElement("tbody");
+	[
+		{ teamName: entry.team1Name, inningRuns: team1Runs, totalRuns: entry.team1Score },
+		{ teamName: entry.team2Name, inningRuns: team2Runs, totalRuns: entry.team2Score }
+	].forEach(row => {
+		const tr = document.createElement("tr");
+		const values = [
+			row.teamName,
+			...Array.from({ length: inningCount }, (_, index) => Number(row.inningRuns[index] || 0)),
+			row.totalRuns,
+			getPastGameTeamErrorTotal(entry, row.teamName)
+		];
+		values.forEach((value, index) => {
+			const td = document.createElement("td");
+			td.setAttribute("data-label", ["Team", ...Array.from({ length: inningCount }, (_, idx) => String(idx + 1)), "R", "E"][index]);
+			td.textContent = String(value);
+			tr.appendChild(td);
+		});
+		tbody.appendChild(tr);
+	});
+	table.appendChild(tbody);
+	card.appendChild(table);
+
+	return card;
+}
+
+function createPastGameNotesCard(entry) {
+	const card = document.createElement("div");
+	card.className = "card";
+	card.innerHTML = `<h4>Game Notes</h4>`;
+
+	card.appendChild(buildSeasonStatsMetricGrid([
+		{ label: "Winning Pitcher", value: entry?.winningPitcher?.pitcherName ? `${entry.winningPitcher.pitcherName} (${entry.winningPitcher.teamName || ""})` : "-" },
+		{ label: "Losing Pitcher", value: entry?.losingPitcher?.pitcherName ? `${entry.losingPitcher.pitcherName} (${entry.losingPitcher.teamName || ""})` : "-" },
+		{ label: `${entry?.team1Name || "Team 1"} Errors`, value: getPastGameTeamErrorTotal(entry, entry?.team1Name) },
+		{ label: `${entry?.team2Name || "Team 2"} Errors`, value: getPastGameTeamErrorTotal(entry, entry?.team2Name) }
+	]));
+
+	const subs = Array.isArray(entry?.subsUsed) ? entry.subsUsed : [];
+	if (subs.length) {
+		const list = document.createElement("div");
+		list.className = "past-game-sub-list";
+		list.innerHTML = `<div class="season-stats-note" style="margin-bottom:8px;">Subs Used</div>`;
+		subs.forEach(item => {
+			const row = document.createElement("div");
+			row.className = "past-game-sub-item";
+			row.textContent = item?.replacedPlayer
+				? `${item.subName} (${item.teamName}) for ${item.replacedPlayer}`
+				: `${item.subName} (${item.teamName})`;
+			list.appendChild(row);
+		});
+		card.appendChild(list);
+	} else {
+		const note = document.createElement("p");
+		note.className = "season-stats-note";
+		note.textContent = entry?.hasDetailedStats
+			? "No subs were used, or sub usage was not stored for this saved game."
+			: "Sub usage was not stored for this older game.";
+		card.appendChild(note);
+	}
+
+	return card;
 }
 
 function createPastGameTeamCard(entry, teamName, score) {
@@ -3067,26 +3240,31 @@ function createPastGameDetails(entry) {
 		{ label: "Date", value: formatPastGameDate(entry.playedAt) },
 		{ label: "Time", value: formatPastGameTime(entry.playedAt) || "-" },
 		{ label: "Type", value: entry.scheduleRef ? "Scheduled" : "Manual" },
-		{ label: "Detail", value: entry.hasDetailedStats ? "Full box score" : "Score only" }
+		{ label: "Slot", value: getPastGameScheduleSlotLabel(entry) },
+		{ label: "Detail", value: getPastGameDetailLevelLabel(entry) }
 	]));
 
-	if (entry.scheduleLabel) {
-		const note = document.createElement("p");
-		note.className = "season-stats-note";
-		note.textContent = entry.hasDetailedStats
-			? `${entry.scheduleLabel}. Batting and pitching lines below come from the saved game log.`
-			: `${entry.scheduleLabel}. This older game was found from the saved schedule results, but detailed player lines were not stored yet.`;
-		summaryCard.appendChild(note);
+	const note = document.createElement("p");
+	note.className = "season-stats-note";
+	if (!entry.hasDetailedStats) {
+		note.textContent = "This older saved game has a final score, but the full box score was not stored yet.";
+	} else if (!entry.lineScore) {
+		note.textContent = "This saved game includes batting and pitching lines, but inning-by-inning line score and some box score extras were not stored yet.";
+	} else {
+		note.textContent = "This saved game includes the full box score details that were stored at game finalization.";
 	}
-
+	summaryCard.appendChild(note);
 	wrap.appendChild(summaryCard);
+
+	wrap.appendChild(createPastGameLineScoreCard(entry));
+	wrap.appendChild(createPastGameNotesCard(entry));
 
 	if (!entry.hasDetailedStats) {
 		const noDetailsCard = document.createElement("div");
 		noDetailsCard.className = "card";
 		noDetailsCard.innerHTML = `
 			<h4>Player Performances</h4>
-			<p class="season-stats-note">Detailed player game stats will appear here for games saved after this Past Game Log feature was added.</p>
+			<p class="season-stats-note">Detailed batting and pitching lines were not stored for this older game.</p>
 		`;
 		wrap.appendChild(noDetailsCard);
 		return wrap;
