@@ -1003,6 +1003,11 @@ function sanitizeSeasonGameLogsForRestore(seasonObj) {
 			? entry.playerStats.map(stats => ({ ...createComparableStatsLine(stats) }))
 			: [],
 		lineups: isPlainObject(entry?.lineups) ? deepCloneJson(entry.lineups) : {},
+		lineScore: isPlainObject(entry?.lineScore) ? deepCloneJson(entry.lineScore) : null,
+		winningPitcher: isPlainObject(entry?.winningPitcher) ? deepCloneJson(entry.winningPitcher) : null,
+		losingPitcher: isPlainObject(entry?.losingPitcher) ? deepCloneJson(entry.losingPitcher) : null,
+		subsUsed: Array.isArray(entry?.subsUsed) ? deepCloneJson(entry.subsUsed) : [],
+		scheduleMeta: isPlainObject(entry?.scheduleMeta) ? deepCloneJson(entry.scheduleMeta) : null,
 		scheduleRef: entry?.scheduleRef && typeof entry.scheduleRef === "object"
 			? {
 				dayIndex: Number(entry.scheduleRef.dayIndex),
