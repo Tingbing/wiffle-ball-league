@@ -92,6 +92,42 @@ async function showSeasonStats() {
 	}
 }
 
+async function showPlayerStats() {
+	hideAllScreens();
+	document.getElementById("playerStatsScreen").classList.remove("hidden");
+	updatePublicAccessUI();
+	try { displayPlayerStats(); } catch (e) { console.warn("displayPlayerStats failed:", e); }
+
+	if (isPublicViewOnlyMode()) {
+		try {
+			refreshPublicViewData({ quiet: true })
+				.then(() => {
+					const screen = document.getElementById("playerStatsScreen");
+					if (screen && !screen.classList.contains("hidden")) displayPlayerStats();
+				})
+				.catch((e) => console.warn("public player stats refresh failed:", e));
+		} catch (e) {}
+	}
+}
+
+async function showTeamStats() {
+	hideAllScreens();
+	document.getElementById("teamStatsScreen").classList.remove("hidden");
+	updatePublicAccessUI();
+	try { displayTeamStats(); } catch (e) { console.warn("displayTeamStats failed:", e); }
+
+	if (isPublicViewOnlyMode()) {
+		try {
+			refreshPublicViewData({ quiet: true })
+				.then(() => {
+					const screen = document.getElementById("teamStatsScreen");
+					if (screen && !screen.classList.contains("hidden")) displayTeamStats();
+				})
+				.catch((e) => console.warn("public team stats refresh failed:", e));
+		} catch (e) {}
+	}
+}
+
 async function showRankings() {
 	hideAllScreens();
 	document.getElementById("rankingsScreen").classList.remove("hidden");
@@ -136,6 +172,8 @@ function hideAllScreens() {
 	document.getElementById("gameScreen").classList.add("hidden");
 	document.getElementById("gameOverScreen").classList.add("hidden");
 	document.getElementById("seasonStatsScreen").classList.add("hidden");
+	document.getElementById("playerStatsScreen").classList.add("hidden");
+	document.getElementById("teamStatsScreen").classList.add("hidden");
 	document.getElementById("rankingsScreen").classList.add("hidden");
 	document.getElementById("pastGameLogScreen").classList.add("hidden");
 	document.getElementById("scheduleScreen").classList.add("hidden");
