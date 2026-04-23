@@ -1949,6 +1949,46 @@ function getSeasonPlayerStatsForOption(option) {
 	return season.playerStats?.[getPlayerKey(option.teamName, option.playerName)] || createEmptyStats(option.teamName, option.playerName, { isSub: false });
 }
 
+function getSeasonTeamTotals(team) {
+	const totals = createEmptyStats(team?.name || "", team?.name || "", { isSub: false });
+	const statKeys = [
+		"atBats",
+		"hits",
+		"singles",
+		"doubles",
+		"triples",
+		"homeRuns",
+		"walks",
+		"hitByPitch",
+		"strikeouts",
+		"outs",
+		"rbis",
+		"runsScored",
+		"pitchOuts",
+		"pitchStrikeouts",
+		"fieldingErrors",
+		"inningsPitched",
+		"runsAllowed",
+		"earnedRunsAllowed"
+	];
+
+	const seenPlayers = new Set();
+	(team?.players || []).forEach(playerName => {
+		const normalizedPlayerName = String(playerName || "").trim();
+		if (!normalizedPlayerName || seenPlayers.has(normalizedPlayerName)) return;
+		seenPlayers.add(normalizedPlayerName);
+
+		const playerStats = season.playerStats?.[getPlayerKey(team.name, normalizedPlayerName)]
+			|| createEmptyStats(team.name, normalizedPlayerName, { isSub: false });
+
+		statKeys.forEach(key => {
+			totals[key] = Number(totals[key] || 0) + Number(playerStats[key] || 0);
+		});
+	});
+
+	return totals;
+}
+
 function getSeasonTeamRankings(teamsForDisplay) {
 	const sorted = (teamsForDisplay || [])
 		.map(team => {
@@ -2116,12 +2156,17 @@ function createSeasonTeamDetails(team, rankings) {
 	const rankedTeam = (rankings || []).find(entry => entry.teamName === team.name) || null;
 	const teamRank = rankedTeam?.rank || "-";
 	const avgMargin = rankedTeam ? rankedTeam.avgMargin : 0;
+	const totals = getSeasonTeamTotals(team);
+	const battingAvg = Number(totals.atBats || 0) > 0 ? (Number(totals.hits || 0) / Number(totals.atBats || 0)).toFixed(3) : ".000";
+	const innings = getPitchingInningsValue(totals);
+	const era = innings > 0 ? ((Number(totals.earnedRunsAllowed || 0) / innings) * 3).toFixed(2) : "-";
+	const kPer3 = innings > 0 ? ((Number(totals.pitchStrikeouts || 0) / innings) * 3).toFixed(2) : "-";
 
 	const header = document.createElement("div");
 	header.className = "season-stats-selection-header";
 	header.innerHTML = `
 		<h4>${team.name}</h4>
-		<p>Team-only season summary</p>
+		<p>Regular-roster team totals and rates</p>
 	`;
 	wrap.appendChild(header);
 
@@ -2141,13 +2186,37 @@ function createSeasonTeamDetails(team, rankings) {
 	summaryCard.appendChild(summaryNote);
 	wrap.appendChild(summaryCard);
 
-	const futureCard = document.createElement("div");
-	futureCard.className = "card";
-	futureCard.innerHTML = `
-		<h4>More Team Stats</h4>
-		<p class="season-stats-note">This section is reserved so more team-level stats can be added later without bringing player stat tables back into this view.</p>
-	`;
-	wrap.appendChild(futureCard);
+	const battingCard = document.createElement("div");
+	battingCard.className = "card";
+	battingCard.innerHTML = '<h4>Team Batting Summary</h4>';
+	battingCard.appendChild(buildSeasonStatsMetricGrid([
+		{ label: "AVG", value: battingAvg },
+		{ label: "AB", value: totals.atBats },
+		{ label: "H", value: totals.hits },
+		{ label: "1B", value: totals.singles },
+		{ label: "2B", value: totals.doubles },
+		{ label: "3B", value: totals.triples },
+		{ label: "HR", value: totals.homeRuns },
+		{ label: "RBI", value: totals.rbis },
+		{ label: "BB", value: totals.walks },
+		{ label: "K", value: totals.strikeouts }
+	]));
+	wrap.appendChild(battingCard);
+
+	const pitchingCard = document.createElement("div");
+	pitchingCard.className = "card";
+	pitchingCard.innerHTML = '<h4>Team Pitching Summary</h4>';
+	pitchingCard.appendChild(buildSeasonStatsMetricGrid([
+		{ label: "IP", value: innings.toFixed(1) },
+		{ label: "Outs", value: totals.pitchOuts },
+		{ label: "K's", value: totals.pitchStrikeouts },
+		{ label: "K/3", value: kPer3 },
+		{ label: "R", value: totals.runsAllowed },
+		{ label: "ER", value: totals.earnedRunsAllowed },
+		{ label: "ERA", value: era },
+		{ label: "Errors", value: totals.fieldingErrors }
+	]));
+	wrap.appendChild(pitchingCard);
 
 	return wrap;
 }
@@ -2156,8 +2225,31 @@ function displaySeasonStats() {
 	const container = document.getElementById("seasonStatsContainer");
 	if (!container) return;
 
+	const hasRegularStats = Object.keys(season.playerStats || {}).length > 0;
+	const hasSubStats = Object.keys(season.subStats || {}).length > 0;
+	const teamsForDisplay = getSeasonTeamsForDisplay();
+
+	container.innerHTML = "";
+
+	const introCard = document.createElement("div");
+	introCard.className = "card";
+	introCard.innerHTML = `
+		<h3 style="margin-top:0;">Season Stats Hub</h3>
+		<p class="season-stats-note">Choose Rankings, Past Game Log, Player Stats, or Team Stats. Player Stats includes regular players and substitute players in the same selector.</p>
+	`;
+
+	if (!teamsForDisplay.length && !hasRegularStats && !hasSubStats) {
+		introCard.innerHTML += `<p class="season-stats-note" style="margin-bottom:0;">No season statistics published yet.</p>`;
+	}
+
+	container.appendChild(introCard);
+}
+
+function displayPlayerStats() {
+	const container = document.getElementById("playerStatsContainer");
+	if (!container) return;
+
 	const previousPlayerValue = document.getElementById("seasonPlayerSelect")?.value || "";
-	const previousTeamValue = document.getElementById("seasonTeamSelect")?.value || "";
 	container.innerHTML = "";
 
 	const hasRegularStats = Object.keys(season.playerStats || {}).length > 0;
@@ -2170,27 +2262,14 @@ function displaySeasonStats() {
 	}
 
 	const playerOptions = getSeasonPlayerOptions(teamsForDisplay);
-	const teamRankings = getSeasonTeamRankings(teamsForDisplay);
-
-	const introCard = document.createElement("div");
-	introCard.className = "card";
-	introCard.innerHTML = `
-		<h3 style="margin-top:0;">Season Stats Hub</h3>
-		<p class="season-stats-note">Use the dropdowns below to quickly switch between one player or one team at a time instead of scrolling through every stat table at once.</p>
-	`;
-	container.appendChild(introCard);
-
-	const layout = document.createElement("div");
-	layout.className = "season-stats-layout";
-	container.appendChild(layout);
 
 	const playerPanel = document.createElement("div");
 	playerPanel.className = "card season-stats-panel";
 	playerPanel.innerHTML = `
 		<h3>Player Stats</h3>
-		<p class="season-stats-note">Select one player to view that player’s batting and pitching stats together.</p>
+		<p class="season-stats-note">Select one regular player or substitute player to view batting and pitching stats together.</p>
 	`;
-	layout.appendChild(playerPanel);
+	container.appendChild(playerPanel);
 
 	const playerSelect = document.createElement("select");
 	playerSelect.id = "seasonPlayerSelect";
@@ -2215,13 +2294,46 @@ function displaySeasonStats() {
 	playerDetails.id = "seasonPlayerDetails";
 	playerPanel.appendChild(playerDetails);
 
+	function renderSelectedPlayer() {
+		const selected = playerOptions.find(option => option.value === playerSelect.value) || playerOptions[0] || null;
+		playerDetails.innerHTML = "";
+		playerDetails.appendChild(createSeasonPlayerDetails(selected));
+	}
+
+	if (playerOptions.length) {
+		playerSelect.value = playerOptions.some(option => option.value === previousPlayerValue)
+			? previousPlayerValue
+			: playerOptions[0].value;
+	}
+
+	playerSelect.addEventListener("change", renderSelectedPlayer);
+	renderSelectedPlayer();
+}
+
+function displayTeamStats() {
+	const container = document.getElementById("teamStatsContainer");
+	if (!container) return;
+
+	const previousTeamValue = document.getElementById("seasonTeamSelect")?.value || "";
+	container.innerHTML = "";
+
+	const hasRegularStats = Object.keys(season.playerStats || {}).length > 0;
+	const teamsForDisplay = getSeasonTeamsForDisplay();
+
+	if (!teamsForDisplay.length && !hasRegularStats) {
+		container.innerHTML = "<div class='card'><p>No team statistics published yet.</p></div>";
+		return;
+	}
+
+	const teamRankings = getSeasonTeamRankings(teamsForDisplay);
+
 	const teamPanel = document.createElement("div");
 	teamPanel.className = "card season-stats-panel";
 	teamPanel.innerHTML = `
 		<h3>Team Stats</h3>
-		<p class="season-stats-note">Select one team to view its record summary plus full batting and pitching tables.</p>
+		<p class="season-stats-note">Select one team to view record info plus full-team batting and pitching totals built from the regular roster.</p>
 	`;
-	layout.appendChild(teamPanel);
+	container.appendChild(teamPanel);
 
 	const teamSelect = document.createElement("select");
 	teamSelect.id = "seasonTeamSelect";
@@ -2246,22 +2358,10 @@ function displaySeasonStats() {
 	teamDetails.id = "seasonTeamDetails";
 	teamPanel.appendChild(teamDetails);
 
-	function renderSelectedPlayer() {
-		const selected = playerOptions.find(option => option.value === playerSelect.value) || playerOptions[0] || null;
-		playerDetails.innerHTML = "";
-		playerDetails.appendChild(createSeasonPlayerDetails(selected));
-	}
-
 	function renderSelectedTeam() {
 		const selected = teamsForDisplay.find(team => team.name === teamSelect.value) || teamsForDisplay[0] || null;
 		teamDetails.innerHTML = "";
 		teamDetails.appendChild(createSeasonTeamDetails(selected, teamRankings));
-	}
-
-	if (playerOptions.length) {
-		playerSelect.value = playerOptions.some(option => option.value === previousPlayerValue)
-			? previousPlayerValue
-			: playerOptions[0].value;
 	}
 
 	if (teamsForDisplay.length) {
@@ -2270,43 +2370,8 @@ function displaySeasonStats() {
 			: teamsForDisplay[0].name;
 	}
 
-	playerSelect.addEventListener("change", renderSelectedPlayer);
 	teamSelect.addEventListener("change", renderSelectedTeam);
-	renderSelectedPlayer();
 	renderSelectedTeam();
-
-	const subEntries = Object.values(season.subStats || {}).sort((a, b) =>
-		String(a.playerName).localeCompare(String(b.playerName))
-	);
-
-	if (subEntries.length) {
-		const subWrap = document.createElement("details");
-		subWrap.className = "season-substats-details";
-		subWrap.innerHTML = '<summary>View Sub Stats</summary>';
-
-		const subInner = document.createElement("div");
-		subInner.className = "season-stats-stack";
-
-		const subNote = document.createElement("div");
-		subNote.className = "card";
-		subNote.innerHTML = `<p class="season-stats-note">Season totals earned by substitute players stay separate from regular team rosters.</p>`;
-		subInner.appendChild(subNote);
-
-		const battingCard = document.createElement("div");
-		battingCard.className = "card";
-		battingCard.innerHTML = `<h3>Sub Stats - Batting</h3>`;
-		battingCard.appendChild(createSubBattingStatsTable(subEntries));
-		subInner.appendChild(battingCard);
-
-		const pitchingCard = document.createElement("div");
-		pitchingCard.className = "card";
-		pitchingCard.innerHTML = `<h3>Sub Stats - Pitching</h3>`;
-		pitchingCard.appendChild(createSubPitchingStatsTable(subEntries));
-		subInner.appendChild(pitchingCard);
-
-		subWrap.appendChild(subInner);
-		container.appendChild(subWrap);
-	}
 }
 
 function buildRankingsPlayerEntry(stats, isSub) {
