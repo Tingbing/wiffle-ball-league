@@ -350,34 +350,44 @@ function startGameWithTeams(t1, t2, scheduleRef = null, lockInfo = null) {
 	let batting = Math.random() > 0.5 ? activeTeam1 : activeTeam2;
 	let fielding = batting === activeTeam1 ? activeTeam2 : activeTeam1;
 
-	game = {
-		team1: activeTeam1,
-		team2: activeTeam2,
-		team1Score: 0,
-		team2Score: 0,
-		batting: batting,
-		fielding: fielding,
-		outs: 0,
-		inning: 1,
-		halfInning: "top",
-		batterIndex: 0,
-		batterIndexByTeam: {
-			[activeTeam1.name]: 0,
-			[activeTeam2.name]: 0
-		},
-		currentPitcher: null,
-		bases: { first: null, second: null, third: null },
-		gameStats: {},
-		currentInningPitchers: {},
-		halfInningRuns: 0,
-		_scheduleRef: scheduleRef,
-		_lockId: lockInfo?.lockId || null,
-		_lockInfo: lockInfo || null,
-		_gameInstanceId: scheduleRef
-			? `scheduled-${scheduleRef.dayIndex}-${scheduleRef.seriesIndex}-${scheduleRef.seriesGameIndex}`
-			: (lockInfo?.lockId ? `manual-${lockInfo.lockId}` : `manual-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`),
-		_startedAt: Date.now()
-	};
+game = {
+	team1: activeTeam1,
+	team2: activeTeam2,
+	team1Score: 0,
+	team2Score: 0,
+	batting: batting,
+	fielding: fielding,
+	outs: 0,
+	inning: 1,
+	halfInning: "top",
+	batterIndex: 0,
+	batterIndexByTeam: {
+		[activeTeam1.name]: 0,
+		[activeTeam2.name]: 0
+	},
+	currentPitcher: null,
+	bases: { first: null, second: null, third: null },
+	gameStats: {},
+	currentInningPitchers: {},
+	halfInningRuns: 0,
+	lineScore: {
+		[activeTeam1.name]: [],
+		[activeTeam2.name]: []
+	},
+	pitcherDecisions: {
+		winningPitcher: null,
+		losingPitcher: null,
+		pendingWinningPitcherTeamName: null,
+		pitcherOfRecordByTeam: {}
+	},
+	_scheduleRef: scheduleRef,
+	_lockId: lockInfo?.lockId || null,
+	_lockInfo: lockInfo || null,
+	_gameInstanceId: scheduleRef
+		? `scheduled-${scheduleRef.dayIndex}-${scheduleRef.seriesIndex}-${scheduleRef.seriesGameIndex}`
+		: (lockInfo?.lockId ? `manual-${lockInfo.lockId}` : `manual-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`),
+	_startedAt: Date.now()
+};
 
 	[activeTeam1, activeTeam2].forEach(teamObj => {
 		(teamObj.players || []).forEach(playerName => {
@@ -518,6 +528,8 @@ function saveGameState() {
 		batting: game.batting,
 		fielding: game.fielding,
 		currentInningPitchers: { ...game.currentInningPitchers },
+		lineScore: JSON.parse(JSON.stringify(game.lineScore || {})),
+		pitcherDecisions: JSON.parse(JSON.stringify(game.pitcherDecisions || {})),
 		pendingBattingResult: pendingBattingResult ? JSON.parse(JSON.stringify(pendingBattingResult)) : null,
 		lastPlay: lastPlay ? JSON.parse(JSON.stringify(lastPlay)) : null
 	});
@@ -542,6 +554,13 @@ function restoreGameState(stateString) {
 	game.batting = state.batting;
 	game.fielding = state.fielding;
 	game.currentInningPitchers = state.currentInningPitchers || {};
+	game.lineScore = state.lineScore || { [game.team1.name]: [], [game.team2.name]: [] };
+	game.pitcherDecisions = state.pitcherDecisions || {
+		winningPitcher: null,
+		losingPitcher: null,
+		pendingWinningPitcherTeamName: null,
+		pitcherOfRecordByTeam: {}
+	};
 	pendingBattingResult = state.pendingBattingResult || null;
 	lastPlay = state.lastPlay || null;
 	game.batterIndex = getCurrentBatterIndex();
@@ -589,30 +608,31 @@ updatePitcherSelect();
     }
   }
 }
-	function updatePitcherSelect() {
-		let select = document.getElementById("pitcherSelect");
-		select.innerHTML = "";
+function updatePitcherSelect() {
+	let select = document.getElementById("pitcherSelect");
+	select.innerHTML = "";
 
-		game.fielding.players.forEach((player, i) => {
-			let opt = document.createElement("option");
-			opt.value = i;
-			opt.text = player;
-			select.appendChild(opt);
-		});
+	game.fielding.players.forEach((player, i) => {
+		let opt = document.createElement("option");
+		opt.value = i;
+		opt.text = player;
+		select.appendChild(opt);
+	});
 
-		let halfInningKey = game.inning + "-" + game.halfInning;
-		if (game.currentInningPitchers[halfInningKey] !== undefined) {
-			select.selectedIndex = game.currentInningPitchers[halfInningKey];
-		}
-
-		updatePitcherDisplay();
+	let halfInningKey = game.inning + "-" + game.halfInning;
+	if (game.currentInningPitchers[halfInningKey] !== undefined) {
+		select.selectedIndex = game.currentInningPitchers[halfInningKey];
 	}
 
-	function updatePitcherDisplay() {
+	updatePitcherDisplay();
+}
+
+function updatePitcherDisplay() {
 	let select = document.getElementById("pitcherSelect");
 	let pitcherIndex = parseInt(select.value);
 	let pitcher = game.fielding.players[pitcherIndex];
 	document.getElementById("pitcherText").innerText = "Pitching: " + pitcher;
+	rememberPitcherOfRecordForFieldingTeam();
 	captureSelectedPitcherState();
 	persistLiveGameAutosave();
 }
@@ -793,9 +813,9 @@ function manualScoreFromThird() {
 	game.bases.third = null;
 
 	const pitcherKey = getCurrentPitcherKey();
-	const totals = { runs: 0, earnedRuns: 0, rbis: 0, pitcherCharges: {} };
+	const totals = { runs: 0, earnedRuns: 0, rbis: 0, pitcherCharges: {}, scoringEvents: [] };
 	scoreExistingRunner(runner, totals, { creditRbi: false });
-	applyHalfInningRuns(totals.runs);
+	applyHalfInningRuns(totals.runs, totals.scoringEvents || []);
 
 	if (game.inning <= 2 && game.halfInningRuns >= 6) {
 		endHalfInning(pitcherKey, "Run rule reached (6). Switching sides.");
@@ -941,20 +961,118 @@ function scoreExistingRunner(runner, totals, options = {}) {
 
 	totals.pitcherCharges = totals.pitcherCharges || {};
 	chargeRunToResponsiblePitcher(normalized, totals.pitcherCharges);
+	totals.scoringEvents = Array.isArray(totals.scoringEvents) ? totals.scoringEvents : [];
+	totals.scoringEvents.push({
+		runnerName: normalized.player || "",
+		responsiblePitcherKey: normalized.responsiblePitcherKey || null,
+		responsiblePitcherName: normalized.responsiblePitcherName || null,
+		wasEarnedRun: !normalized.reachedOnError
+	});
 }
 
-function applyHalfInningRuns(runs) {
+function getCurrentScoreForTeam(teamName) {
+	if (!game) return 0;
+	if (teamName === game.team1?.name) return Number(game.team1Score || 0);
+	if (teamName === game.team2?.name) return Number(game.team2Score || 0);
+	return 0;
+}
+
+function rememberPitcherOfRecordForFieldingTeam() {
+	if (!game?.fielding?.name) return;
+	const pitcherKey = getCurrentPitcherKey();
+	const rawIndex = parseInt(document.getElementById("pitcherSelect")?.value, 10);
+	const pitcherIndex = Number.isInteger(rawIndex) && rawIndex >= 0 ? rawIndex : 0;
+	const pitcherName = String(game.fielding.players?.[pitcherIndex] || "").trim();
+	if (!pitcherKey || !pitcherName) return;
+
+	game.pitcherDecisions = game.pitcherDecisions || {
+		winningPitcher: null,
+		losingPitcher: null,
+		pendingWinningPitcherTeamName: null,
+		pitcherOfRecordByTeam: {}
+	};
+	game.pitcherDecisions.pitcherOfRecordByTeam = game.pitcherDecisions.pitcherOfRecordByTeam || {};
+	game.pitcherDecisions.pitcherOfRecordByTeam[game.fielding.name] = { pitcherKey, pitcherName, teamName: game.fielding.name };
+
+	if (game.pitcherDecisions.pendingWinningPitcherTeamName === game.fielding.name) {
+		game.pitcherDecisions.winningPitcher = { pitcherKey, pitcherName, teamName: game.fielding.name };
+		game.pitcherDecisions.pendingWinningPitcherTeamName = null;
+	}
+}
+
+function updatePitcherDecisionsFromScoringEvents(scoringEvents = []) {
+	if (!game || !Array.isArray(scoringEvents) || !scoringEvents.length) return;
+
+	game.pitcherDecisions = game.pitcherDecisions || {
+		winningPitcher: null,
+		losingPitcher: null,
+		pendingWinningPitcherTeamName: null,
+		pitcherOfRecordByTeam: {}
+	};
+	game.pitcherDecisions.pitcherOfRecordByTeam = game.pitcherDecisions.pitcherOfRecordByTeam || {};
+
+	scoringEvents.forEach(event => {
+		const battingTeamName = String(event?.battingTeamName || game.batting?.name || "").trim();
+		if (!battingTeamName) return;
+
+		const otherTeamName = battingTeamName === game.team1?.name ? game.team2?.name : game.team1?.name;
+		const beforeBatting = Number(event?.beforeBattingScore ?? getCurrentScoreForTeam(battingTeamName));
+		const beforeOther = Number(event?.beforeOtherScore ?? getCurrentScoreForTeam(otherTeamName));
+		const afterBatting = beforeBatting + 1;
+		const tookLead = afterBatting > beforeOther && beforeBatting <= beforeOther;
+
+		if (!tookLead) return;
+
+		const pitcherOfRecord = game.pitcherDecisions.pitcherOfRecordByTeam[battingTeamName] || null;
+		if (pitcherOfRecord?.pitcherKey && pitcherOfRecord?.pitcherName) {
+			game.pitcherDecisions.winningPitcher = { ...pitcherOfRecord };
+			game.pitcherDecisions.pendingWinningPitcherTeamName = null;
+		} else {
+			game.pitcherDecisions.winningPitcher = null;
+			game.pitcherDecisions.pendingWinningPitcherTeamName = battingTeamName;
+		}
+
+		if (event?.responsiblePitcherKey || event?.responsiblePitcherName) {
+			game.pitcherDecisions.losingPitcher = {
+				pitcherKey: event.responsiblePitcherKey || null,
+				pitcherName: event.responsiblePitcherName || "-",
+				teamName: otherTeamName || ""
+			};
+		}
+	});
+}
+
+function applyHalfInningRuns(runs, scoringEvents = []) {
 	const runCount = Number(runs || 0);
 	if (runCount <= 0 || !game) return;
+
+	const battingTeamName = game.batting?.name || "";
+	const inningIndex = Math.max(0, Number(game.inning || 1) - 1);
+	game.lineScore = game.lineScore || { [game.team1?.name || "Team 1"]: [], [game.team2?.name || "Team 2"]: [] };
+	game.lineScore[battingTeamName] = Array.isArray(game.lineScore[battingTeamName]) ? game.lineScore[battingTeamName] : [];
+	game.lineScore[battingTeamName][inningIndex] = Number(game.lineScore[battingTeamName][inningIndex] || 0) + runCount;
+
+	const otherTeamName = battingTeamName === game.team1?.name ? game.team2?.name : game.team1?.name;
+	const runningBattingScore = getCurrentScoreForTeam(battingTeamName);
+	const runningOtherScore = getCurrentScoreForTeam(otherTeamName);
+	const normalizedEvents = Array.isArray(scoringEvents)
+		? scoringEvents.map((event, index) => ({
+			...event,
+			battingTeamName,
+			beforeBattingScore: runningBattingScore + index,
+			beforeOtherScore: runningOtherScore
+		}))
+		: [];
 
 	if (game.batting === game.team1) game.team1Score += runCount;
 	else game.team2Score += runCount;
 
 	game.halfInningRuns += runCount;
+	updatePitcherDecisionsFromScoringEvents(normalizedEvents);
 }
 
 function advanceRunnersOnContact(bases, currentBatter, reachedOnError = false, pitcherResponsibility = null) {
-	const totals = { runs: 0, earnedRuns: 0, rbis: 0, pitcherCharges: {} };
+	const totals = { runs: 0, earnedRuns: 0, rbis: 0, pitcherCharges: {}, scoringEvents: [] };
 
 	const r1 = normalizeBaseRunner(game.bases.first, game.batting);
 	const r2 = normalizeBaseRunner(game.bases.second, game.batting);
@@ -997,7 +1115,7 @@ function advanceRunnersOnContact(bases, currentBatter, reachedOnError = false, p
 }
 
 function advanceRunnersOnAwardedFirst(currentBatter, pitcherResponsibility = null) {
-	const totals = { runs: 0, earnedRuns: 0, rbis: 0, pitcherCharges: {} };
+	const totals = { runs: 0, earnedRuns: 0, rbis: 0, pitcherCharges: {}, scoringEvents: [] };
 
 	const r1 = normalizeBaseRunner(game.bases.first, game.batting);
 	const r2 = normalizeBaseRunner(game.bases.second, game.batting);
@@ -1292,9 +1410,10 @@ function recordPitchingResult(pitchResult, errorFielderIndex = null) {
 	const fieldingPlayersSnapshot = Array.isArray(game.fielding?.players) ? game.fielding.players.slice() : [];
 
 	let runs = 0;
-	let earnedRuns = 0;
-	let rbis = 0;
-	let pitcherCharges = {};
+let earnedRuns = 0;
+let rbis = 0;
+let pitcherCharges = {};
+let scoringEvents = [];
 
 	if (result !== "walk" && result !== "HBP") {
 		batterStats.atBats++;
