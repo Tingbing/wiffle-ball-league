@@ -979,6 +979,126 @@ function forceRegenerateSchedule() {
 	showNotification("✅ Schedule rebuilt from current team list", 1600);
 }
 
+function getScheduleSeriesStatusMeta(seriesEntry) {
+	const completedCount = countCompletedSeriesGames(seriesEntry);
+	if (seriesEntry?.result?.type === "tie") {
+		const awayWins = Number(seriesEntry.result.awayWins || 0);
+		const homeWins = Number(seriesEntry.result.homeWins || 0);
+		const ties = Number(seriesEntry.result.tieGames || 0);
+		return {
+			text: ties > 0 ? `Series tied ${awayWins}-${homeWins}-${ties}` : `Series tied ${awayWins}-${homeWins}`,
+			className: "schedule-series-status is-complete"
+		};
+	}
+
+	if (seriesEntry?.result?.type === "win") {
+		const ties = Number(seriesEntry.result.tieGames || 0);
+		return {
+			text: ties > 0
+				? `${seriesEntry.result.winner} won ${seriesEntry.result.winnerGames}-${seriesEntry.result.loserGames}-${ties}`
+				: `${seriesEntry.result.winner} won ${seriesEntry.result.winnerGames}-${seriesEntry.result.loserGames}`,
+			className: "schedule-series-status is-complete"
+		};
+	}
+
+	if (completedCount > 0) {
+		return {
+			text: `${completedCount} of 3 games played`,
+			className: "schedule-series-status is-partial"
+		};
+	}
+
+	return {
+		text: "Not played yet",
+		className: "schedule-series-status is-pending"
+	};
+}
+
+function getScheduleGameResultLabel(seriesEntry, seriesGame, pastGameEntry) {
+	if (pastGameEntry) {
+		return `${pastGameEntry.team1Name} ${pastGameEntry.team1Score} – ${pastGameEntry.team2Score} ${pastGameEntry.team2Name}`;
+	}
+
+	const result = seriesGame?.result || null;
+	if (!result) return "Not Played Yet";
+	if (result.type === "tie") return `${seriesEntry.away} ${Number(result.score1 || 0)} – ${Number(result.score2 || 0)} ${seriesEntry.home}`;
+
+	const awayScore = result.winner === seriesEntry.away ? Number(result.winnerScore || 0) : Number(result.loserScore || 0);
+	const homeScore = result.winner === seriesEntry.home ? Number(result.winnerScore || 0) : Number(result.loserScore || 0);
+	return `${seriesEntry.away} ${awayScore} – ${homeScore} ${seriesEntry.home}`;
+}
+
+function createScheduleSeriesExpansionRow(dayIndex, seriesIndex, seriesEntry) {
+	const tr = document.createElement("tr");
+	tr.className = "schedule-series-expand-row";
+	const td = document.createElement("td");
+	td.colSpan = 3;
+	tr.appendChild(td);
+
+	const details = document.createElement("details");
+	details.className = "schedule-series-details";
+	const summary = document.createElement("summary");
+	summary.textContent = "View Games";
+	details.appendChild(summary);
+
+	const body = document.createElement("div");
+	body.className = "schedule-series-games-panel";
+
+	(seriesEntry?.gamesInSeries || []).forEach((seriesGame, seriesGameIndex) => {
+		const gameEntry = typeof getPastGameEntryForScheduleSlot === "function"
+			? getPastGameEntryForScheduleSlot(dayIndex, seriesIndex, seriesGameIndex)
+			: null;
+
+		const gameCard = document.createElement("div");
+		gameCard.className = "schedule-series-game-card";
+
+		const header = document.createElement("div");
+		header.className = "schedule-series-game-header";
+		const title = document.createElement("div");
+		title.className = "schedule-series-game-title";
+		title.textContent = `Game ${Number(seriesGame?.gameNumber || (seriesGameIndex + 1))}`;
+		header.appendChild(title);
+
+		const resultText = document.createElement("div");
+		resultText.className = seriesGame?.result ? "schedule-series-game-result is-complete" : "schedule-series-game-result is-pending";
+		resultText.textContent = getScheduleGameResultLabel(seriesEntry, seriesGame, gameEntry);
+		header.appendChild(resultText);
+		gameCard.appendChild(header);
+
+		if (seriesGame?.result) {
+			const boxDetails = document.createElement("details");
+			boxDetails.className = "schedule-boxscore-details";
+			const boxSummary = document.createElement("summary");
+			boxSummary.textContent = "View Box Score";
+			boxDetails.appendChild(boxSummary);
+
+			const content = document.createElement("div");
+			content.className = "schedule-boxscore-content";
+			if (gameEntry && typeof createPastGameDetails === "function") {
+				content.appendChild(createPastGameDetails(gameEntry));
+			} else {
+				const note = document.createElement("p");
+				note.className = "season-stats-note";
+				note.textContent = "That game was recorded, but its box score details are not available in this view yet.";
+				content.appendChild(note);
+			}
+			boxDetails.appendChild(content);
+			gameCard.appendChild(boxDetails);
+		} else {
+			const pending = document.createElement("div");
+			pending.className = "season-stats-note";
+			pending.textContent = "Not Played Yet";
+			gameCard.appendChild(pending);
+		}
+
+		body.appendChild(gameCard);
+	});
+
+	details.appendChild(body);
+	td.appendChild(details);
+	return tr;
+}
+
 function renderScheduleUI() {
 	const container = document.getElementById("scheduleContainer");
 	const summaryText = document.getElementById("scheduleSummaryText");
@@ -1045,40 +1165,6 @@ function renderScheduleUI() {
 		const dayCard = document.createElement("div");
 		dayCard.className = "card";
 
-		const rows = (dayObj.games || []).map(seriesEntry => {
-			const awayRec = formatTeamRecord(seriesEntry.away);
-			const homeRec = formatTeamRecord(seriesEntry.home);
-
-			let awayTag = "";
-			let homeTag = "";
-			let scoreTag = "";
-
-			if (seriesEntry.result) {
-				if (seriesEntry.result.type === "tie") {
-					awayTag = " 🤝 T";
-					homeTag = " 🤝 T";
-					const tieText = `${seriesEntry.result.awayWins}-${seriesEntry.result.homeWins}`;
-					scoreTag = ` — Series tied (${tieText})`;
-				} else {
-					awayTag = (seriesEntry.result.winner === seriesEntry.away) ? " ✅ W" : " ❌ L";
-					homeTag = (seriesEntry.result.winner === seriesEntry.home) ? " ✅ W" : " ❌ L";
-					scoreTag = ` — Series ${seriesEntry.result.winnerGames}-${seriesEntry.result.loserGames}`;
-				}
-			}
-
-			return `
-			<tr>
-				<td>Series ${seriesEntry.gameNumber}</td>
-				<td>
-					<b>${seriesEntry.away}</b> <span style="color:#aaa;">(${awayRec})</span>${awayTag}
-					&nbsp;vs&nbsp;
-					<b>${seriesEntry.home}</b> <span style="color:#aaa;">(${homeRec})</span>${homeTag}
-					<span style="color:#aaa;">${scoreTag}</span>
-				</td>
-			</tr>
-			`;
-		}).join("");
-
 		const byeTeam = activeConfigId === SCHEDULE_FORMAT_SINGLE_ROUND_ROBIN_5
 			? getByeTeamForDay(dayObj, snapshotTeamNames)
 			: "";
@@ -1088,22 +1174,58 @@ function renderScheduleUI() {
 			: "";
 
 		dayCard.innerHTML = `
-		<div class="section-header">Day ${dayObj.day}</div>
-		${byeTeam ? `<div style="margin:6px 0 12px; color:#aaa;"><b style="color:white;">Bye:</b> ${byeTeam}</div>` : ""}
-		${dayLockedNote}
-		<table class="stats-table">
-			<tr>
-				<th>Series</th>
-				<th>Matchup</th>
-			</tr>
-			${rows}
-		</table>
+			<div class="section-header">Day ${dayObj.day}</div>
+			${byeTeam ? `<div style="margin:6px 0 12px; color:#aaa;"><b style="color:white;">Bye:</b> ${byeTeam}</div>` : ""}
+			${dayLockedNote}
 		`;
 
+		const table = document.createElement("table");
+		table.className = "stats-table schedule-series-table";
+		table.innerHTML = `
+			<thead>
+				<tr>
+					<th>Series</th>
+					<th>Matchup</th>
+					<th>Status</th>
+				</tr>
+			</thead>
+		`;
+
+		const tbody = document.createElement("tbody");
+		(dayObj.games || []).forEach((seriesEntry, seriesIndex) => {
+			const awayRec = formatTeamRecord(seriesEntry.away);
+			const homeRec = formatTeamRecord(seriesEntry.home);
+			const statusMeta = getScheduleSeriesStatusMeta(seriesEntry);
+			const completedCount = countCompletedSeriesGames(seriesEntry);
+
+			const row = document.createElement("tr");
+			row.innerHTML = `
+				<td>Series ${seriesEntry.gameNumber}</td>
+				<td>
+					<div class="schedule-matchup-main">
+						<b>${seriesEntry.away}</b> <span class="schedule-team-record">(${awayRec})</span>
+						<span class="schedule-matchup-vs">vs</span>
+						<b>${seriesEntry.home}</b> <span class="schedule-team-record">(${homeRec})</span>
+					</div>
+				</td>
+				<td>
+					<div class="schedule-series-status-wrap">
+						<span class="${statusMeta.className}">${statusMeta.text}</span>
+					</div>
+				</td>
+			`;
+			tbody.appendChild(row);
+
+			if (completedCount > 0) {
+				tbody.appendChild(createScheduleSeriesExpansionRow(dayIndex, seriesIndex, seriesEntry));
+			}
+		});
+
+		table.appendChild(tbody);
+		dayCard.appendChild(table);
 		container.appendChild(dayCard);
 	});
 }
-
 	// NAVIGATION FUNCTIONS
 
 /* ================================
