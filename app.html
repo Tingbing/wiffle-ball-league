@@ -440,33 +440,51 @@
 <!-- SEASON STATS SCREEN -->
 <div id="seasonStatsScreen" class="hidden">
 	<button class="back-button" onclick="showMainMenu()">← Back to Main Menu</button>
-	
-<h2>📊 Season Statistics</h2>
 
-<div class="card">
-	<button class="menu-button" onclick="showRankings()">🏆 Rankings</button>
-	<button class="menu-button" onclick="showPastGameLog()">🗂️ Past Game Log</button>
-	<p class="season-stats-note" style="margin-bottom:0;">
-		Open separate screens for player leaderboards and completed game history.
-	</p>
+	<h2>📊 Season Statistics</h2>
+
+	<div class="card">
+		<div class="season-stats-hub-buttons">
+			<button class="menu-button" onclick="showRankings()">🏆 Rankings</button>
+			<button class="menu-button" onclick="showPastGameLog()">🗂️ Past Game Log</button>
+			<button class="menu-button" onclick="showPlayerStats()">👤 Player Stats</button>
+			<button class="menu-button" onclick="showTeamStats()">📋 Team Stats</button>
+		</div>
+		<p class="season-stats-note" style="margin-bottom:0;">
+			Choose a dedicated stats screen below. Player Stats includes substitutes in the same selector.
+		</p>
+	</div>
+
+	<div id="seasonStatsContainer"></div>
+
+	<div class="card" id="seasonStatsAdminCard">
+		<h3 style="margin-top:0;">Stats Backup Tools</h3>
+		<p class="season-stats-note">
+			Download a JSON backup of the current season stats and schedule results, clear current stats, or restore a saved backup file.
+		</p>
+		<div style="display:flex; gap:10px; flex-wrap:wrap; margin-top:10px;">
+			<button class="menu-button" type="button" onclick="downloadStatsBackupJson()">⬇️ Download Stats JSON</button>
+			<button class="menu-button" type="button" onclick="openStatsRestorePicker()">⬆️ Restore Stats JSON</button>
+		</div>
+		<input id="statsRestoreFileInput" type="file" accept="application/json,.json" class="hidden" onchange="handleStatsRestoreFile(event)">
+		<div style="margin-top:12px;">
+			<button onclick="resetSeason()" style="background: #a44; color: white;">Reset Season Data</button>
+		</div>
+	</div>
 </div>
 
-<div id="seasonStatsContainer"></div>
-<div class="card" id="seasonStatsAdminCard">
-	<h3 style="margin-top:0;">Stats Backup Tools</h3>
-	<p class="season-stats-note">
-		Download a JSON backup of the current season stats and schedule results, clear current stats, or restore a saved backup file.
-	</p>
-	<div style="display:flex; gap:10px; flex-wrap:wrap; margin-top:10px;">
-		<button class="menu-button" type="button" onclick="downloadStatsBackupJson()">⬇️ Download Stats JSON</button>
-		<button class="menu-button" type="button" onclick="openStatsRestorePicker()">⬆️ Restore Stats JSON</button>
-	</div>
-	<input id="statsRestoreFileInput" type="file" accept="application/json,.json" class="hidden" onchange="handleStatsRestoreFile(event)">
-	<div style="margin-top:12px;">
-		<button onclick="resetSeason()" style="background: #a44; color: white;">Reset Season Data</button>
-	</div>
+<div id="playerStatsScreen" class="hidden">
+	<button class="back-button" onclick="showSeasonStats()">← Back to Season Stats</button>
+
+	<h2>👤 Player Stats</h2>
+	<div id="playerStatsContainer"></div>
 </div>
-	
+
+<div id="teamStatsScreen" class="hidden">
+	<button class="back-button" onclick="showSeasonStats()">← Back to Season Stats</button>
+
+	<h2>📋 Team Stats</h2>
+	<div id="teamStatsContainer"></div>
 </div>
 
 <div id="rankingsScreen" class="hidden">
