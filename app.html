@@ -92,6 +92,10 @@
 			📅 Season Schedule
 		</button>
 
+		<button class="menu-button" onclick="showPostseason()">
+	🏆 Postseason
+</button>
+
 	<button class="small-link" onclick="beginFullAccessFlow()">
 	🔒 Sign In for Full Access
 </button>
@@ -127,6 +131,10 @@
 		<button class="menu-button" onclick="showSchedule()">
   📅 Schedule
 </button>
+
+		<button class="menu-button" onclick="showPostseason()">
+  🏆 Postseason
+</button>
 		
 
 <div id="mainLoginBlock">
@@ -161,6 +169,12 @@
 <div id="scheduleContainer"></div>
 </div>
 
+<div id="postseasonScreen" class="hidden">
+	<button class="back-button" onclick="showMainMenu()">← Back to Main Menu</button>
+
+	<h2>🏆 Postseason</h2>
+	<div id="postseasonContainer"></div>
+</div>
 
 <!-- ACTIVE USERS SCREEN -->
 <div id="activeUsersScreen" class="hidden">
