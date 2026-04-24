@@ -554,8 +554,7 @@
 	padding-top: 0;
 }
 
-.schedule-series-details,
-.schedule-boxscore-details {
+.schedule-series-details {
 	background: #151515;
 	border: 1px solid #2e2e2e;
 	border-radius: 12px;
@@ -563,8 +562,7 @@
 	margin-top: 10px;
 }
 
-.schedule-series-details summary,
-.schedule-boxscore-details summary {
+.schedule-series-details summary {
 	cursor: pointer;
 	font-weight: 700;
 }
@@ -579,36 +577,42 @@
 	background: #101010;
 	border: 1px solid #2a2a2a;
 	border-radius: 12px;
-	padding: 12px;
+	padding: 14px;
 }
 
 .schedule-series-game-header {
 	display: flex;
-	justify-content: space-between;
+	justify-content: flex-start;
 	gap: 10px;
 	flex-wrap: wrap;
 	align-items: center;
-	margin-bottom: 8px;
+	margin-bottom: 10px;
 }
 
 .schedule-series-game-title {
 	font-weight: 700;
+	font-size: 15px;
 }
 
-.schedule-series-game-result {
-	font-size: 13px;
+.schedule-series-game-summary {
+	background: #171717;
+	border: 1px solid #303030;
+	border-radius: 12px;
+	padding: 14px;
+	text-align: center;
 }
 
-.schedule-series-game-result.is-complete {
-	color: #ddd;
+.schedule-series-game-score-big {
+	font-size: 24px;
+	font-weight: 900;
+	color: #f3f3f3;
+	line-height: 1.25;
+	margin-bottom: 8px;
 }
 
-.schedule-series-game-result.is-pending {
-	color: #999;
-}
-
-.schedule-boxscore-content {
-	margin-top: 12px;
+.schedule-series-game-date {
+	font-size: 14px;
+	color: #aaa;
 }
     /* Mobile-friendly stats tables (prevents cutoff on small screens) */
   @media (max-width: 720px) {
