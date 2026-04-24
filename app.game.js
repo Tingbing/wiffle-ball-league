@@ -331,21 +331,24 @@ async function maybeOfferLiveGameResume() {
 	resumeLiveGameFromAutosave(snapshot);
 }
 
-function startGameWithTeams(t1, t2, scheduleRef = null, lockInfo = null) {
+function startGameWithTeams(t1, t2, scheduleRef = null, lockInfo = null, gameContext = null) {
 	const activeTeam1 = buildActiveTeamForGame(t1, scheduleRef);
 	const activeTeam2 = buildActiveTeamForGame(t2, scheduleRef);
 
-	activeTeam1.players.forEach(playerName => {
-		const statsKey = activeTeam1._playerMeta?.[playerName]?.statsKey;
-		if (isSubKey(statsKey)) initSubStats(playerName);
-		else initPlayerStats(activeTeam1.name, playerName);
-	});
+	const shouldInitSeasonStatBuckets = !gameContext?.postseasonRef;
+	if (shouldInitSeasonStatBuckets) {
+		activeTeam1.players.forEach(playerName => {
+			const statsKey = activeTeam1._playerMeta?.[playerName]?.statsKey;
+			if (isSubKey(statsKey)) initSubStats(playerName);
+			else initPlayerStats(activeTeam1.name, playerName);
+		});
 
-	activeTeam2.players.forEach(playerName => {
-		const statsKey = activeTeam2._playerMeta?.[playerName]?.statsKey;
-		if (isSubKey(statsKey)) initSubStats(playerName);
-		else initPlayerStats(activeTeam2.name, playerName);
-	});
+		activeTeam2.players.forEach(playerName => {
+			const statsKey = activeTeam2._playerMeta?.[playerName]?.statsKey;
+			if (isSubKey(statsKey)) initSubStats(playerName);
+			else initPlayerStats(activeTeam2.name, playerName);
+		});
+	}
 
 	let batting = Math.random() > 0.5 ? activeTeam1 : activeTeam2;
 	let fielding = batting === activeTeam1 ? activeTeam2 : activeTeam1;
@@ -385,7 +388,11 @@ game = {
 	_lockInfo: lockInfo || null,
 	_gameInstanceId: scheduleRef
 		? `scheduled-${scheduleRef.dayIndex}-${scheduleRef.seriesIndex}-${scheduleRef.seriesGameIndex}`
-		: (lockInfo?.lockId ? `manual-${lockInfo.lockId}` : `manual-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`),
+		: (gameContext?.postseasonRef?.slotId
+			? `postseason-${gameContext.postseasonRef.bracketId || "current"}-${gameContext.postseasonRef.slotId}`
+			: (lockInfo?.lockId ? `manual-${lockInfo.lockId}` : `manual-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`)),
+	_postseasonRef: gameContext?.postseasonRef ? { ...gameContext.postseasonRef } : null,
+	_gameContext: gameContext ? deepCloneJson(gameContext) : null,
 	_startedAt: Date.now()
 };
 
@@ -413,9 +420,9 @@ game = {
 	persistLiveGameAutosave();
 }
 
-async function beginLockedGame(t1, t2, scheduleRef = null, extraLockDetails = {}) {
+async function beginLockedGame(t1, t2, scheduleRef = null, extraLockDetails = {}, gameContext = null) {
 	const attempt = await acquireGameLock({
-		type: scheduleRef ? "scheduled" : "manual",
+		type: extraLockDetails?.type || (scheduleRef ? "scheduled" : (gameContext?.postseasonRef ? "postseason" : "manual")),
 		team1: t1?.name || "",
 		team2: t2?.name || "",
 		...extraLockDetails
@@ -441,7 +448,7 @@ async function beginLockedGame(t1, t2, scheduleRef = null, extraLockDetails = {}
 		}
 	}
 
-	startGameWithTeams(t1, t2, scheduleRef, attempt.lock);
+	startGameWithTeams(t1, t2, scheduleRef, attempt.lock, gameContext);
 	return true;
 }
 
@@ -1622,11 +1629,14 @@ function buildCompletedGameLogEntry() {
 		team1Score: Number(game.team1Score || 0),
 		team2Score: Number(game.team2Score || 0),
 		scheduleRef,
+		postseasonRef: game?._postseasonRef ? { ...game._postseasonRef } : null,
+		seasonPhase: game?._postseasonRef ? "postseason" : "regular",
 		scheduleMeta: game?._lockInfo ? {
-			type: game._lockInfo.type || (scheduleRef ? "scheduled" : "manual"),
+			type: game._lockInfo.type || (game?._postseasonRef ? "postseason" : (scheduleRef ? "scheduled" : "manual")),
 			dayNumber: Number(game._lockInfo.dayNumber || 0) || null,
 			seriesNumber: Number(game._lockInfo.seriesNumber || 0) || null,
-			seriesGameNumber: Number(game._lockInfo.seriesGameNumber || 0) || null
+			seriesGameNumber: Number(game._lockInfo.seriesGameNumber || 0) || null,
+			slotId: game?._postseasonRef?.slotId || null
 		} : null,
 		lineups: {
 			[game.team1.name]: Array.isArray(game.team1.players) ? game.team1.players.slice() : [],
@@ -1664,6 +1674,47 @@ async function saveGameStats() {
 	const completedEntry = buildCompletedGameLogEntry();
 	const completedEntryId = completedEntry?.id || null;
 	const existingEntry = findCompletedGameLogEntry(completedEntryId);
+	const postseasonRef = game?._postseasonRef?.slotId ? { ...game._postseasonRef } : null;
+
+	if (postseasonRef) {
+		if (Number(game?.team1Score || 0) === Number(game?.team2Score || 0)) {
+			alert("Postseason games cannot end in a tie.");
+			return false;
+		}
+
+		const postseason = season?.postseason?.created ? season.postseason : null;
+		const slot = postseason?.games?.[postseasonRef.slotId] || null;
+		if (!slot) {
+			alert("This postseason game could not be matched back to its playoff bracket slot. Nothing was saved.");
+			return false;
+		}
+
+		if (slot.status === "final" && !existingEntry) {
+			alert("That postseason game was already recorded. Nothing new was saved.");
+			clearLiveGameAutosave();
+			return await releaseGameLock(game?._lockId || activeGameLock?.lockId || null, { quiet: true });
+		}
+
+		if (!existingEntry) {
+			saveCompletedGameLog({
+				outcomeApplied: true,
+				postseasonRef: { ...postseasonRef },
+				seasonPhase: "postseason"
+			});
+		}
+
+		const logId = existingEntry?.id || completedEntryId;
+		const postseasonApplied = applyPostseasonOutcomeOnce(postseasonRef.slotId, logId);
+		if (!postseasonApplied) {
+			alert("This postseason game could not be applied back to the playoff bracket slot, so nothing new was finalized.");
+			return false;
+		}
+
+		saveSeason();
+		clearLiveGameAutosave();
+		queueServerSync("game", { immediate: true });
+		return await releaseGameLock(game?._lockId || activeGameLock?.lockId || null, { quiet: true });
+	}
 
 	const scheduledRef =
 		game?._scheduleRef &&
@@ -2756,6 +2807,390 @@ isEligible: stats => getPitchingInningsValue(stats) > 0,
 	layout.appendChild(pitchingSection);
 }
 
+function getPostseasonSectionConfig(slotId) {
+	if (["W1", "W2", "W3"].includes(slotId)) return { sectionKey: "winners", sectionLabel: "Winners Bracket", sortSeries: 0 };
+	if (["L1", "L2"].includes(slotId)) return { sectionKey: "losers", sectionLabel: "Losers Bracket", sortSeries: 1 };
+	return { sectionKey: "championship", sectionLabel: "Championship", sortSeries: 2 };
+}
+
+function createPostseasonGameTemplate(slotId, label, section) {
+	return {
+		slotId,
+		label,
+		section,
+		team1Name: "",
+		team2Name: "",
+		score1: null,
+		score2: null,
+		winner: "",
+		loser: "",
+		status: "pending",
+		completedGameLogId: null,
+		playedAt: null
+	};
+}
+
+function buildEmptyPostseasonGames() {
+	return {
+		W1: createPostseasonGameTemplate("W1", "Seed 1 vs Seed 4", "Winners Bracket"),
+		W2: createPostseasonGameTemplate("W2", "Seed 2 vs Seed 3", "Winners Bracket"),
+		W3: createPostseasonGameTemplate("W3", "Winners Final", "Winners Bracket"),
+		L1: createPostseasonGameTemplate("L1", "Losers Round 1", "Losers Bracket"),
+		L2: createPostseasonGameTemplate("L2", "Losers Final", "Losers Bracket"),
+		C1: createPostseasonGameTemplate("C1", "Championship", "Championship"),
+		C2: createPostseasonGameTemplate("C2", "Championship Reset", "Championship")
+	};
+}
+
+function getPostseasonState() {
+	season = ensureSeasonShape(season);
+	return season.postseason;
+}
+
+function getPostseasonTypeLabel(entry) {
+	if (entry?.postseasonRef?.slotId) return "Postseason";
+	return entry?.scheduleRef ? "Scheduled" : "Manual";
+}
+
+function getPostseasonStandingsSnapshot() {
+	const teamsForDisplay = getSeasonTeamsForDisplay();
+	const rankings = getSeasonTeamRankings(teamsForDisplay);
+	if (rankings.length !== 4) return [];
+	return rankings.slice(0, 4).map((entry, index) => ({
+		seed: index + 1,
+		teamName: entry.teamName,
+		wins: Number(entry.wins || 0),
+		losses: Number(entry.losses || 0),
+		avgMargin: Number(entry.avgMargin || 0)
+	}));
+}
+
+function assignPostseasonParticipants(gameSlot, team1Name, team2Name) {
+	gameSlot.team1Name = team1Name || "";
+	gameSlot.team2Name = team2Name || "";
+	if (gameSlot.status !== "final") {
+		gameSlot.status = gameSlot.team1Name && gameSlot.team2Name ? "scheduled" : "pending";
+	}
+}
+
+function carryPostseasonResult(gameSlot, previousSlot) {
+	if (!previousSlot || previousSlot.status !== "final") return;
+	if (!gameSlot.team1Name || !gameSlot.team2Name) return;
+	if (previousSlot.team1Name !== gameSlot.team1Name || previousSlot.team2Name !== gameSlot.team2Name) return;
+	if (!previousSlot.winner || !previousSlot.loser || previousSlot.winner === previousSlot.loser) return;
+	gameSlot.score1 = Number(previousSlot.score1 || 0);
+	gameSlot.score2 = Number(previousSlot.score2 || 0);
+	gameSlot.winner = previousSlot.winner;
+	gameSlot.loser = previousSlot.loser;
+	gameSlot.status = "final";
+	gameSlot.completedGameLogId = previousSlot.completedGameLogId || null;
+	gameSlot.playedAt = Number(previousSlot.playedAt || 0) || null;
+}
+
+function recomputePostseasonBracket(postseasonObj) {
+	const postseason = ensurePostseasonShape(deepCloneJson(postseasonObj));
+	const seeds = (postseason.seeds || []).slice().sort((a, b) => Number(a.seed || 0) - Number(b.seed || 0));
+	const previousGames = postseason.games || {};
+	const games = buildEmptyPostseasonGames();
+
+	assignPostseasonParticipants(games.W1, seeds[0]?.teamName || "", seeds[3]?.teamName || "");
+	assignPostseasonParticipants(games.W2, seeds[1]?.teamName || "", seeds[2]?.teamName || "");
+	carryPostseasonResult(games.W1, previousGames.W1);
+	carryPostseasonResult(games.W2, previousGames.W2);
+
+	assignPostseasonParticipants(games.W3, games.W1.winner || "", games.W2.winner || "");
+	assignPostseasonParticipants(games.L1, games.W1.loser || "", games.W2.loser || "");
+	carryPostseasonResult(games.W3, previousGames.W3);
+	carryPostseasonResult(games.L1, previousGames.L1);
+
+	assignPostseasonParticipants(games.L2, games.W3.loser || "", games.L1.winner || "");
+	carryPostseasonResult(games.L2, previousGames.L2);
+
+	assignPostseasonParticipants(games.C1, games.W3.winner || "", games.L2.winner || "");
+	carryPostseasonResult(games.C1, previousGames.C1);
+
+	postseason.needsResetGame = false;
+	if (games.C1.status === "final" && games.C1.winner && games.C1.winner === games.C1.team2Name) {
+		postseason.needsResetGame = true;
+		assignPostseasonParticipants(games.C2, games.C1.team1Name || "", games.C1.team2Name || "");
+		carryPostseasonResult(games.C2, previousGames.C2);
+	}
+
+	postseason.champion = null;
+	if (games.C1.status === "final" && games.C1.winner && games.C1.winner === games.C1.team1Name) {
+		postseason.champion = games.C1.winner;
+	} else if (games.C2.status === "final" && games.C2.winner) {
+		postseason.champion = games.C2.winner;
+	}
+
+	postseason.games = games;
+	postseason.isComplete = !!postseason.champion;
+	return postseason;
+}
+
+function createPostseasonBracketFromSeeds(seeds) {
+	return recomputePostseasonBracket({
+		...createEmptyPostseasonState(),
+		created: true,
+		createdAt: Date.now(),
+		seeds: deepCloneJson(seeds || []),
+		games: buildEmptyPostseasonGames(),
+		champion: null,
+		isComplete: false,
+		needsResetGame: false
+	});
+}
+
+function getLeagueTeamByName(teamName) {
+	return (league?.teams || []).find(team => team && team.name === teamName) || null;
+}
+
+function applyPostseasonOutcomeOnce(slotId, completedGameLogId = null) {
+	if (!game || !slotId) return false;
+	const postseason = getPostseasonState();
+	if (!postseason?.created) return false;
+	const slot = postseason.games?.[slotId];
+	if (!slot) return false;
+	if (slot.status === "final") return true;
+
+	const team1Name = String(game.team1?.name || "").trim();
+	const team2Name = String(game.team2?.name || "").trim();
+	if (!team1Name || !team2Name) return false;
+	if (slot.team1Name !== team1Name || slot.team2Name !== team2Name) return false;
+
+	const score1 = Number(game.team1Score || 0);
+	const score2 = Number(game.team2Score || 0);
+	if (score1 === score2) return false;
+
+	postseason.games[slotId] = {
+		...slot,
+		team1Name,
+		team2Name,
+		score1,
+		score2,
+		winner: score1 > score2 ? team1Name : team2Name,
+		loser: score1 > score2 ? team2Name : team1Name,
+		status: "final",
+		completedGameLogId: completedGameLogId || slot.completedGameLogId || null,
+		playedAt: Date.now()
+	};
+
+	season.postseason = recomputePostseasonBracket(postseason);
+	game._resultSaved = true;
+	return true;
+}
+
+function createPostseasonBracket() {
+	if (!hasFullAppAccess()) {
+		alert("Sign in and enter the league code to create the postseason bracket.");
+		return;
+	}
+
+	const postseason = getPostseasonState();
+	if (postseason?.created) {
+		alert("A postseason bracket already exists. Reset postseason first if you want to create a new one.");
+		return;
+	}
+
+	const seeds = getPostseasonStandingsSnapshot();
+	if (seeds.length !== 4) {
+		alert("Postseason requires exactly 4 ranked teams in the current regular season standings.");
+		return;
+	}
+
+	season.postseason = createPostseasonBracketFromSeeds(seeds);
+	saveSeason();
+	showNotification("Postseason bracket created.", 1500);
+	displayPostseason();
+}
+
+function resetPostseason() {
+	if (!hasFullAppAccess()) {
+		alert("Sign in and enter the league code to reset postseason.");
+		return;
+	}
+	if (!confirm("Reset postseason? This clears the playoff bracket only and does not change the regular season schedule or stats.")) return;
+	season.postseason = createEmptyPostseasonState();
+	saveSeason();
+	displayPostseason();
+}
+
+async function startPostseasonGame(slotId) {
+	if (!hasFullAppAccess()) {
+		alert("Sign in and enter the league code to record postseason games.");
+		return;
+	}
+
+	const postseason = getPostseasonState();
+	if (!postseason?.created || postseason?.isComplete) {
+		alert("Create the postseason bracket first, or reset it before starting more playoff games.");
+		return;
+	}
+
+	const slot = postseason.games?.[slotId];
+	if (!slot) {
+		alert("That postseason game slot was not found.");
+		return;
+	}
+	if (slot.status === "final") {
+		alert("That postseason game was already completed.");
+		return;
+	}
+	if (!slot.team1Name || !slot.team2Name) {
+		alert("That postseason game cannot start yet because both teams are not known.");
+		return;
+	}
+
+	const team1 = getLeagueTeamByName(slot.team1Name);
+	const team2 = getLeagueTeamByName(slot.team2Name);
+	if (!team1 || !team2) {
+		alert("One or both postseason teams could not be found in the current league setup.");
+		return;
+	}
+
+	await beginLockedGame(
+		team1,
+		team2,
+		null,
+		{ type: "postseason", postseasonSlotId: slotId, postseasonLabel: slot.label },
+		{ postseasonRef: { slotId, label: slot.label, bracketId: postseason.createdAt || Date.now() } }
+	);
+}
+
+function getPostseasonGameDisplayStatus(slot) {
+	if (!slot) return "pending";
+	if (slot.status === "final") return "final";
+	if (activeGameLock?.type === "postseason" && activeGameLock?.postseasonSlotId === slot.slotId) return "in_progress";
+	return slot.status || "pending";
+}
+
+function createPostseasonSeedCard(seedRow) {
+	const row = document.createElement("div");
+	row.className = "postseason-seed-row";
+	row.innerHTML = `
+		<div class="postseason-seed-number">Seed ${seedRow.seed}</div>
+		<div class="postseason-seed-name">${seedRow.teamName}</div>
+		<div class="postseason-seed-note">${seedRow.wins}-${seedRow.losses} • ${formatSeasonStatsSignedNumber(seedRow.avgMargin, 1)} avg margin</div>
+	`;
+	return row;
+}
+
+function createPostseasonGameCard(slotId, slot) {
+	const card = document.createElement("div");
+	card.className = "postseason-game-card";
+	const displayStatus = getPostseasonGameDisplayStatus(slot);
+	const scoreText = slot.status === "final" && Number.isFinite(slot.score1) && Number.isFinite(slot.score2)
+		? `${slot.score1} – ${slot.score2}`
+		: "";
+
+	card.innerHTML = `
+		<div class="postseason-game-header">
+			<div>
+				<div class="postseason-game-slot">${slotId}</div>
+				<div class="postseason-game-label">${slot.label}</div>
+			</div>
+			<span class="postseason-status postseason-status-${displayStatus}">${displayStatus.replace("_", " ")}</span>
+		</div>
+		<div class="postseason-team-row ${slot.status === "final" && slot.winner === slot.team1Name ? "is-winner" : ""}">
+			<span>${slot.team1Name || "TBD"}</span>
+			${slot.status === "final" ? `<strong>${slot.score1}</strong>` : ""}
+		</div>
+		<div class="postseason-team-row ${slot.status === "final" && slot.winner === slot.team2Name ? "is-winner" : ""}">
+			<span>${slot.team2Name || "TBD"}</span>
+			${slot.status === "final" ? `<strong>${slot.score2}</strong>` : ""}
+		</div>
+		${slot.status === "final" ? `<div class="postseason-game-note">Winner: ${slot.winner}${scoreText ? ` • ${scoreText}` : ""}</div>` : ""}
+	`;
+
+	if (displayStatus === "in_progress") {
+		const note = document.createElement("div");
+		note.className = "postseason-game-note";
+		note.textContent = "This playoff game is already in progress.";
+		card.appendChild(note);
+	} else if (hasFullAppAccess() && !getPostseasonState()?.isComplete && slot.team1Name && slot.team2Name && slot.status !== "final") {
+		const button = document.createElement("button");
+		button.textContent = "Start Game";
+		button.onclick = () => startPostseasonGame(slotId);
+		card.appendChild(button);
+	} else if (!slot.team1Name || !slot.team2Name) {
+		const note = document.createElement("div");
+		note.className = "postseason-game-note";
+		note.textContent = "Waiting for earlier game results.";
+		card.appendChild(note);
+	}
+
+	return card;
+}
+
+function createPostseasonSectionCard(title, slotIds, games) {
+	const section = document.createElement("div");
+	section.className = "card postseason-section";
+	section.innerHTML = `<h3 style="margin-top:0;">${title}</h3>`;
+	const stack = document.createElement("div");
+	stack.className = "postseason-section-stack";
+	slotIds.forEach(slotId => stack.appendChild(createPostseasonGameCard(slotId, games[slotId])));
+	section.appendChild(stack);
+	return section;
+}
+
+function displayPostseason() {
+	const container = document.getElementById("postseasonContainer");
+	if (!container) return;
+	container.innerHTML = "";
+
+	const postseason = getPostseasonState();
+	const currentSeeds = getPostseasonStandingsSnapshot();
+
+	const intro = document.createElement("div");
+	intro.className = "card";
+	intro.innerHTML = `
+		<h3 style="margin-top:0;">4-Team Double-Elimination Bracket</h3>
+		<p class="season-stats-note">Postseason is stored separately from the regular season schedule. Seeds are frozen from the current regular season standings only when you create the bracket.</p>
+	`;
+	if (postseason?.champion) {
+		intro.innerHTML += `<div class="winner-banner" style="margin-top:12px;">🏆 Champion: ${postseason.champion}</div>`;
+	}
+	if (hasFullAppAccess()) {
+		const controls = document.createElement("div");
+		controls.style.cssText = "display:flex; gap:10px; flex-wrap:wrap; margin-top:12px;";
+		controls.innerHTML = `
+			<button type="button" onclick="createPostseasonBracket()">Create Postseason Bracket</button>
+			<button type="button" onclick="resetPostseason()" style="background:#a44; color:white;">Reset Postseason</button>
+		`;
+		intro.appendChild(controls);
+	}
+	container.appendChild(intro);
+
+	const seedsCard = document.createElement("div");
+	seedsCard.className = "card";
+	seedsCard.innerHTML = `<h3 style="margin-top:0;">${postseason?.created ? "Frozen Seeds" : "Current Standings Preview"}</h3>`;
+	const seedsToShow = postseason?.created ? (postseason.seeds || []) : currentSeeds;
+	if (seedsToShow.length !== 4) {
+		seedsCard.innerHTML += `<p class="season-stats-note">Exactly 4 ranked teams are required to create the postseason bracket.</p>`;
+	} else {
+		const seedWrap = document.createElement("div");
+		seedWrap.className = "postseason-seeds";
+		seedsToShow.slice().sort((a, b) => Number(a.seed || 0) - Number(b.seed || 0)).forEach(seedRow => seedWrap.appendChild(createPostseasonSeedCard(seedRow)));
+		seedsCard.appendChild(seedWrap);
+	}
+	container.appendChild(seedsCard);
+
+	if (!postseason?.created) {
+		const empty = document.createElement("div");
+		empty.className = "card";
+		empty.innerHTML = `<p class="season-stats-note">No postseason bracket exists yet. Create it once the 4-team regular season standings are final.</p>`;
+		container.appendChild(empty);
+		return;
+	}
+
+	const layout = document.createElement("div");
+	layout.className = "postseason-layout";
+	layout.appendChild(createPostseasonSectionCard("Winners Bracket", ["W1", "W2", "W3"], postseason.games));
+	layout.appendChild(createPostseasonSectionCard("Losers Bracket", ["L1", "L2"], postseason.games));
+	const champSection = createPostseasonSectionCard("Championship", postseason.needsResetGame ? ["C1", "C2"] : ["C1"], postseason.games);
+	layout.appendChild(champSection);
+	container.appendChild(layout);
+}
 
 function formatPastGameDate(value) {
 	if (!value) return "Unknown date";
@@ -2866,6 +3301,23 @@ function getPastGameEntryForScheduleSlot(dayIndex, seriesIndex, seriesGameIndex)
 }
 
 function getPastGameBrowserMeta(entry) {
+	if (entry?.postseasonRef?.slotId) {
+		const slotId = entry.postseasonRef.slotId;
+		const section = getPostseasonSectionConfig(slotId);
+		const slotSortMap = { W1: 1, W2: 2, W3: 3, L1: 1, L2: 2, C1: 1, C2: 2 };
+		return {
+			dayKey: "postseason",
+			dayLabel: "Postseason",
+			seriesKey: `postseason-${section.sectionKey}`,
+			seriesLabel: section.sectionLabel,
+			gameKey: entry.id,
+			gameLabel: slotId,
+			sortDay: 998,
+			sortSeries: section.sortSeries,
+			sortGame: Number(slotSortMap[slotId] || 0)
+		};
+	}
+
 	const ref = entry?.scheduleRef;
 	if (
 		ref &&
@@ -3073,6 +3525,9 @@ function getPastGameTeamErrorTotal(entry, teamName) {
 }
 
 function getPastGameScheduleSlotLabel(entry) {
+	if (entry?.postseasonRef?.slotId) {
+		return `Postseason • ${entry.postseasonRef.slotId}`;
+	}
 	const meta = entry?.scheduleMeta || null;
 	if (meta?.dayNumber && meta?.seriesNumber && meta?.seriesGameNumber) {
 		return `Day ${meta.dayNumber} • Series ${meta.seriesNumber} • Game ${meta.seriesGameNumber}`;
@@ -3239,7 +3694,7 @@ function createPastGameDetails(entry) {
 	summaryCard.appendChild(buildSeasonStatsMetricGrid([
 		{ label: "Date", value: formatPastGameDate(entry.playedAt) },
 		{ label: "Time", value: formatPastGameTime(entry.playedAt) || "-" },
-		{ label: "Type", value: entry.scheduleRef ? "Scheduled" : "Manual" },
+		{ label: "Type", value: getPostseasonTypeLabel(entry) },
 		{ label: "Slot", value: getPastGameScheduleSlotLabel(entry) },
 		{ label: "Detail", value: getPastGameDetailLevelLabel(entry) }
 	]));
@@ -3298,7 +3753,7 @@ function displayPastGameLog() {
 	introCard.className = "card";
 	introCard.innerHTML = `
 		<h3 style="margin-top:0;">Past Game Log</h3>
-		<p class="season-stats-note">Browse completed games by season day, then choose the series and game number to review the final score and saved player performances.</p>
+		<p class="season-stats-note">Browse completed games by season day or postseason round, then choose the series and game number to review the final score and saved player performances.</p>
 	`;
 	container.appendChild(introCard);
 
