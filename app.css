@@ -614,6 +614,135 @@
 	font-size: 14px;
 	color: #aaa;
 }
+
+.postseason-seeds {
+	display: grid;
+	gap: 10px;
+}
+
+.postseason-seed-row {
+	background: #1a1a1a;
+	border: 1px solid #333;
+	border-radius: 10px;
+	padding: 12px;
+}
+
+.postseason-seed-number {
+	font-size: 12px;
+	text-transform: uppercase;
+	letter-spacing: 0.04em;
+	color: #aaa;
+	margin-bottom: 6px;
+}
+
+.postseason-seed-name {
+	font-size: 20px;
+	font-weight: bold;
+}
+
+.postseason-seed-note {
+	font-size: 13px;
+	color: #aaa;
+	margin-top: 4px;
+}
+
+.postseason-layout {
+	display: grid;
+	grid-template-columns: repeat(3, minmax(0, 1fr));
+	gap: 14px;
+	align-items: start;
+}
+
+.postseason-section {
+	display: grid;
+	gap: 12px;
+}
+
+.postseason-section-stack {
+	display: grid;
+	gap: 12px;
+}
+
+.postseason-game-card {
+	background: #1a1a1a;
+	border: 1px solid #333;
+	border-radius: 12px;
+	padding: 12px;
+	display: grid;
+	gap: 10px;
+}
+
+.postseason-game-header {
+	display: flex;
+	justify-content: space-between;
+	align-items: flex-start;
+	gap: 10px;
+	flex-wrap: wrap;
+}
+
+.postseason-game-slot {
+	font-size: 12px;
+	text-transform: uppercase;
+	letter-spacing: 0.04em;
+	color: #aaa;
+	margin-bottom: 4px;
+}
+
+.postseason-game-label {
+	font-size: 18px;
+	font-weight: bold;
+}
+
+.postseason-status {
+	display: inline-flex;
+	align-items: center;
+	padding: 6px 10px;
+	border-radius: 999px;
+	font-size: 12px;
+	font-weight: 700;
+	border: 1px solid #333;
+	background: #151515;
+	text-transform: capitalize;
+}
+
+.postseason-status-scheduled {
+	color: #ddd;
+}
+
+.postseason-status-pending {
+	color: #aaa;
+}
+
+.postseason-status-in_progress {
+	color: #f3e2b0;
+	border-color: #5e4a1f;
+}
+
+.postseason-status-final {
+	color: #d8f7d8;
+	border-color: #325232;
+}
+
+.postseason-team-row {
+	display: flex;
+	justify-content: space-between;
+	align-items: center;
+	gap: 10px;
+	background: #131313;
+	border: 1px solid #2b2b2b;
+	border-radius: 10px;
+	padding: 10px 12px;
+}
+
+.postseason-team-row.is-winner {
+	border-color: #3d6b3d;
+	background: #162316;
+}
+
+.postseason-game-note {
+	font-size: 13px;
+	color: #aaa;
+}
     /* Mobile-friendly stats tables (prevents cutoff on small screens) */
   @media (max-width: 720px) {
 	.past-game-browser-grid,
@@ -621,8 +750,9 @@
 		grid-template-columns: 1fr;
 	}
 
-	.season-stats-hub-buttons,
-	.season-stats-layout {
+		.season-stats-hub-buttons,
+	.season-stats-layout,
+	.postseason-layout {
 		grid-template-columns: 1fr;
 	}
 
