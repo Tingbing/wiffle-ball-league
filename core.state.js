@@ -40,8 +40,20 @@ function deepCloneJson(value) {
 	}
 }
 
+function createEmptyPostseasonState() {
+	return {
+		created: false,
+		createdAt: null,
+		seeds: [],
+		games: {},
+		champion: null,
+		isComplete: false,
+		needsResetGame: false
+	};
+}
+
 function createEmptySeasonState() {
-	return { playerStats: {}, teamRecords: {}, seasonSubs: [], subStats: {}, games: [] };
+	return { playerStats: {}, teamRecords: {}, seasonSubs: [], subStats: {}, games: [], postseason: createEmptyPostseasonState() };
 }
 
 /* ================================
@@ -101,15 +113,33 @@ async function load() {
 /* ================================
    SEASON / SCHEDULE SHAPE HELPERS
 ================================== */
+function ensurePostseasonShape(obj) {
+	const base = createEmptyPostseasonState();
+	if (!obj || typeof obj !== "object") obj = {};
+	if (!Array.isArray(obj.seeds)) obj.seeds = [];
+	if (!obj.games || typeof obj.games !== "object") obj.games = {};
+	return {
+		...base,
+		...obj,
+		seeds: Array.isArray(obj.seeds) ? obj.seeds.map(seed => ({ ...seed })) : [],
+		games: obj.games && typeof obj.games === "object" ? { ...obj.games } : {},
+		champion: obj.champion || null,
+		created: !!obj.created,
+		isComplete: !!obj.isComplete,
+		needsResetGame: !!obj.needsResetGame
+	};
+}
+
 function ensureSeasonShape(obj) {
 	if (!obj || typeof obj !== "object") {
-		obj = { playerStats: {}, teamRecords: {}, seasonSubs: [], subStats: {}, games: [] };
+		obj = createEmptySeasonState();
 	}
 	if (!obj.playerStats) obj.playerStats = {};
 	if (!obj.teamRecords) obj.teamRecords = {};
 	if (!Array.isArray(obj.seasonSubs)) obj.seasonSubs = [];
 	if (!obj.subStats || typeof obj.subStats !== "object") obj.subStats = {};
 	if (!Array.isArray(obj.games)) obj.games = [];
+	obj.postseason = ensurePostseasonShape(obj.postseason);
 	return obj;
 }
 
