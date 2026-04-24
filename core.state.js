@@ -157,27 +157,27 @@ function ensureScheduleShape(obj) {
 			const away = entry?.away || "";
 			const home = entry?.home || "";
 
-			// already in new series format
 			if (Array.isArray(entry?.gamesInSeries)) {
-				
-			const gamesInSeries = entry.gamesInSeries.slice(0, 3).map((slot, slotIndex) => ({
-	gameNumber: Number(slot?.gameNumber || (slotIndex + 1)),
-	result: slot?.result || null,
-	subAssignments: Array.isArray(slot?.subAssignments) ? slot.subAssignments.map(a => ({ ...a })) : []
-}));
+				const gamesInSeries = entry.gamesInSeries.slice(0, 3).map((slot, slotIndex) => ({
+					gameNumber: Number(slot?.gameNumber || (slotIndex + 1)),
+					result: slot?.result || null,
+					skipped: slot?.skipped && typeof slot.skipped === "object" ? { ...slot.skipped } : null,
+					subAssignments: Array.isArray(slot?.subAssignments) ? slot.subAssignments.map(a => ({ ...a })) : []
+				}));
+
 				while (gamesInSeries.length < 3) {
 					gamesInSeries.push(createSeriesGameSlot(gamesInSeries.length + 1));
 				}
 
 				const normalized = {
-	...entry,
-	gameNumber: seriesNumber,
-	away,
-	home,
-	gamesInSeries,
-	subAssignments: Array.isArray(entry?.subAssignments) ? entry.subAssignments.map(a => ({ ...a })) : [],
-	result: entry?.result || null
-};
+					...entry,
+					gameNumber: seriesNumber,
+					away,
+					home,
+					gamesInSeries,
+					subAssignments: Array.isArray(entry?.subAssignments) ? entry.subAssignments.map(a => ({ ...a })) : [],
+					result: entry?.result || null
+				};
 
 				if (!normalized.result) {
 					normalized.result = computeSeriesResult(normalized);
@@ -186,8 +186,8 @@ function ensureScheduleShape(obj) {
 				return normalized;
 			}
 
-			// old format -> convert single game row into new series row
 			const migrated = createSeriesEntry(away, home, seriesNumber);
+			migrated.subAssignments = Array.isArray(entry?.subAssignments) ? entry.subAssignments.map(a => ({ ...a })) : [];
 
 			if (entry?.result) {
 				migrated.gamesInSeries[0].result = entry.result;
