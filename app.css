@@ -602,6 +602,11 @@
 	text-align: center;
 }
 
+.schedule-series-game-summary.is-neutral {
+	background: #141414;
+	border-color: #2a2a2a;
+}
+
 .schedule-series-game-score-big {
 	font-size: 24px;
 	font-weight: 900;
@@ -613,6 +618,12 @@
 .schedule-series-game-date {
 	font-size: 14px;
 	color: #aaa;
+}
+
+.schedule-series-action {
+	display: grid;
+	gap: 8px;
+	padding: 10px 0 2px;
 }
 
 .postseason-seeds {
