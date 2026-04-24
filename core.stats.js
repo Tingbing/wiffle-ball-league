@@ -1089,28 +1089,30 @@ function rebuildSeasonStatBucketsFromGameLogs(seasonObj) {
 	const rebuiltSubStats = {};
 	const subNames = new Set();
 
-	(seasonObj?.games || []).forEach(entry => {
-		(entry?.playerStats || []).forEach(rawStats => {
-			const normalized = createComparableStatsLine(rawStats);
-			if (!normalized.playerName || (!normalized.isSub && !normalized.teamName)) return;
+	(seasonObj?.games || [])
+		.filter(entry => entry?.seasonPhase !== "postseason" && !entry?.postseasonRef)
+		.forEach(entry => {
+			(entry?.playerStats || []).forEach(rawStats => {
+				const normalized = createComparableStatsLine(rawStats);
+				if (!normalized.playerName || (!normalized.isSub && !normalized.teamName)) return;
 
-			const key = normalized.isSub
-				? getSubKey(normalized.playerName)
-				: getPlayerKey(normalized.teamName, normalized.playerName);
-			const bucket = normalized.isSub ? rebuiltSubStats : rebuiltPlayerStats;
+				const key = normalized.isSub
+					? getSubKey(normalized.playerName)
+					: getPlayerKey(normalized.teamName, normalized.playerName);
+				const bucket = normalized.isSub ? rebuiltSubStats : rebuiltPlayerStats;
 
-			if (!bucket[key]) {
-				bucket[key] = createEmptyStats(normalized.isSub ? "SUB" : normalized.teamName, normalized.playerName, { isSub: normalized.isSub });
-			}
+				if (!bucket[key]) {
+					bucket[key] = createEmptyStats(normalized.isSub ? "SUB" : normalized.teamName, normalized.playerName, { isSub: normalized.isSub });
+				}
 
-			STATS_BACKUP_NUMERIC_FIELDS.forEach(field => {
-				bucket[key][field] = Number(bucket[key][field] || 0) + normalized[field];
+				STATS_BACKUP_NUMERIC_FIELDS.forEach(field => {
+					bucket[key][field] = Number(bucket[key][field] || 0) + normalized[field];
+				});
+				syncPitchingInnings(bucket[key]);
+
+				if (normalized.isSub && normalized.playerName) subNames.add(normalized.playerName);
 			});
-			syncPitchingInnings(bucket[key]);
-
-			if (normalized.isSub && normalized.playerName) subNames.add(normalized.playerName);
 		});
-	});
 
 	return {
 		playerStats: rebuiltPlayerStats,
