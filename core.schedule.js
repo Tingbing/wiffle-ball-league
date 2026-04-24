@@ -1054,36 +1054,56 @@ function createScheduleSeriesExpansionRow(dayIndex, seriesIndex, seriesEntry) {
 
 		const header = document.createElement("div");
 		header.className = "schedule-series-game-header";
+
 		const title = document.createElement("div");
 		title.className = "schedule-series-game-title";
 		title.textContent = `Game ${Number(seriesGame?.gameNumber || (seriesGameIndex + 1))}`;
 		header.appendChild(title);
 
-		const resultText = document.createElement("div");
-		resultText.className = seriesGame?.result ? "schedule-series-game-result is-complete" : "schedule-series-game-result is-pending";
-		resultText.textContent = getScheduleGameResultLabel(seriesEntry, seriesGame, gameEntry);
-		header.appendChild(resultText);
 		gameCard.appendChild(header);
 
 		if (seriesGame?.result) {
-			const boxDetails = document.createElement("details");
-			boxDetails.className = "schedule-boxscore-details";
-			const boxSummary = document.createElement("summary");
-			boxSummary.textContent = "View Box Score";
-			boxDetails.appendChild(boxSummary);
+			const result = seriesGame.result;
+			const playedAt = Number(gameEntry?.playedAt || result?.playedAt || 0);
 
-			const content = document.createElement("div");
-			content.className = "schedule-boxscore-content";
-			if (gameEntry && typeof createPastGameDetails === "function") {
-				content.appendChild(createPastGameDetails(gameEntry));
+			const awayName = gameEntry?.team1Name || seriesEntry.away;
+			const homeName = gameEntry?.team2Name || seriesEntry.home;
+
+			const awayScore = gameEntry
+				? Number(gameEntry.team1Score || 0)
+				: (result?.type === "tie"
+					? Number(result.score1 || 0)
+					: (result?.winner === awayName ? Number(result.winnerScore || 0) : Number(result.loserScore || 0)));
+
+			const homeScore = gameEntry
+				? Number(gameEntry.team2Score || 0)
+				: (result?.type === "tie"
+					? Number(result.score2 || 0)
+					: (result?.winner === homeName ? Number(result.winnerScore || 0) : Number(result.loserScore || 0)));
+
+			let scoreLine = "";
+			if (awayScore === homeScore) {
+				scoreLine = `${awayName} tied ${homeName}, ${awayScore}–${homeScore}`;
+			} else if (awayScore > homeScore) {
+				scoreLine = `${awayName} beat ${homeName}, ${awayScore}–${homeScore}`;
 			} else {
-				const note = document.createElement("p");
-				note.className = "season-stats-note";
-				note.textContent = "That game was recorded, but its box score details are not available in this view yet.";
-				content.appendChild(note);
+				scoreLine = `${homeName} beat ${awayName}, ${homeScore}–${awayScore}`;
 			}
-			boxDetails.appendChild(content);
-			gameCard.appendChild(boxDetails);
+
+			const dateText = playedAt
+				? (typeof formatPastGameDate === "function"
+					? formatPastGameDate(playedAt)
+					: new Date(playedAt).toLocaleDateString())
+				: "-";
+
+			const summaryCard = document.createElement("div");
+			summaryCard.className = "schedule-series-game-summary";
+			summaryCard.innerHTML = `
+				<div class="schedule-series-game-score-big">${scoreLine}</div>
+				<div class="schedule-series-game-date">Played: ${dateText}</div>
+			`;
+
+			gameCard.appendChild(summaryCard);
 		} else {
 			const pending = document.createElement("div");
 			pending.className = "season-stats-note";
