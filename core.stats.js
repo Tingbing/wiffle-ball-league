@@ -1047,6 +1047,7 @@ function buildSanitizedScheduleForRestore(scheduleObj) {
 			normalized.gamesInSeries = (Array.isArray(seriesEntry?.gamesInSeries) ? seriesEntry.gamesInSeries : []).slice(0, 3).map((seriesGame, seriesGameIndex) => ({
 				gameNumber: Number(seriesGame?.gameNumber || (seriesGameIndex + 1)),
 				result: seriesGame?.result ? deepCloneJson(seriesGame.result) : null,
+				skipped: seriesGame?.skipped && typeof seriesGame.skipped === "object" ? deepCloneJson(seriesGame.skipped) : null,
 				subAssignments: Array.isArray(seriesGame?.subAssignments) ? deepCloneJson(seriesGame.subAssignments) : []
 			}));
 			while (normalized.gamesInSeries.length < 3) {
