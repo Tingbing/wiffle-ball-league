@@ -442,8 +442,14 @@ async function beginLockedGame(t1, t2, scheduleRef = null, extraLockDetails = {}
 		const freshSeriesGame = serverSchedule?.days?.[scheduleRef.dayIndex]?.games?.[scheduleRef.seriesIndex]?.gamesInSeries?.[scheduleRef.seriesGameIndex];
 		if (freshSeriesGame?.result) {
 			await releaseGameLock(attempt.lockId, { quiet: true });
-						applyServerSeasonRow(attempt.row, { source: "lock-acquire" });
+			applyServerSeasonRow(attempt.row, { source: "lock-acquire" });
 			alert("That game was already recorded on another device.");
+			return false;
+		}
+		if (freshSeriesGame?.skipped) {
+			await releaseGameLock(attempt.lockId, { quiet: true });
+			applyServerSeasonRow(attempt.row, { source: "lock-acquire" });
+			alert("That game was marked not played because the series ended early.");
 			return false;
 		}
 	}
@@ -2975,6 +2981,15 @@ function applyPostseasonOutcomeOnce(slotId, completedGameLogId = null) {
 	if (!team1Name || !team2Name) return false;
 	if (slot.team1Name !== team1Name || slot.team2Name !== team2Name) return false;
 
+	const completedGameLogIds = Array.isArray(slot.completedGameLogIds)
+		? slot.completedGameLogIds.filter(Boolean).slice()
+		: [];
+
+	if (completedGameLogId && completedGameLogIds.includes(completedGameLogId)) {
+		game._resultSaved = true;
+		return true;
+	}
+
 	const score1 = Number(game.team1Score || 0);
 	const score2 = Number(game.team2Score || 0);
 	if (score1 === score2) return false;
@@ -2985,10 +3000,7 @@ function applyPostseasonOutcomeOnce(slotId, completedGameLogId = null) {
 	const targetWins = Number(slot.targetWins || 2);
 	const seriesIsFinal = nextSeriesWins1 >= targetWins || nextSeriesWins2 >= targetWins;
 
-	const completedGameLogIds = Array.isArray(slot.completedGameLogIds)
-		? slot.completedGameLogIds.filter(Boolean).slice()
-		: [];
-	if (completedGameLogId && !completedGameLogIds.includes(completedGameLogId)) {
+	if (completedGameLogId) {
 		completedGameLogIds.push(completedGameLogId);
 	}
 
