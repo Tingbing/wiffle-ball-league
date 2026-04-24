@@ -449,6 +449,13 @@ function refreshStatsBackupViews() {
 			refreshGameSetupScheduleCards();
 		}
 	} catch (e) {}
+
+		try {
+		const postseasonScreen = document.getElementById("postseasonScreen");
+		if (postseasonScreen && !postseasonScreen.classList.contains("hidden") && typeof displayPostseason === "function") {
+			displayPostseason();
+		}
+	} catch (e) {}
 }
 
 function createBackupRosterLookup(backup) {
