@@ -1015,6 +1015,8 @@ function sanitizeSeasonGameLogsForRestore(seasonObj) {
 		losingPitcher: isPlainObject(entry?.losingPitcher) ? deepCloneJson(entry.losingPitcher) : null,
 		subsUsed: Array.isArray(entry?.subsUsed) ? deepCloneJson(entry.subsUsed) : [],
 		scheduleMeta: isPlainObject(entry?.scheduleMeta) ? deepCloneJson(entry.scheduleMeta) : null,
+		postseasonRef: isPlainObject(entry?.postseasonRef) ? deepCloneJson(entry.postseasonRef) : null,
+		seasonPhase: String(entry?.seasonPhase || "").trim() || (entry?.postseasonRef ? "postseason" : "regular"),
 		scheduleRef: entry?.scheduleRef && typeof entry.scheduleRef === "object"
 			? {
 				dayIndex: Number(entry.scheduleRef.dayIndex),
