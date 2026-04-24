@@ -386,10 +386,10 @@ game = {
 	_scheduleRef: scheduleRef,
 	_lockId: lockInfo?.lockId || null,
 	_lockInfo: lockInfo || null,
-	_gameInstanceId: scheduleRef
+		_gameInstanceId: scheduleRef
 		? `scheduled-${scheduleRef.dayIndex}-${scheduleRef.seriesIndex}-${scheduleRef.seriesGameIndex}`
 		: (gameContext?.postseasonRef?.slotId
-			? `postseason-${gameContext.postseasonRef.bracketId || "current"}-${gameContext.postseasonRef.slotId}`
+			? `postseason-${gameContext.postseasonRef.bracketId || "current"}-${gameContext.postseasonRef.slotId}-g${gameContext.postseasonRef.seriesGameNumber || 1}`
 			: (lockInfo?.lockId ? `manual-${lockInfo.lockId}` : `manual-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`)),
 	_postseasonRef: gameContext?.postseasonRef ? { ...gameContext.postseasonRef } : null,
 	_gameContext: gameContext ? deepCloneJson(gameContext) : null,
@@ -2826,7 +2826,11 @@ function createPostseasonGameTemplate(slotId, label, section) {
 		loser: "",
 		status: "pending",
 		completedGameLogId: null,
-		playedAt: null
+		completedGameLogIds: [],
+		playedAt: null,
+		seriesWins1: 0,
+		seriesWins2: 0,
+		targetWins: 2
 	};
 }
 
@@ -2874,17 +2878,30 @@ function assignPostseasonParticipants(gameSlot, team1Name, team2Name) {
 }
 
 function carryPostseasonResult(gameSlot, previousSlot) {
-	if (!previousSlot || previousSlot.status !== "final") return;
+	if (!previousSlot) return;
 	if (!gameSlot.team1Name || !gameSlot.team2Name) return;
 	if (previousSlot.team1Name !== gameSlot.team1Name || previousSlot.team2Name !== gameSlot.team2Name) return;
-	if (!previousSlot.winner || !previousSlot.loser || previousSlot.winner === previousSlot.loser) return;
-	gameSlot.score1 = Number(previousSlot.score1 || 0);
-	gameSlot.score2 = Number(previousSlot.score2 || 0);
-	gameSlot.winner = previousSlot.winner;
-	gameSlot.loser = previousSlot.loser;
-	gameSlot.status = "final";
+
+	gameSlot.seriesWins1 = Number(previousSlot.seriesWins1 || 0);
+	gameSlot.seriesWins2 = Number(previousSlot.seriesWins2 || 0);
+	gameSlot.targetWins = Number(previousSlot.targetWins || gameSlot.targetWins || 2);
+	gameSlot.score1 = previousSlot.score1 == null ? null : Number(previousSlot.score1);
+	gameSlot.score2 = previousSlot.score2 == null ? null : Number(previousSlot.score2);
 	gameSlot.completedGameLogId = previousSlot.completedGameLogId || null;
+	gameSlot.completedGameLogIds = Array.isArray(previousSlot.completedGameLogIds)
+		? previousSlot.completedGameLogIds.filter(Boolean).slice()
+		: (previousSlot.completedGameLogId ? [previousSlot.completedGameLogId] : []);
 	gameSlot.playedAt = Number(previousSlot.playedAt || 0) || null;
+
+	if (previousSlot.status === "final" && previousSlot.winner && previousSlot.loser && previousSlot.winner !== previousSlot.loser) {
+		gameSlot.winner = previousSlot.winner;
+		gameSlot.loser = previousSlot.loser;
+		gameSlot.status = "final";
+	} else {
+		gameSlot.winner = "";
+		gameSlot.loser = "";
+		gameSlot.status = gameSlot.team1Name && gameSlot.team2Name ? "scheduled" : "pending";
+	}
 }
 
 function recomputePostseasonBracket(postseasonObj) {
@@ -2949,9 +2966,9 @@ function applyPostseasonOutcomeOnce(slotId, completedGameLogId = null) {
 	if (!game || !slotId) return false;
 	const postseason = getPostseasonState();
 	if (!postseason?.created) return false;
+
 	const slot = postseason.games?.[slotId];
 	if (!slot) return false;
-	if (slot.status === "final") return true;
 
 	const team1Name = String(game.team1?.name || "").trim();
 	const team2Name = String(game.team2?.name || "").trim();
@@ -2962,16 +2979,33 @@ function applyPostseasonOutcomeOnce(slotId, completedGameLogId = null) {
 	const score2 = Number(game.team2Score || 0);
 	if (score1 === score2) return false;
 
+	const team1Won = score1 > score2;
+	const nextSeriesWins1 = Number(slot.seriesWins1 || 0) + (team1Won ? 1 : 0);
+	const nextSeriesWins2 = Number(slot.seriesWins2 || 0) + (team1Won ? 0 : 1);
+	const targetWins = Number(slot.targetWins || 2);
+	const seriesIsFinal = nextSeriesWins1 >= targetWins || nextSeriesWins2 >= targetWins;
+
+	const completedGameLogIds = Array.isArray(slot.completedGameLogIds)
+		? slot.completedGameLogIds.filter(Boolean).slice()
+		: [];
+	if (completedGameLogId && !completedGameLogIds.includes(completedGameLogId)) {
+		completedGameLogIds.push(completedGameLogId);
+	}
+
 	postseason.games[slotId] = {
 		...slot,
 		team1Name,
 		team2Name,
 		score1,
 		score2,
-		winner: score1 > score2 ? team1Name : team2Name,
-		loser: score1 > score2 ? team2Name : team1Name,
-		status: "final",
+		seriesWins1: nextSeriesWins1,
+		seriesWins2: nextSeriesWins2,
+		targetWins,
+		winner: seriesIsFinal ? (team1Won ? team1Name : team2Name) : "",
+		loser: seriesIsFinal ? (team1Won ? team2Name : team1Name) : "",
+		status: seriesIsFinal ? "final" : "scheduled",
 		completedGameLogId: completedGameLogId || slot.completedGameLogId || null,
+		completedGameLogIds,
 		playedAt: Date.now()
 	};
 
@@ -3015,6 +3049,10 @@ function resetPostseason() {
 	displayPostseason();
 }
 
+function getNextPostseasonSeriesGameNumber(slot) {
+	return Number(slot?.seriesWins1 || 0) + Number(slot?.seriesWins2 || 0) + 1;
+}
+
 async function startPostseasonGame(slotId) {
 	if (!hasFullAppAccess()) {
 		alert("Sign in and enter the league code to record postseason games.");
@@ -3033,11 +3071,11 @@ async function startPostseasonGame(slotId) {
 		return;
 	}
 	if (slot.status === "final") {
-		alert("That postseason game was already completed.");
+		alert("That postseason series was already completed.");
 		return;
 	}
 	if (!slot.team1Name || !slot.team2Name) {
-		alert("That postseason game cannot start yet because both teams are not known.");
+		alert("That postseason series cannot start yet because both teams are not known.");
 		return;
 	}
 
@@ -3048,12 +3086,26 @@ async function startPostseasonGame(slotId) {
 		return;
 	}
 
+	const seriesGameNumber = getNextPostseasonSeriesGameNumber(slot);
+
 	await beginLockedGame(
 		team1,
 		team2,
 		null,
-		{ type: "postseason", postseasonSlotId: slotId, postseasonLabel: slot.label },
-		{ postseasonRef: { slotId, label: slot.label, bracketId: postseason.createdAt || Date.now() } }
+		{
+			type: "postseason",
+			postseasonSlotId: slotId,
+			postseasonLabel: slot.label,
+			postseasonGameNumber: seriesGameNumber
+		},
+		{
+			postseasonRef: {
+				slotId,
+				label: slot.label,
+				bracketId: postseason.createdAt || Date.now(),
+				seriesGameNumber
+			}
+		}
 	);
 }
 
@@ -3078,10 +3130,16 @@ function createPostseasonSeedCard(seedRow) {
 function createPostseasonGameCard(slotId, slot) {
 	const card = document.createElement("div");
 	card.className = "postseason-game-card";
+
 	const displayStatus = getPostseasonGameDisplayStatus(slot);
-	const scoreText = slot.status === "final" && Number.isFinite(slot.score1) && Number.isFinite(slot.score2)
+	const seriesWins1 = Number(slot?.seriesWins1 || 0);
+	const seriesWins2 = Number(slot?.seriesWins2 || 0);
+	const targetWins = Number(slot?.targetWins || 2);
+	const nextGameNumber = getNextPostseasonSeriesGameNumber(slot);
+	const lastGameScoreText = (slot?.score1 != null && slot?.score2 != null)
 		? `${slot.score1} – ${slot.score2}`
 		: "";
+	const showSeriesScore = !!slot?.team1Name && !!slot?.team2Name;
 
 	card.innerHTML = `
 		<div class="postseason-game-header">
@@ -3093,14 +3151,25 @@ function createPostseasonGameCard(slotId, slot) {
 		</div>
 		<div class="postseason-team-row ${slot.status === "final" && slot.winner === slot.team1Name ? "is-winner" : ""}">
 			<span>${slot.team1Name || "TBD"}</span>
-			${slot.status === "final" ? `<strong>${slot.score1}</strong>` : ""}
+			${showSeriesScore ? `<strong>${seriesWins1}</strong>` : ""}
 		</div>
 		<div class="postseason-team-row ${slot.status === "final" && slot.winner === slot.team2Name ? "is-winner" : ""}">
 			<span>${slot.team2Name || "TBD"}</span>
-			${slot.status === "final" ? `<strong>${slot.score2}</strong>` : ""}
+			${showSeriesScore ? `<strong>${seriesWins2}</strong>` : ""}
 		</div>
-		${slot.status === "final" ? `<div class="postseason-game-note">Winner: ${slot.winner}${scoreText ? ` • ${scoreText}` : ""}</div>` : ""}
 	`;
+
+	if (slot.status === "final") {
+		const note = document.createElement("div");
+		note.className = "postseason-game-note";
+		note.textContent = `Series winner: ${slot.winner} • Series ${seriesWins1}-${seriesWins2}${lastGameScoreText ? ` • Last game ${lastGameScoreText}` : ""}`;
+		card.appendChild(note);
+	} else if (showSeriesScore) {
+		const note = document.createElement("div");
+		note.className = "postseason-game-note";
+		note.textContent = `Best of 3 • First to ${targetWins} wins • Series ${seriesWins1}-${seriesWins2}${lastGameScoreText ? ` • Last game ${lastGameScoreText}` : ""}`;
+		card.appendChild(note);
+	}
 
 	if (displayStatus === "in_progress") {
 		const note = document.createElement("div");
@@ -3109,13 +3178,13 @@ function createPostseasonGameCard(slotId, slot) {
 		card.appendChild(note);
 	} else if (hasFullAppAccess() && !getPostseasonState()?.isComplete && slot.team1Name && slot.team2Name && slot.status !== "final") {
 		const button = document.createElement("button");
-		button.textContent = "Start Game";
+		button.textContent = `Start Game ${nextGameNumber}`;
 		button.onclick = () => startPostseasonGame(slotId);
 		card.appendChild(button);
 	} else if (!slot.team1Name || !slot.team2Name) {
 		const note = document.createElement("div");
 		note.className = "postseason-game-note";
-		note.textContent = "Waiting for earlier game results.";
+		note.textContent = "Waiting for earlier series results.";
 		card.appendChild(note);
 	}
 
@@ -3305,16 +3374,17 @@ function getPastGameBrowserMeta(entry) {
 		const slotId = entry.postseasonRef.slotId;
 		const section = getPostseasonSectionConfig(slotId);
 		const slotSortMap = { W1: 1, W2: 2, W3: 3, L1: 1, L2: 2, C1: 1, C2: 2 };
+		const seriesGameNumber = Number(entry?.postseasonRef?.seriesGameNumber || 0);
 		return {
 			dayKey: "postseason",
 			dayLabel: "Postseason",
 			seriesKey: `postseason-${section.sectionKey}`,
 			seriesLabel: section.sectionLabel,
 			gameKey: entry.id,
-			gameLabel: slotId,
+			gameLabel: seriesGameNumber > 0 ? `${slotId} Game ${seriesGameNumber}` : slotId,
 			sortDay: 998,
 			sortSeries: section.sortSeries,
-			sortGame: Number(slotSortMap[slotId] || 0)
+			sortGame: (Number(slotSortMap[slotId] || 0) * 10) + Number(seriesGameNumber || 0)
 		};
 	}
 
@@ -3525,8 +3595,10 @@ function getPastGameTeamErrorTotal(entry, teamName) {
 }
 
 function getPastGameScheduleSlotLabel(entry) {
-	if (entry?.postseasonRef?.slotId) {
-		return `Postseason • ${entry.postseasonRef.slotId}`;
+
+		if (entry?.postseasonRef?.slotId) {
+		const seriesGameNumber = Number(entry?.postseasonRef?.seriesGameNumber || 0);
+		return `Postseason • ${entry.postseasonRef.slotId}${seriesGameNumber > 0 ? ` • Game ${seriesGameNumber}` : ""}`;
 	}
 	const meta = entry?.scheduleMeta || null;
 	if (meta?.dayNumber && meta?.seriesNumber && meta?.seriesGameNumber) {
