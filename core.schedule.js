@@ -67,7 +67,7 @@ function normalizeMatchupKey(teamA, teamB) {
 }
 
 function createSeriesGameSlot(gameNumber, result = null) {
-	return { gameNumber, result, subAssignments: [] };
+	return { gameNumber, result, skipped: null, subAssignments: [] };
 }
 
 function createSeriesEntry(away, home, seriesNumber) {
@@ -85,25 +85,49 @@ function createSeriesEntry(away, home, seriesNumber) {
 	};
 }
 
-function createDayEntryFromLayout(layout, dayNumber) {
+function countCompletedSeriesGames(seriesEntry) {
+	return (seriesEntry?.gamesInSeries || []).filter(g => g?.result).length;
+}
+
+function isSeriesGameSkipped(seriesGame) {
+	return !!(seriesGame?.skipped && typeof seriesGame.skipped === "object");
+}
+
+function isSeriesGameResolved(seriesGame) {
+	return !!seriesGame?.result || isSeriesGameSkipped(seriesGame);
+}
+
+function getSeriesEarlyEndCandidate(seriesEntry) {
+	const games = Array.isArray(seriesEntry?.gamesInSeries) ? seriesEntry.gamesInSeries : [];
+	const game1 = games[0];
+	const game2 = games[1];
+	const game3 = games[2];
+
+	if (!game1?.result || !game2?.result || !game3) return null;
+	if (game3?.result || isSeriesGameSkipped(game3)) return null;
+	if (game1.result.type !== "win" || game2.result.type !== "win") return null;
+	if (String(game1.result.winner || "").trim() === "") return null;
+	if (game1.result.winner !== game2.result.winner) return null;
+
+	const winner = game1.result.winner;
+	const loser = winner === seriesEntry.away ? seriesEntry.home : seriesEntry.away;
+
 	return {
-		day: dayNumber,
-		byeTeam: layout?.byeTeam || "",
-		games: (layout?.pairings || []).map((pairing, idx) =>
-			createSeriesEntry(pairing[0], pairing[1], idx + 1)
-		)
+		winner,
+		loser,
+		skippedGameNumber: Number(game3?.gameNumber || 3)
 	};
 }
 
-function countCompletedSeriesGames(seriesEntry) {
-	return (seriesEntry?.gamesInSeries || []).filter(g => g?.result).length;
+function canEndSeriesEarly(seriesEntry) {
+	return !!getSeriesEarlyEndCandidate(seriesEntry);
 }
 
 function computeSeriesResult(seriesEntry) {
 	if (!seriesEntry || !Array.isArray(seriesEntry.gamesInSeries)) return null;
 
 	const playedGames = seriesEntry.gamesInSeries.filter(g => g && g.result);
-	if (playedGames.length < 3) return null;
+	const skippedGames = seriesEntry.gamesInSeries.filter(g => isSeriesGameSkipped(g));
 
 	let awayWins = 0;
 	let homeWins = 0;
@@ -121,6 +145,28 @@ function computeSeriesResult(seriesEntry) {
 		if (r.winner === seriesEntry.away) awayWins += 1;
 		if (r.winner === seriesEntry.home) homeWins += 1;
 	});
+
+	if (playedGames.length === 2 && skippedGames.length === 1) {
+		if (awayWins === 2 || homeWins === 2) {
+			const winner = awayWins > homeWins ? seriesEntry.away : seriesEntry.home;
+			const loser = winner === seriesEntry.away ? seriesEntry.home : seriesEntry.away;
+
+			return {
+				type: "win",
+				winner,
+				loser,
+				winnerGames: Math.max(awayWins, homeWins),
+				loserGames: Math.min(awayWins, homeWins),
+				tieGames,
+				playedAt: Number(skippedGames[0]?.skipped?.skippedAt || 0) || Date.now(),
+				endedEarly: true,
+				skippedGameNumber: Number(skippedGames[0]?.gameNumber || 3)
+			};
+		}
+		return null;
+	}
+
+	if (playedGames.length < 3) return null;
 
 	if (awayWins === homeWins) {
 		return {
@@ -979,8 +1025,63 @@ function forceRegenerateSchedule() {
 	showNotification("✅ Schedule rebuilt from current team list", 1600);
 }
 
+function endSeriesEarly(dayIndex, seriesIndex) {
+	if (!hasFullAppAccess()) {
+		alert("Sign in and enter the league code to edit the schedule.");
+		return;
+	}
+
+	const seriesEntry = schedule?.days?.[dayIndex]?.games?.[seriesIndex];
+	const candidate = getSeriesEarlyEndCandidate(seriesEntry);
+
+	if (!seriesEntry || !candidate) {
+		alert("This series cannot be ended early right now.");
+		return;
+	}
+
+	if (!confirm(
+		`${candidate.winner} has already won the first 2 games of this series.\n\n` +
+		`Game ${candidate.skippedGameNumber} will be marked as not played.\n` +
+		`No stats, standings, records, game logs, or box scores will be added for that skipped game.\n\n` +
+		`End this series early?`
+	)) {
+		return;
+	}
+
+	const skippedGame = seriesEntry.gamesInSeries?.[2];
+	if (!skippedGame) {
+		alert("Could not find Game 3 for this series.");
+		return;
+	}
+
+	skippedGame.result = null;
+	skippedGame.skipped = {
+		reason: "series_clinched",
+		winner: candidate.winner,
+		loser: candidate.loser,
+		skippedAt: Date.now(),
+		gameNumber: candidate.skippedGameNumber
+	};
+
+	seriesEntry.result = computeSeriesResult(seriesEntry);
+
+	if (seriesEntry.result?.type === "win" && !seriesEntry._seriesStandingsApplied) {
+		getTeamRecord(seriesEntry.result.winner).wins += 1;
+		getTeamRecord(seriesEntry.result.loser).losses += 1;
+		seriesEntry._seriesStandingsApplied = true;
+	}
+
+	saveSchedule();
+	saveSeason();
+	try { refreshGameSetupScheduleCards(); } catch (e) {}
+	renderScheduleUI();
+	showNotification("✅ Series ended early. Game 3 marked not played.", 1800);
+}
+
 function getScheduleSeriesStatusMeta(seriesEntry) {
 	const completedCount = countCompletedSeriesGames(seriesEntry);
+	const hasSkippedGame = (seriesEntry?.gamesInSeries || []).some(seriesGame => isSeriesGameSkipped(seriesGame));
+
 	if (seriesEntry?.result?.type === "tie") {
 		const awayWins = Number(seriesEntry.result.awayWins || 0);
 		const homeWins = Number(seriesEntry.result.homeWins || 0);
@@ -994,9 +1095,11 @@ function getScheduleSeriesStatusMeta(seriesEntry) {
 	if (seriesEntry?.result?.type === "win") {
 		const ties = Number(seriesEntry.result.tieGames || 0);
 		return {
-			text: ties > 0
-				? `${seriesEntry.result.winner} won ${seriesEntry.result.winnerGames}-${seriesEntry.result.loserGames}-${ties}`
-				: `${seriesEntry.result.winner} won ${seriesEntry.result.winnerGames}-${seriesEntry.result.loserGames}`,
+			text: hasSkippedGame
+				? `${seriesEntry.result.winner} won ${seriesEntry.result.winnerGames}-${seriesEntry.result.loserGames} • ended early`
+				: (ties > 0
+					? `${seriesEntry.result.winner} won ${seriesEntry.result.winnerGames}-${seriesEntry.result.loserGames}-${ties}`
+					: `${seriesEntry.result.winner} won ${seriesEntry.result.winnerGames}-${seriesEntry.result.loserGames}`),
 			className: "schedule-series-status is-complete"
 		};
 	}
@@ -1104,6 +1207,15 @@ function createScheduleSeriesExpansionRow(dayIndex, seriesIndex, seriesEntry) {
 			`;
 
 			gameCard.appendChild(summaryCard);
+		} else if (isSeriesGameSkipped(seriesGame)) {
+			const skippedMeta = seriesGame.skipped || {};
+			const summaryCard = document.createElement("div");
+			summaryCard.className = "schedule-series-game-summary is-neutral";
+			summaryCard.innerHTML = `
+				<div class="schedule-series-game-score-big">Not Played</div>
+				<div class="schedule-series-game-date">Series ended early • ${skippedMeta.winner || "Series clinched"} won in 2 games</div>
+			`;
+			gameCard.appendChild(summaryCard);
 		} else {
 			const pending = document.createElement("div");
 			pending.className = "season-stats-note";
@@ -1113,6 +1225,16 @@ function createScheduleSeriesExpansionRow(dayIndex, seriesIndex, seriesEntry) {
 
 		body.appendChild(gameCard);
 	});
+
+	if (canEndSeriesEarly(seriesEntry) && hasFullAppAccess()) {
+		const actionWrap = document.createElement("div");
+		actionWrap.className = "schedule-series-action";
+		actionWrap.innerHTML = `
+			<button type="button" onclick="endSeriesEarly(${dayIndex}, ${seriesIndex})">End Series Early</button>
+			<div class="season-stats-note">This series is already decided 2-0. Game 3 will be marked not played and will not add stats.</div>
+		`;
+		body.appendChild(actionWrap);
+	}
 
 	details.appendChild(body);
 	td.appendChild(details);
@@ -1283,6 +1405,7 @@ function ensureScheduleUpToDateForSelection() {
 	return getScheduleGuardState();
 }
 
+
 function populateScheduleDaySelect() {
 	const daySelect = document.getElementById("scheduleDaySelect");
 	if (!daySelect) return;
@@ -1291,18 +1414,18 @@ function populateScheduleDaySelect() {
 
 	(schedule.days || []).forEach((dayObj, idx) => {
 		const openGames = (dayObj.games || []).reduce((count, seriesEntry) => {
-			return count + (seriesEntry.gamesInSeries || []).filter(g => !g.result).length;
+			return count + (seriesEntry.gamesInSeries || []).filter(g => !isSeriesGameResolved(g)).length;
 		}, 0);
 
 		const opt = document.createElement("option");
 		opt.value = String(idx);
-		opt.text = `Day ${dayObj.day}` + (openGames === 0 ? " (all recorded)" : "");
+		opt.text = `Day ${dayObj.day}` + (openGames === 0 ? " (all resolved)" : "");
 		daySelect.appendChild(opt);
 	});
 
 	const firstOpen = (schedule.days || []).findIndex(dayObj =>
 		(dayObj.games || []).some(seriesEntry =>
-			(seriesEntry.gamesInSeries || []).some(g => !g.result)
+			(seriesEntry.gamesInSeries || []).some(g => !isSeriesGameResolved(g))
 		)
 	);
 
@@ -1329,7 +1452,7 @@ function populateScheduleSeriesSelect() {
 	let added = 0;
 
 	dayObj.games.forEach((seriesEntry, seriesIndex) => {
-		const openGames = (seriesEntry.gamesInSeries || []).filter(g => !g.result).length;
+		const openGames = (seriesEntry.gamesInSeries || []).filter(g => !isSeriesGameResolved(g)).length;
 		if (openGames === 0) return;
 
 		const opt = document.createElement("option");
@@ -1342,7 +1465,7 @@ function populateScheduleSeriesSelect() {
 	if (added === 0) {
 		const opt = document.createElement("option");
 		opt.value = "";
-		opt.text = "No available series (already recorded)";
+		opt.text = "No available series (already resolved)";
 		seriesSelect.appendChild(opt);
 		seriesSelect.disabled = true;
 	} else {
@@ -1366,11 +1489,11 @@ function populateScheduleGameSelect() {
 	if (!seriesSelect.value) {
 		const opt = document.createElement("option");
 		opt.value = "";
-		opt.text = "No available games (already recorded)";
+		opt.text = "No available games (already resolved)";
 		gameSelect.appendChild(opt);
 		gameSelect.disabled = true;
 		if (btn) btn.disabled = true;
-		if (hint) hint.innerText = "All series for this day are already recorded.";
+		if (hint) hint.innerText = "All series for this day are already resolved.";
 		renderSubAssignmentSummary();
 		return;
 	}
@@ -1391,7 +1514,7 @@ function populateScheduleGameSelect() {
 	let added = 0;
 
 	seriesEntry.gamesInSeries.forEach((seriesGame, seriesGameIndex) => {
-		if (seriesGame.result) return;
+		if (isSeriesGameResolved(seriesGame)) return;
 
 		const opt = document.createElement("option");
 		opt.value = `${dayIndex}|${seriesIndex}|${seriesGameIndex}`;
@@ -1403,11 +1526,16 @@ function populateScheduleGameSelect() {
 	if (added === 0) {
 		const opt = document.createElement("option");
 		opt.value = "";
-		opt.text = "No available games (already recorded)";
+		opt.text = "No available games (already resolved)";
 		gameSelect.appendChild(opt);
 		gameSelect.disabled = true;
 		if (btn) btn.disabled = true;
-		if (hint) hint.innerText = "All 3 games in that series are already recorded.";
+
+		if ((seriesEntry.gamesInSeries || []).some(seriesGame => isSeriesGameSkipped(seriesGame))) {
+			if (hint) hint.innerText = "This series ended early. Game 3 was marked not played.";
+		} else {
+			if (hint) hint.innerText = "All 3 games in that series are already recorded.";
+		}
 	} else {
 		gameSelect.disabled = false;
 		if (btn) btn.disabled = false;
@@ -1421,7 +1549,7 @@ function populateScheduleGameSelect() {
 	}
 
 	renderSubAssignmentSummary();
-refreshGameLockUI();
+	refreshGameLockUI();
 }
 
 async function startSelectedScheduledGame() {
@@ -1448,6 +1576,12 @@ async function startSelectedScheduledGame() {
 
 	if (seriesGame.result) {
 		alert("That game was already recorded.");
+		populateScheduleGameSelect();
+		return;
+	}
+
+	if (isSeriesGameSkipped(seriesGame)) {
+		alert("That game was marked not played because the series ended early.");
 		populateScheduleGameSelect();
 		return;
 	}
