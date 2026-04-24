@@ -164,6 +164,24 @@ async function showPastGameLog() {
 	}
 }
 
+async function showPostseason() {
+	hideAllScreens();
+	document.getElementById("postseasonScreen").classList.remove("hidden");
+	updatePublicAccessUI();
+	try { displayPostseason(); } catch (e) { console.warn("displayPostseason failed:", e); }
+
+	if (isPublicViewOnlyMode()) {
+		try {
+			refreshPublicViewData({ quiet: true })
+				.then(() => {
+					const screen = document.getElementById("postseasonScreen");
+					if (screen && !screen.classList.contains("hidden")) displayPostseason();
+				})
+				.catch((e) => console.warn("public postseason refresh failed:", e));
+		} catch (e) {}
+	}
+}
+
 function hideAllScreens() {
 	document.getElementById("publicMenu").classList.add("hidden");
 	document.getElementById("mainMenu").classList.add("hidden");
@@ -177,6 +195,7 @@ function hideAllScreens() {
 	document.getElementById("rankingsScreen").classList.add("hidden");
 	document.getElementById("pastGameLogScreen").classList.add("hidden");
 	document.getElementById("scheduleScreen").classList.add("hidden");
+	document.getElementById("postseasonScreen").classList.add("hidden");
 	document.getElementById("activeUsersScreen").classList.add("hidden");
 }
 
