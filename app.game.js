@@ -1348,10 +1348,23 @@ const pitcherCharges = (lastPlay.pitcherCharges && typeof lastPlay.pitcherCharge
 }
 
 async function finalizeCompletedGame() {
+	if (!game || game._finalizeInProgress) return;
+	game._finalizeInProgress = true;
+
+	const completedEntryId = getCompletedGameEntryId(game);
 	const lockReleased = await saveGameStats();
+	const savedEntry = findCompletedGameLogEntry(completedEntryId);
+	const savedOk = !!savedEntry && !!savedEntry.outcomeApplied;
+
+	if (!savedOk) {
+		game._finalizeInProgress = false;
+		return;
+	}
+
 	if (!lockReleased) {
 		alert("Game stats were saved, but the live-game lock could not be cleared. Please sync again before anyone starts another game.");
 	}
+
 	displayGameOver();
 }
 
