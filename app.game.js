@@ -1073,10 +1073,14 @@ function normalizeBaseRunner(runner, fallbackTeam = game?.batting) {
 	if (runner.reachedOnError !== true) runner.reachedOnError = false;
 
 	if (!runner.responsiblePitcherKey && runner.player) {
-		const responsibility = getCurrentPitcherResponsibility();
-		runner.responsiblePitcherKey = responsibility.pitcherKey || null;
-		runner.responsiblePitcherName = responsibility.pitcherName || null;
-	}
+	const responsibility = getCurrentPitcherResponsibility();
+	runner.responsiblePitcherKey = responsibility.pitcherKey || null;
+	runner.responsiblePitcherName = responsibility.pitcherName || null;
+}
+
+if (runner.awaitingOvertimePitcherResponsibility && runner.responsiblePitcherKey) {
+	runner.awaitingOvertimePitcherResponsibility = false;
+}
 
 	return runner;
 }
