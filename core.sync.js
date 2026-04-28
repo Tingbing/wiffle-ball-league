@@ -452,18 +452,44 @@ async function releaseGameLock(lockId, { quiet = false } = {}) {
 
 	const { data } = await supabaseClient.auth.getSession();
 	const userId = data?.session?.user?.id || null;
-	const { error } = await supabaseClient
+
+	const { data: updatedRow, error } = await supabaseClient
 		.from("season_data")
 		.update({
-	active_game_lock: null,
-	active_game_lock_id: null,
-	updated_by: userId
-})
+			active_game_lock: null,
+			active_game_lock_id: null,
+			updated_by: userId
+		})
 		.eq("league_code", String(LEAGUE_CODE))
-		.eq("active_game_lock_id", lockId);
+		.eq("active_game_lock_id", lockId)
+		.select("active_game_lock,active_game_lock_id")
+		.maybeSingle();
 
 	if (error) {
 		if (!quiet) console.log("release game lock failed:", error);
+		return false;
+	}
+
+	if (updatedRow) {
+		persistActiveGameLock(null);
+		return true;
+	}
+
+	let latestRow = null;
+	try {
+		latestRow = await fetchSeasonRowFromServer({ quiet: true });
+	} catch (e) {
+		if (!quiet) console.log("could not verify game lock release:", e);
+		return false;
+	}
+
+	if (!latestRow) {
+		if (!quiet) console.log("could not verify game lock release: no season row found");
+		return false;
+	}
+
+	if (latestRow.active_game_lock || latestRow.active_game_lock_id) {
+		persistActiveGameLock(latestRow.active_game_lock || null);
 		return false;
 	}
 
