@@ -1025,9 +1025,14 @@ function forceRegenerateSchedule() {
 	showNotification("✅ Schedule rebuilt from current team list", 1600);
 }
 
-function endSeriesEarly(dayIndex, seriesIndex) {
+async function endSeriesEarly(dayIndex, seriesIndex) {
 	if (!hasFullAppAccess()) {
 		alert("Sign in and enter the league code to edit the schedule.");
+		return;
+	}
+
+	if (game || activeGameLock) {
+		alert("A live game is currently in progress. Finish or emergency-end that game before ending a series early.");
 		return;
 	}
 
@@ -1037,6 +1042,42 @@ function endSeriesEarly(dayIndex, seriesIndex) {
 	if (!seriesEntry || !candidate) {
 		alert("This series cannot be ended early right now.");
 		return;
+	}
+
+	let latestRow = null;
+	if (typeof fetchSeasonRowFromServer === "function") {
+		try {
+			latestRow = await fetchSeasonRowFromServer({ quiet: true });
+		} catch (e) {
+			latestRow = null;
+		}
+	}
+
+	if (latestRow?.active_game_lock) {
+		persistActiveGameLock(latestRow.active_game_lock);
+		alert("A game is currently being recorded on another device. Finish or clear that game before ending a series early.");
+		return;
+	}
+
+	if (latestRow?.schedule_json) {
+		const latestSchedule = ensureScheduleShape(deepCloneJson(latestRow.schedule_json));
+		const latestSeriesEntry = latestSchedule?.days?.[dayIndex]?.games?.[seriesIndex];
+		const latestCandidate = getSeriesEarlyEndCandidate(latestSeriesEntry);
+
+		if (
+			!latestSeriesEntry ||
+			!latestCandidate ||
+			latestCandidate.winner !== candidate.winner ||
+			latestCandidate.loser !== candidate.loser ||
+			latestCandidate.skippedGameNumber !== candidate.skippedGameNumber
+		) {
+			try { applyServerSeasonRow(latestRow, { source: "end-series-early-check" }); } catch (e) {}
+			try { renderScheduleUI(); } catch (e) {}
+			try { refreshGameSetupScheduleCards(); } catch (e) {}
+
+			alert("The schedule changed on another device, or this series is no longer eligible to end early. Sync the schedule and check it again.");
+			return;
+		}
 	}
 
 	if (!confirm(
@@ -1065,9 +1106,16 @@ function endSeriesEarly(dayIndex, seriesIndex) {
 
 	seriesEntry.result = computeSeriesResult(seriesEntry);
 
-	if (seriesEntry.result?.type === "win" && !seriesEntry._seriesStandingsApplied) {
-		getTeamRecord(seriesEntry.result.winner).wins += 1;
-		getTeamRecord(seriesEntry.result.loser).losses += 1;
+	try {
+		rebuildCurrentTeamRecordsFromSavedResults({ preserveWhenNoSource: false });
+	} catch (e) {
+		if (seriesEntry.result?.type === "win" && !seriesEntry._seriesStandingsApplied) {
+			getTeamRecord(seriesEntry.result.winner).wins += 1;
+			getTeamRecord(seriesEntry.result.loser).losses += 1;
+		}
+	}
+
+	if (seriesEntry.result?.type === "win") {
 		seriesEntry._seriesStandingsApplied = true;
 	}
 
