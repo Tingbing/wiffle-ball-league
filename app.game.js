@@ -438,21 +438,38 @@ async function beginLockedGame(t1, t2, scheduleRef = null, extraLockDetails = {}
 	}
 
 	if (scheduleRef && attempt.row) {
-		const serverSchedule = ensureScheduleShape(attempt.row.schedule_json);
-		const freshSeriesGame = serverSchedule?.days?.[scheduleRef.dayIndex]?.games?.[scheduleRef.seriesIndex]?.gamesInSeries?.[scheduleRef.seriesGameIndex];
-		if (freshSeriesGame?.result) {
-			await releaseGameLock(attempt.lockId, { quiet: true });
-			applyServerSeasonRow(attempt.row, { source: "lock-acquire" });
-			alert("That game was already recorded on another device.");
-			return false;
-		}
-		if (freshSeriesGame?.skipped) {
-			await releaseGameLock(attempt.lockId, { quiet: true });
-			applyServerSeasonRow(attempt.row, { source: "lock-acquire" });
-			alert("That game was marked not played because the series ended early.");
-			return false;
-		}
+	const serverSchedule = ensureScheduleShape(attempt.row.schedule_json);
+	const freshSeriesEntry = serverSchedule?.days?.[scheduleRef.dayIndex]?.games?.[scheduleRef.seriesIndex];
+	const freshSeriesGame = freshSeriesEntry?.gamesInSeries?.[scheduleRef.seriesGameIndex];
+
+	const freshTeamsMatch =
+		!!freshSeriesEntry &&
+		(
+			(freshSeriesEntry.away === t1?.name && freshSeriesEntry.home === t2?.name) ||
+			(freshSeriesEntry.away === t2?.name && freshSeriesEntry.home === t1?.name)
+		);
+
+	if (!freshSeriesEntry || !freshSeriesGame || !freshTeamsMatch) {
+		await releaseGameLock(attempt.lockId, { quiet: true });
+		applyServerSeasonRow(attempt.row, { source: "lock-acquire" });
+		alert("That scheduled slot changed on another device. The game was not started. Sync the schedule and pick the game again.");
+		return false;
 	}
+
+	if (freshSeriesGame?.result) {
+		await releaseGameLock(attempt.lockId, { quiet: true });
+		applyServerSeasonRow(attempt.row, { source: "lock-acquire" });
+		alert("That game was already recorded on another device.");
+		return false;
+	}
+
+	if (freshSeriesGame?.skipped) {
+		await releaseGameLock(attempt.lockId, { quiet: true });
+		applyServerSeasonRow(attempt.row, { source: "lock-acquire" });
+		alert("That game was marked not played because the series ended early.");
+		return false;
+	}
+}
 
 	startGameWithTeams(t1, t2, scheduleRef, attempt.lock, gameContext);
 	return true;
