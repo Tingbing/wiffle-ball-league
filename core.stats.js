@@ -108,12 +108,14 @@ function loadSeason() {
 		return `${r.wins}-${r.losses}`;
 	}
 
-	function syncTeamRecordsWithLeague() {
-		// Make sure every current team has a record row
+function syncTeamRecordsWithLeague() {
+	try {
+		rebuildCurrentTeamRecordsFromSavedResults({ preserveWhenNoSource: true });
+	} catch (e) {
 		(league.teams || []).forEach(t => getTeamRecord(t.name));
-		try { saveSeason({ skipServerSync: true, touchMeta: false }); } catch (e) {}
-
 	}
+	try { saveSeason({ skipServerSync: true, touchMeta: false }); } catch (e) {}
+}
 
 function updateScheduleForCompletedGame(teamA, teamB, resultObj) {
 	if (!schedule?.days?.length) return false;
@@ -217,7 +219,17 @@ function applyGameOutcomeOnce() {
 		getTeamRecord(loser).losses += 1;
 	}
 
-	if (!outcomeApplied) return false;
+		if (!outcomeApplied) return false;
+
+	const completedEntryId = getCompletedGameEntryId(game);
+	try {
+		if (completedEntryId && (findCompletedGameLogEntry(completedEntryId) || game?._scheduleRef)) {
+			rebuildCurrentTeamRecordsFromSavedResults({ preserveWhenNoSource: false });
+			markCompletedGameOutcomeApplied(completedEntryId);
+		}
+	} catch (e) {
+		console.warn("Could not rebuild records after game outcome:", e);
+	}
 
 	game._resultSaved = true;
 	saveSeason();
@@ -1063,25 +1075,95 @@ function buildSanitizedScheduleForRestore(scheduleObj) {
 	return ensureScheduleShape(nextSchedule);
 }
 
-function rebuildTeamRecordsFromSchedule(scheduleObj, fallbackTeamNames = []) {
-	const teamNames = uniqueTrimmedStrings([...(scheduleObj?.teamNames || []), ...fallbackTeamNames]);
+function rebuildTeamRecordsFromScheduleAndGameLogs(scheduleObj, seasonObj = null, fallbackTeamNames = []) {
+	const safeSchedule = ensureScheduleShape(deepCloneJson(scheduleObj) || { days: [], teamNames: [] });
+	const safeSeason = ensureSeasonShape(deepCloneJson(seasonObj) || createEmptySeasonState());
+	const teamNames = uniqueTrimmedStrings([
+		...(safeSchedule?.teamNames || []),
+		...fallbackTeamNames,
+		...(Array.isArray(league?.teams) ? league.teams.map(team => team.name) : []),
+		...Object.keys(safeSeason?.teamRecords || {}),
+		...(safeSeason?.games || []).flatMap(entry => [entry?.team1Name, entry?.team2Name])
+	]);
+
 	const records = {};
 	teamNames.forEach(teamName => {
 		records[teamName] = { wins: 0, losses: 0 };
 	});
 
-	(scheduleObj?.days || []).forEach(dayObj => {
+	function ensureRecord(teamName) {
+		const name = String(teamName || "").trim();
+		if (!name) return null;
+		if (!records[name]) records[name] = { wins: 0, losses: 0 };
+		return records[name];
+	}
+
+	function addWinLoss(winner, loser) {
+		const winnerName = String(winner || "").trim();
+		const loserName = String(loser || "").trim();
+		const winRow = ensureRecord(winnerName);
+		const lossRow = ensureRecord(loserName);
+		if (!winRow || !lossRow || winnerName === loserName) return;
+		winRow.wins += 1;
+		lossRow.losses += 1;
+	}
+
+	(safeSchedule?.days || []).forEach(dayObj => {
 		(dayObj?.games || []).forEach(seriesEntry => {
-			const result = computeSeriesResult(seriesEntry);
+			const result = seriesEntry?.result || computeSeriesResult(seriesEntry);
 			if (!result || result.type !== "win") return;
-			if (!records[result.winner]) records[result.winner] = { wins: 0, losses: 0 };
-			if (!records[result.loser]) records[result.loser] = { wins: 0, losses: 0 };
-			records[result.winner].wins += 1;
-			records[result.loser].losses += 1;
+			addWinLoss(result.winner, result.loser);
 		});
 	});
 
+	const countedManualIds = new Set();
+	(safeSeason?.games || []).forEach(entry => {
+		if (!entry || entry?.seasonPhase === "postseason" || entry?.postseasonRef) return;
+		if (entry?.scheduleRef) return;
+
+		const entryId = String(entry?.id || "").trim();
+		if (entryId && countedManualIds.has(entryId)) return;
+		if (entryId) countedManualIds.add(entryId);
+
+		const team1Name = String(entry?.team1Name || "").trim();
+		const team2Name = String(entry?.team2Name || "").trim();
+		const team1Score = Number(entry?.team1Score || 0);
+		const team2Score = Number(entry?.team2Score || 0);
+		if (!team1Name || !team2Name || team1Name === team2Name || team1Score === team2Score) return;
+
+		addWinLoss(
+			team1Score > team2Score ? team1Name : team2Name,
+			team1Score > team2Score ? team2Name : team1Name
+		);
+	});
+
 	return records;
+}
+
+function rebuildTeamRecordsFromSchedule(scheduleObj, fallbackTeamNames = []) {
+	return rebuildTeamRecordsFromScheduleAndGameLogs(scheduleObj, createEmptySeasonState(), fallbackTeamNames);
+}
+
+function rebuildCurrentTeamRecordsFromSavedResults({ preserveWhenNoSource = true } = {}) {
+	season = ensureSeasonShape(season);
+	schedule = ensureScheduleShape(schedule);
+
+	const hasScheduledSeriesResults = (schedule?.days || []).some(dayObj =>
+		(dayObj?.games || []).some(seriesEntry => !!seriesEntry?.result || !!computeSeriesResult(seriesEntry))
+	);
+	const hasManualGameLogs = (season?.games || []).some(entry =>
+		entry && !entry.scheduleRef && !entry.postseasonRef && entry.seasonPhase !== "postseason" &&
+		String(entry.team1Name || "").trim() && String(entry.team2Name || "").trim() &&
+		Number(entry.team1Score || 0) !== Number(entry.team2Score || 0)
+	);
+
+	if (preserveWhenNoSource && !hasScheduledSeriesResults && !hasManualGameLogs) {
+		(Array.isArray(league?.teams) ? league.teams : []).forEach(team => getTeamRecord(team.name));
+		return season.teamRecords;
+	}
+
+	season.teamRecords = rebuildTeamRecordsFromScheduleAndGameLogs(schedule, season, []);
+	return season.teamRecords;
 }
 
 function rebuildSeasonStatBucketsFromGameLogs(seasonObj) {
@@ -1179,8 +1261,11 @@ function prepareStatsBackupRestore(raw) {
 	const nextSchedule = buildSanitizedScheduleForRestore(backup.schedule);
 	let nextSeason = ensureSeasonShape(deepCloneJson(backup.season));
 	nextSeason.games = sanitizeSeasonGameLogsForRestore(nextSeason);
-	nextSeason.teamRecords = rebuildTeamRecordsFromSchedule(nextSchedule, backup?.leagueSnapshot?.teams?.map(team => team.name) || []);
-
+	nextSeason.teamRecords = rebuildTeamRecordsFromScheduleAndGameLogs(
+		nextSchedule,
+		nextSeason,
+		backup?.leagueSnapshot?.teams?.map(team => team.name) || []
+	);
 	const rebuildPlan = evaluateBackupRebuildPlan(backup, nextSeason, nextSchedule);
 	if (rebuildPlan.error) {
 		return {
@@ -1316,11 +1401,32 @@ function downloadStatsBackupJson() {
 	showNotification("⬇️ Stats backup downloaded", 1800);
 }
 
+function hasActiveGameSaveOrLock() {
+	if (game) return true;
+	if (activeGameLock) return true;
+	try {
+		return typeof readLiveGameAutosave === "function" && !!readLiveGameAutosave()?.game;
+	} catch (e) {
+		return false;
+	}
+}
+
+function warnIfDestructiveActionUnsafe(actionLabel) {
+	if (!hasActiveGameSaveOrLock()) return false;
+	alert(
+		`Cannot continue ${actionLabel} while a live game is in progress or recoverable.\n\n` +
+		"Finish the game normally, or use Emergency End Game if the live game is truly stuck."
+	);
+	return true;
+}
+
 async function clearCurrentStatsOnly({ skipConfirm = false, quiet = false, syncToServer = true } = {}) {
-	if (isPublicViewOnlyMode()) {
+		if (isPublicViewOnlyMode()) {
 		alert("Sign in with full access before clearing season stats.");
 		return false;
 	}
+
+	if (warnIfDestructiveActionUnsafe("clearing current stats")) return false;
 
 	if (!skipConfirm) {
 		const confirmed = confirm(
@@ -1370,6 +1476,8 @@ function openStatsRestorePicker() {
 }
 
 async function restoreStatsBackupFromPayload(raw) {
+	if (warnIfDestructiveActionUnsafe("restoring a backup")) return false;
+
 	const prepared = prepareStatsBackupRestore(raw);
 	if (!prepared.ok) {
 		alert(`Restore failed.\n\n${prepared.message}`);
@@ -1455,6 +1563,7 @@ async function handleStatsRestoreFile(event) {
 
 async function resetSeason() {
 	if (!(await requireLogin())) return;
+	if (warnIfDestructiveActionUnsafe("resetting the season")) return;
 
 	const msg =
 		"⚠️ Reset Season?\n\n" +
