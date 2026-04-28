@@ -1480,17 +1480,28 @@ let scoringEvents = [];
 
 		if (runnerCount < 2) {
 			showNotification("Need 2+ runners for a double play", 1500);
-		} else {
-			game.outs += 2;
-			batterStats.outs++;
-			pitcherStats.pitchOuts += 2;
-			syncPitchingInnings(pitcherStats);
+				} else {
+			const outsToRecord = Math.max(0, Math.min(2, 2 - Number(game.outs || 0)));
 
-			const removedBase = game.bases.first ? "first" : (game.bases.second ? "second" : "third");
-			const removedRunner = game.bases[removedBase];
-			game.bases[removedBase] = null;
+			if (outsToRecord <= 0) {
+				showNotification("Side is already over.", 1200);
+			} else {
+				game.outs += outsToRecord;
+				batterStats.outs++;
+				pitcherStats.pitchOuts += outsToRecord;
+				syncPitchingInnings(pitcherStats);
 
-			showNotification("Double play!" + (removedRunner?.player ? (" (" + removedRunner.player + " out)") : ""), 1500);
+				const removedBase = game.bases.first ? "first" : (game.bases.second ? "second" : "third");
+				const removedRunner = game.bases[removedBase];
+				game.bases[removedBase] = null;
+
+				showNotification(
+					outsToRecord === 2
+						? "Double play!" + (removedRunner?.player ? (" (" + removedRunner.player + " out)") : "")
+						: "Inning-ending out!" + (removedRunner?.player ? (" (" + removedRunner.player + " out)") : ""),
+					1500
+				);
+			}
 		}
 
 	} else if (result === "single") {
