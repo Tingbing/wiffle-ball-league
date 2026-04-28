@@ -235,10 +235,11 @@ function resumeLiveGameFromAutosave(snapshot) {
 game.overtime = normalizeOvertimeState(game.overtime);
 
 keepLiveGameSectionsEnabled();
-	showGame();
-	updatePitcherSelect();
-	updateGameScreen();
-	applyLiveGameUiState(snapshot.uiState || {});
+showGame();
+updatePitcherSelect();
+ensureOvertimeHalfSetupAfterResume();
+updateGameScreen();
+applyLiveGameUiState(snapshot.uiState || {});
 	document.getElementById("undoButton").disabled = gameHistory.length === 0;
 	persistLiveGameAutosave();
 	showNotification("Recovered saved live game", 1500);
@@ -686,11 +687,19 @@ function startOvertimeHalfInning(reasonText = "") {
 	game.halfInningRuns = 0;
 
 	if (runnerName) {
-		const runner = createBaseRunner(runnerName, false, game.batting, getCurrentPitcherResponsibility());
-		runner.isAutomaticOvertimeRunner = true;
-		runner.overtimeRound = overtime.round;
-		runner.overtimeHalf = game.halfInning;
-		runner.battingOrderIndex = runnerInfo.runnerIndex;
+		const runner = createBaseRunner(runnerName, false, game.batting, {
+	pitcherKey: null,
+	pitcherName: null,
+	teamName: game.fielding?.name || ""
+});
+
+runner.responsiblePitcherKey = null;
+runner.responsiblePitcherName = null;
+runner.awaitingOvertimePitcherResponsibility = true;
+runner.isAutomaticOvertimeRunner = true;
+runner.overtimeRound = overtime.round;
+runner.overtimeHalf = game.halfInning;
+runner.battingOrderIndex = runnerInfo.runnerIndex;
 
 		game.bases.second = runner;
 
@@ -726,6 +735,21 @@ function getLiveInningLabel() {
 
 function getLineScoreInningLabel(index) {
 	return index < 3 ? String(index + 1) : `OT${index - 2}`;
+}
+
+function ensureOvertimeHalfSetupAfterResume() {
+	if (!game || game?.overtime?.active !== true) return false;
+
+	const overtime = ensureOvertimeState();
+	const halfKey = getCurrentHalfInningKey();
+	if (!halfKey || overtime.halfSetupKeys?.[halfKey]) return false;
+
+	const hasRunnerOnBase = !!(game.bases?.first || game.bases?.second || game.bases?.third);
+	if (Number(game.outs || 0) !== 0 || hasRunnerOnBase) return false;
+
+	return startOvertimeHalfInning(
+		`Recovered OT ${getOvertimeRoundForCurrentInning()} setup: 1 out and a runner on 2nd.`
+	);
 }
 
 function undoLastAction() {
