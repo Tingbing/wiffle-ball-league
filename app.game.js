@@ -1714,19 +1714,21 @@ async function saveGameStats() {
 			return await releaseGameLock(game?._lockId || activeGameLock?.lockId || null, { quiet: true });
 		}
 
+		const logId = existingEntry?.id || completedEntryId;
+		const postseasonApplied = applyPostseasonOutcomeOnce(postseasonRef.slotId, logId);
+		if (!postseasonApplied) {
+			alert("This postseason game could not be applied back to the playoff bracket slot, so nothing new was finalized.");
+			return false;
+		}
+
 		if (!existingEntry) {
 			saveCompletedGameLog({
 				outcomeApplied: true,
 				postseasonRef: { ...postseasonRef },
 				seasonPhase: "postseason"
 			});
-		}
-
-		const logId = existingEntry?.id || completedEntryId;
-		const postseasonApplied = applyPostseasonOutcomeOnce(postseasonRef.slotId, logId);
-		if (!postseasonApplied) {
-			alert("This postseason game could not be applied back to the playoff bracket slot, so nothing new was finalized.");
-			return false;
+		} else {
+			markCompletedGameOutcomeApplied(logId);
 		}
 
 		saveSeason();
