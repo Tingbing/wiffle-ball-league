@@ -546,12 +546,17 @@ function applyServerSeasonRow(row, { force = false, source = "server" } = {}) {
 	}
 
 	if (!force && localDirty && !sameOrOlderData) {
+	if (source === "public-view" && !Object.prototype.hasOwnProperty.call(row, "active_game_lock")) {
+		try { refreshGameLockUI(); } catch (e) {}
+	} else {
 		persistActiveGameLock(row.active_game_lock || null);
-		return scheduleConflictNotice(
-			"A newer server snapshot was detected while this tab still had unsynced local changes.",
-			{ source, row }
-		);
 	}
+
+	return scheduleConflictNotice(
+		"A newer server snapshot was detected while this tab still had unsynced local changes.",
+		{ source, row }
+	);
+}
 
 		suppressAutoSync = true;
 	season = ensureSeasonShape(info.seasonJson);
