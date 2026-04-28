@@ -553,10 +553,15 @@ function applyServerSeasonRow(row, { force = false, source = "server" } = {}) {
 		);
 	}
 
-	suppressAutoSync = true;
+		suppressAutoSync = true;
 	season = ensureSeasonShape(info.seasonJson);
 	schedule = ensureScheduleShape(info.scheduleJson);
-	persistActiveGameLock(row.active_game_lock || null);
+
+	if (source === "public-view" && !Object.prototype.hasOwnProperty.call(row, "active_game_lock")) {
+		try { refreshGameLockUI(); } catch (e) {}
+	} else {
+		persistActiveGameLock(row.active_game_lock || null);
+	}
 
 	try {
 		const serverIso = row.updated_at || new Date().toISOString();
