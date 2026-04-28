@@ -229,11 +229,12 @@ function resumeLiveGameFromAutosave(snapshot) {
 	game.gameStats = game.gameStats || {};
 	game.currentInningPitchers = game.currentInningPitchers || {};
 	game.batterIndexByTeam = game.batterIndexByTeam || {
-		[game.team1?.name || "Team 1"]: 0,
-		[game.team2?.name || "Team 2"]: 0
-	};
+	[game.team1?.name || "Team 1"]: 0,
+	[game.team2?.name || "Team 2"]: 0
+};
+game.overtime = normalizeOvertimeState(game.overtime);
 
-	keepLiveGameSectionsEnabled();
+keepLiveGameSectionsEnabled();
 	showGame();
 	updatePitcherSelect();
 	updateGameScreen();
@@ -378,12 +379,18 @@ game = {
 		[activeTeam2.name]: []
 	},
 	pitcherDecisions: {
-		winningPitcher: null,
-		losingPitcher: null,
-		pendingWinningPitcherTeamName: null,
-		pitcherOfRecordByTeam: {}
-	},
-	_scheduleRef: scheduleRef,
+	winningPitcher: null,
+	losingPitcher: null,
+	pendingWinningPitcherTeamName: null,
+	pitcherOfRecordByTeam: {}
+},
+overtime: {
+	active: false,
+	round: 0,
+	halfSetupKeys: {},
+	automaticRunners: {}
+},
+_scheduleRef: scheduleRef,
 	_lockId: lockInfo?.lockId || null,
 	_lockInfo: lockInfo || null,
 		_gameInstanceId: scheduleRef
@@ -559,8 +566,9 @@ function saveGameState() {
 		fielding: game.fielding,
 		currentInningPitchers: { ...game.currentInningPitchers },
 		lineScore: JSON.parse(JSON.stringify(game.lineScore || {})),
-		pitcherDecisions: JSON.parse(JSON.stringify(game.pitcherDecisions || {})),
-		pendingBattingResult: pendingBattingResult ? JSON.parse(JSON.stringify(pendingBattingResult)) : null,
+pitcherDecisions: JSON.parse(JSON.stringify(game.pitcherDecisions || {})),
+overtime: JSON.parse(JSON.stringify(game.overtime || null)),
+pendingBattingResult: pendingBattingResult ? JSON.parse(JSON.stringify(pendingBattingResult)) : null,
 		lastPlay: lastPlay ? JSON.parse(JSON.stringify(lastPlay)) : null
 	});
 }
@@ -586,12 +594,13 @@ function restoreGameState(stateString) {
 	game.currentInningPitchers = state.currentInningPitchers || {};
 	game.lineScore = state.lineScore || { [game.team1.name]: [], [game.team2.name]: [] };
 	game.pitcherDecisions = state.pitcherDecisions || {
-		winningPitcher: null,
-		losingPitcher: null,
-		pendingWinningPitcherTeamName: null,
-		pitcherOfRecordByTeam: {}
-	};
-	pendingBattingResult = state.pendingBattingResult || null;
+	winningPitcher: null,
+	losingPitcher: null,
+	pendingWinningPitcherTeamName: null,
+	pitcherOfRecordByTeam: {}
+};
+game.overtime = normalizeOvertimeState(state.overtime || game.overtime);
+pendingBattingResult = state.pendingBattingResult || null;
 	lastPlay = state.lastPlay || null;
 	game.batterIndex = getCurrentBatterIndex();
 }
@@ -618,6 +627,105 @@ function setCurrentBatterIndex(nextIndex) {
 	game.batterIndexByTeam[game.batting.name] = normalized;
 	game.batterIndex = normalized;
 	return normalized;
+}
+
+function normalizeOvertimeState(value = null) {
+	const base = (value && typeof value === "object") ? value : {};
+	return {
+		active: base.active === true,
+		round: Math.max(0, Number(base.round || 0) || 0),
+		halfSetupKeys: (base.halfSetupKeys && typeof base.halfSetupKeys === "object") ? { ...base.halfSetupKeys } : {},
+		automaticRunners: (base.automaticRunners && typeof base.automaticRunners === "object") ? JSON.parse(JSON.stringify(base.automaticRunners)) : {}
+	};
+}
+
+function ensureOvertimeState() {
+	if (!game) return null;
+	game.overtime = normalizeOvertimeState(game.overtime);
+	return game.overtime;
+}
+
+function isOvertimeActive() {
+	return !!game?.overtime?.active || Number(game?.inning || 0) > 3;
+}
+
+function getOvertimeRoundForCurrentInning() {
+	return Math.max(1, Number(game?.inning || 4) - 3);
+}
+
+function getLastBatterInfoForCurrentTeam() {
+	const players = Array.isArray(game?.batting?.players) ? game.batting.players : [];
+	if (!players.length) return null;
+
+	const currentIndex = getCurrentBatterIndex();
+	const runnerIndex = ((currentIndex - 1) % players.length + players.length) % players.length;
+
+	return {
+		playerName: players[runnerIndex] || null,
+		runnerIndex
+	};
+}
+
+function startOvertimeHalfInning(reasonText = "") {
+	if (!game) return false;
+
+	const overtime = ensureOvertimeState();
+	overtime.active = true;
+	overtime.round = getOvertimeRoundForCurrentInning();
+	overtime.halfSetupKeys = overtime.halfSetupKeys || {};
+	overtime.automaticRunners = overtime.automaticRunners || {};
+
+	const halfKey = getCurrentHalfInningKey();
+	if (overtime.halfSetupKeys[halfKey]) return false;
+
+	const runnerInfo = getLastBatterInfoForCurrentTeam();
+	const runnerName = runnerInfo?.playerName || null;
+
+	game.bases = { first: null, second: null, third: null };
+	game.outs = 1;
+	game.halfInningRuns = 0;
+
+	if (runnerName) {
+		const runner = createBaseRunner(runnerName, false, game.batting, getCurrentPitcherResponsibility());
+		runner.isAutomaticOvertimeRunner = true;
+		runner.overtimeRound = overtime.round;
+		runner.overtimeHalf = game.halfInning;
+		runner.battingOrderIndex = runnerInfo.runnerIndex;
+
+		game.bases.second = runner;
+
+		overtime.automaticRunners[halfKey] = {
+			player: runnerName,
+			teamName: game.batting?.name || "",
+			statsKey: runner.statsKey || null,
+			round: overtime.round,
+			halfInning: game.halfInning,
+			battingOrderIndex: runnerInfo.runnerIndex
+		};
+	}
+
+	overtime.halfSetupKeys[halfKey] = true;
+
+	showNotification(
+		reasonText || `OT ${overtime.round}: ${game.batting.name} starts with 1 out and a runner on 2nd.`,
+		2200
+	);
+
+	return true;
+}
+
+function getLiveInningLabel() {
+	const halfText = game.halfInning === "top" ? "Top" : "Bottom";
+
+	if (isOvertimeActive()) {
+		return `${halfText} of OT ${getOvertimeRoundForCurrentInning()} | ${game.batting.name} Batting`;
+	}
+
+	return `${halfText} of Inning ${game.inning} | ${game.batting.name} Batting`;
+}
+
+function getLineScoreInningLabel(index) {
+	return index < 3 ? String(index + 1) : `OT${index - 2}`;
 }
 
 function undoLastAction() {
@@ -673,9 +781,7 @@ function updateGameScreen() {
 	document.getElementById("team1Score").innerText = game.team1Score;
 	document.getElementById("team2Score").innerText = game.team2Score;
 
-	let halfText = game.halfInning === "top" ? "Top" : "Bottom";
-	document.getElementById("inningText").innerText =
-		halfText + " of Inning " + game.inning + " | " + game.batting.name + " Batting";
+document.getElementById("inningText").innerText = getLiveInningLabel();
 
 	document.getElementById("outsText").innerText = "Outs: " + game.outs + "/2";
 
@@ -847,11 +953,11 @@ function manualScoreFromThird() {
 	scoreExistingRunner(runner, totals, { creditRbi: false });
 	applyHalfInningRuns(totals.runs, totals.scoringEvents || []);
 
-	if (game.inning <= 2 && game.halfInningRuns >= 6) {
-		endHalfInning(pitcherKey, "Run rule reached (6). Switching sides.");
-		updateGameScreen();
-		return;
-	}
+	if (!isOvertimeActive() && game.inning <= 2 && game.halfInningRuns >= 6) {
+	endHalfInning(pitcherKey, "Run rule reached (6). Switching sides.");
+	updateGameScreen();
+	return;
+}
 
 	showNotification("Run scored!", 1200);
 	updateGameScreen();
@@ -926,10 +1032,12 @@ function chargeRunToResponsiblePitcher(runner, chargeLog = null) {
 		chargeLog[pitcherKey].runs += 1;
 	}
 
-	if (!normalized.reachedOnError) {
-		pitcherStats.earnedRunsAllowed += 1;
-		if (chargeLog) chargeLog[pitcherKey].earnedRuns += 1;
-	}
+	const isEarnedRun = !normalized.reachedOnError && normalized.isAutomaticOvertimeRunner !== true;
+
+if (isEarnedRun) {
+	pitcherStats.earnedRunsAllowed += 1;
+	if (chargeLog) chargeLog[pitcherKey].earnedRuns += 1;
+}
 }
 
 function normalizeBaseRunner(runner, fallbackTeam = game?.batting) {
@@ -985,19 +1093,22 @@ function scoreExistingRunner(runner, totals, options = {}) {
 	const runnerStats = getRunnerGameStats(normalized, game?.batting);
 	if (runnerStats) runnerStats.runsScored += 1;
 
-	totals.runs += 1;
-	if (!normalized.reachedOnError) totals.earnedRuns += 1;
-	if (options.creditRbi !== false) totals.rbis += 1;
+const isEarnedRun = !normalized.reachedOnError && normalized.isAutomaticOvertimeRunner !== true;
+
+totals.runs += 1;
+if (isEarnedRun) totals.earnedRuns += 1;
+if (options.creditRbi !== false) totals.rbis += 1;
 
 	totals.pitcherCharges = totals.pitcherCharges || {};
 	chargeRunToResponsiblePitcher(normalized, totals.pitcherCharges);
 	totals.scoringEvents = Array.isArray(totals.scoringEvents) ? totals.scoringEvents : [];
-	totals.scoringEvents.push({
-		runnerName: normalized.player || "",
-		responsiblePitcherKey: normalized.responsiblePitcherKey || null,
-		responsiblePitcherName: normalized.responsiblePitcherName || null,
-		wasEarnedRun: !normalized.reachedOnError
-	});
+totals.scoringEvents.push({
+	runnerName: normalized.player || "",
+	responsiblePitcherKey: normalized.responsiblePitcherKey || null,
+	responsiblePitcherName: normalized.responsiblePitcherName || null,
+	wasEarnedRun: isEarnedRun,
+	isAutomaticOvertimeRunner: normalized.isAutomaticOvertimeRunner === true
+});
 }
 
 function getCurrentScoreForTeam(teamName) {
@@ -1396,30 +1507,57 @@ function endHalfInning(pitcherKey, reasonText) {
 
 	if (game.halfInning === "top") {
 		game.halfInning = "bottom";
+
 		let temp = game.batting;
 		game.batting = game.fielding;
 		game.fielding = temp;
-		setCurrentBatterIndex(getCurrentBatterIndex());
 
+		setCurrentBatterIndex(getCurrentBatterIndex());
 		updatePitcherSelect();
-		showNotification(reasonText || ("Side change! " + game.batting.name + " now batting."), 1500);
-	} else {
-		game.halfInning = "top";
-		let temp = game.batting;
-		game.batting = game.fielding;
-		game.fielding = temp;
-		setCurrentBatterIndex(getCurrentBatterIndex());
 
-		game.inning++;
+		if (isOvertimeActive()) {
+			ensureOvertimeState().round = getOvertimeRoundForCurrentInning();
+			startOvertimeHalfInning(
+				reasonText || `OT ${getOvertimeRoundForCurrentInning()}: ${game.batting.name} now gets the same runner-on-2nd setup.`
+			);
+		} else {
+			showNotification(reasonText || ("Side change! " + game.batting.name + " now batting."), 1500);
+		}
 
-		if (game.inning > 3) {
+		return;
+	}
+
+	game.halfInning = "top";
+
+	let temp = game.batting;
+	game.batting = game.fielding;
+	game.fielding = temp;
+
+	setCurrentBatterIndex(getCurrentBatterIndex());
+
+	game.inning++;
+
+	if (game.inning > 3) {
+		if (Number(game.team1Score || 0) !== Number(game.team2Score || 0)) {
 			finalizeCompletedGame();
 			return;
 		}
 
+		const overtime = ensureOvertimeState();
+		overtime.active = true;
+		overtime.round = getOvertimeRoundForCurrentInning();
+
 		updatePitcherSelect();
-		showNotification(reasonText || ("Inning " + game.inning + " starting! " + game.batting.name + " batting."), 1500);
+
+		startOvertimeHalfInning(
+			reasonText || `Tie game after regulation — OT ${overtime.round} begins with 1 out and a runner on 2nd.`
+		);
+
+		return;
 	}
+
+	updatePitcherSelect();
+	showNotification(reasonText || ("Inning " + game.inning + " starting! " + game.batting.name + " batting."), 1500);
 }
 
 function recordPitchingResult(pitchResult, errorFielderIndex = null) {
@@ -1614,13 +1752,13 @@ let scoringEvents = [];
 	const nextBatterIndex = setCurrentBatterIndex(getCurrentBatterIndex() + 1);
 	checkAndConvertToGhostie(game.batting.players[nextBatterIndex]);
 
-	if (game.inning <= 2 && game.halfInningRuns >= 6) {
-		endHalfInning(pitcherKey, "Run rule reached (6). Switching sides.");
-		pendingBattingResult = null;
-		keepLiveGameSectionsEnabled();
-		updateGameScreen();
-		return;
-	}
+if (!isOvertimeActive() && game.inning <= 2 && game.halfInningRuns >= 6) {
+	endHalfInning(pitcherKey, "Run rule reached (6). Switching sides.");
+	pendingBattingResult = null;
+	keepLiveGameSectionsEnabled();
+	updateGameScreen();
+	return;
+}
 
 	if (game.outs >= 2) {
 		endHalfInning(pitcherKey, null);
@@ -1690,7 +1828,8 @@ function buildCompletedGameLogEntry() {
 			[game.team2.name]: Array.isArray(game.team2.players) ? game.team2.players.slice() : []
 		},
 		lineScore: deepCloneJson(game.lineScore || {}),
-		winningPitcher: deepCloneJson(game?.pitcherDecisions?.winningPitcher || null),
+overtime: game?.overtime?.active ? deepCloneJson(game.overtime) : null,
+winningPitcher: deepCloneJson(game?.pitcherDecisions?.winningPitcher || null),
 		losingPitcher: deepCloneJson(game?.pitcherDecisions?.losingPitcher || null),
 		subsUsed,
 		lockId: game._lockId || null,
@@ -1719,11 +1858,16 @@ function saveCompletedGameLog(extraFields = {}) {
 
 async function saveGameStats() {
 	const completedEntry = buildCompletedGameLogEntry();
-	const completedEntryId = completedEntry?.id || null;
-	const existingEntry = findCompletedGameLogEntry(completedEntryId);
-	const postseasonRef = game?._postseasonRef?.slotId ? { ...game._postseasonRef } : null;
+const completedEntryId = completedEntry?.id || null;
+const existingEntry = findCompletedGameLogEntry(completedEntryId);
+const postseasonRef = game?._postseasonRef?.slotId ? { ...game._postseasonRef } : null;
 
-	if (postseasonRef) {
+if (Number(game?.team1Score || 0) === Number(game?.team2Score || 0)) {
+	alert("This game is still tied. Continue overtime until one team wins.");
+	return false;
+}
+
+if (postseasonRef) {
 		if (Number(game?.team1Score || 0) === Number(game?.team2Score || 0)) {
 			alert("Postseason games cannot end in a tie.");
 			return false;
@@ -3693,7 +3837,9 @@ function createPastGameLineScoreCard(entry) {
 	table.className = "stats-table responsive past-game-line-score-table";
 	const thead = document.createElement("thead");
 	const headRow = document.createElement("tr");
-	["Team", ...Array.from({ length: inningCount }, (_, index) => String(index + 1)), "R", "E"].forEach(label => {
+const lineScoreHeaders = ["Team", ...Array.from({ length: inningCount }, (_, index) => getLineScoreInningLabel(index)), "R", "E"];
+
+lineScoreHeaders.forEach(label => {
 		const th = document.createElement("th");
 		th.textContent = label;
 		headRow.appendChild(th);
@@ -3715,7 +3861,7 @@ function createPastGameLineScoreCard(entry) {
 		];
 		values.forEach((value, index) => {
 			const td = document.createElement("td");
-			td.setAttribute("data-label", ["Team", ...Array.from({ length: inningCount }, (_, idx) => String(idx + 1)), "R", "E"][index]);
+td.setAttribute("data-label", lineScoreHeaders[index]);
 			td.textContent = String(value);
 			tr.appendChild(td);
 		});
