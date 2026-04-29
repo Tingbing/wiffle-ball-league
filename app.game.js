@@ -1233,8 +1233,13 @@ function applyHalfInningRuns(runs, scoringEvents = []) {
 		}))
 		: [];
 
-	if (game.batting === game.team1) game.team1Score += runCount;
-	else game.team2Score += runCount;
+	if (battingTeamName === game.team1?.name) {
+	game.team1Score += runCount;
+} else if (battingTeamName === game.team2?.name) {
+	game.team2Score += runCount;
+} else {
+	console.warn("Could not match batting team to score bucket:", battingTeamName);
+}
 
 	game.halfInningRuns += runCount;
 	updatePitcherDecisionsFromScoringEvents(normalizedEvents);
