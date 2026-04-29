@@ -2491,6 +2491,37 @@ function getTeamGameLogForStats(teamName) {
 			});
 		});
 	});
+
+	const countedManualIds = new Set();
+	(season?.games || []).forEach(entry => {
+		if (!entry || entry.scheduleRef || entry.postseasonRef || entry.seasonPhase === "postseason") return;
+
+		const entryId = String(entry.id || "").trim();
+		if (entryId && countedManualIds.has(entryId)) return;
+		if (entryId) countedManualIds.add(entryId);
+
+		const team1Name = String(entry.team1Name || "").trim();
+		const team2Name = String(entry.team2Name || "").trim();
+		const team1Score = Number(entry.team1Score || 0);
+		const team2Score = Number(entry.team2Score || 0);
+
+		if (!team1Name || !team2Name || team1Name === team2Name || team1Score === team2Score) return;
+
+		if (team1Name === teamName) {
+			logs.push({
+				scored: team1Score,
+				allowed: team2Score,
+				margin: team1Score - team2Score
+			});
+		} else if (team2Name === teamName) {
+			logs.push({
+				scored: team2Score,
+				allowed: team1Score,
+				margin: team2Score - team1Score
+			});
+		}
+	});
+
 	return logs;
 }
 
