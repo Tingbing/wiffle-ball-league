@@ -77,8 +77,8 @@ function applyConfirmRunnerOut() {
 	showNotification(removed.player + " thrown out!", 1200);
 
 	if (game.outs >= 2) {
-		endHalfInning(pitcherKey, "Runner thrown out — side over!");
-		updateGameScreen();
+		const transitionResult = endHalfInning(pitcherKey, "Runner thrown out — side over!");
+		if (transitionResult !== "finalizing") updateGameScreen();
 		return;
 	}
 
