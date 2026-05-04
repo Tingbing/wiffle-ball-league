@@ -40,6 +40,7 @@ function resetLiveGameSessionState() {
 	pendingBattingResult = null;
 	playInputLock = false;
 	clearLiveGameAutosave();
+	try { setLiveGameStatus("synced", "Synced"); } catch (e) {}
 
 	document.getElementById("errorPicker")?.classList.add("hidden");
 	document.getElementById("outPicker")?.classList.add("hidden");
