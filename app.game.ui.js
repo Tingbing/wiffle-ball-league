@@ -46,6 +46,10 @@ function keepLiveGameSectionsEnabled() {
 }
 
 function confirmRunnerOut() {
+	return runLiveGameAction("runner out", () => applyConfirmRunnerOut());
+}
+
+function applyConfirmRunnerOut() {
 	if (!game) return;
 
 	const base = document.getElementById("outBaseSelect").value;
