@@ -76,11 +76,18 @@ function markLiveGameServerSyncPending(reason = "") {
 
 function markLiveGameServerSyncSuccess() {
 	lastLiveGameServerSyncAt = new Date().toISOString();
-	if (game || hasValidLiveGameAutosave()) {
-		setLiveGameStatus("pending", "Local Save OK • Server Backup Pending");
-	} else {
-		setLiveGameStatus("synced", "Synced");
+
+	if (game?._gameCompletePendingSave || game?._finalizeInProgress) {
+		setLiveGameStatus("pending", "Game Complete • Saving");
+		return;
 	}
+
+	if (game || hasValidLiveGameAutosave()) {
+		setLiveGameStatus("synced", "Local Save OK • Server Synced");
+		return;
+	}
+
+	setLiveGameStatus("synced", "Synced");
 }
 
 function markLiveGameServerSyncDelayed() {
