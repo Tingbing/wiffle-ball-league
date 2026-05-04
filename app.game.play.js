@@ -217,6 +217,11 @@ function runLiveGameAction(actionLabel, fn) {
 		setTimeout(() => {
 			liveGameActionInProgress = false;
 			playInputLock = false;
+
+			// If the last play completed the game, keep play controls locked while the
+			// final save is pending. End Game Early remains outside this control group.
+			if (game?._finalizeInProgress || game?._gameCompletePendingSave) return;
+
 			setLiveActionControlsBusy(false);
 		}, 220);
 	}
