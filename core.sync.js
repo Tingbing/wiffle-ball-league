@@ -83,13 +83,19 @@ function clearSyncConflictState() {
 }
 
 function refreshAfterSnapshotChange() {
+	if (typeof hasLocalLiveGameToProtect === "function" && hasLocalLiveGameToProtect()) {
+		try { saveLiveGameForLifecycle("lifecycle"); } catch (e) {}
+		try { refreshLiveGameStatusDisplay(); } catch (e) {}
+		return;
+	}
+
 	try { update(); } catch (e) {}
 	try { if (!document.getElementById("seasonStatsScreen")?.classList.contains("hidden")) displaySeasonStats(); } catch (e) {}
 	try { if (!document.getElementById("scheduleScreen")?.classList.contains("hidden")) renderScheduleUI(); } catch (e) {}
 	try {
-	if (!document.getElementById("gameSetupScreen")?.classList.contains("hidden")) {
-	refreshGameSetupScheduleCards();
-}
+		if (!document.getElementById("gameSetupScreen")?.classList.contains("hidden")) {
+			refreshGameSetupScheduleCards();
+		}
 	} catch (e) {}
 }
 
@@ -282,6 +288,11 @@ try {
    PUBLIC VIEW SERVER REFRESH
 ================================== */
 async function refreshPublicViewData({ quiet = true } = {}) {
+	if (typeof shouldProtectLiveGameFromServerApply === "function" && shouldProtectLiveGameFromServerApply("public-view")) {
+		try { markLiveGameServerSyncPending("Live Game Protected"); } catch (e) {}
+		return null;
+	}
+
 	const row = await fetchSeasonRowFromServer({ quiet, publicView: true });
 	if (row) applyServerSeasonRow(row, { force: true, source: "public-view" });
 	return row;
@@ -521,6 +532,18 @@ async function fetchSeasonRowFromServer({ quiet = true, publicView = false } = {
 function applyServerSeasonRow(row, { force = false, source = "server" } = {}) {
 	if (!row) return false;
 
+		if (!force && typeof shouldProtectLiveGameFromServerApply === "function" && shouldProtectLiveGameFromServerApply(source)) {
+		try {
+			if (Object.prototype.hasOwnProperty.call(row, "active_game_lock")) {
+				const incomingLock = row.active_game_lock || null;
+				const saved = typeof readLiveGameAutosave === "function" ? readLiveGameAutosave() : null;
+				const savedLockId = saved?.lockId || saved?.game?._lockId || saved?.game?._lockInfo?.lockId || game?._lockId || null;
+				if (incomingLock?.lockId && incomingLock.lockId === savedLockId) persistActiveGameLock(incomingLock);
+			}
+		} catch (e) {}
+		try { markLiveGameServerSyncPending("Live Game Protected"); } catch (e) {}
+		return false;
+	}
 	const info = getRowRevisionInfo(row);
 	const localSeasonSnapshot = ensureSeasonShape(deepCloneJson(readJsonStorage(SEASON_STORAGE_KEY, season)));
 	const localScheduleSnapshot = ensureScheduleShape(deepCloneJson(readJsonStorage(SCHEDULE_STORAGE_KEY, schedule)));
@@ -637,11 +660,17 @@ function queueServerSync(reason, { immediate = false } = {}) {
 	if (syncConflictState) return;
 	if (!isLeagueUnlocked() || !getStoredName()) return;
 
+	try { markLiveGameServerSyncPending(reason || "changes"); } catch (e) {}
+
 	if (serverSyncTimer) clearTimeout(serverSyncTimer);
 
 	const run = async () => {
 		serverSyncTimer = null;
-		await syncSeasonToServer({ quiet: true });
+		const ok = await syncSeasonToServer({ quiet: true });
+		try {
+			if (ok) markLiveGameServerSyncSuccess();
+			else markLiveGameServerSyncDelayed();
+		} catch (e) {}
 	};
 
 	if (immediate) run();
@@ -654,8 +683,11 @@ async function ensurePostUnlockSetup() {
 	postUnlockSetupPromise = (async () => {
 		setSyncButtonEnabled(false);
 
-		// Best effort: pull down newer server snapshot before enabling autosync
-		try { await hydrateFromServerIfNewer(); } catch (e) {}
+				// Best effort: pull down newer server snapshot before enabling autosync.
+		// Do not hydrate over a valid local live game; live-game local autosave is authoritative.
+		if (!(typeof hasLocalLiveGameToProtect === "function" && hasLocalLiveGameToProtect())) {
+			try { await hydrateFromServerIfNewer(); } catch (e) {}
+		}
 
 		// Start realtime listeners
 		try { await startRealtime(); } catch (e) {}
@@ -674,6 +706,12 @@ async function ensurePostUnlockSetup() {
 }
 
 	function scheduleTeamsReload() {
+		if (typeof hasLocalLiveGameToProtect === "function" && hasLocalLiveGameToProtect()) {
+			try { saveLiveGameForLifecycle("lifecycle"); } catch (e) {}
+			try { markLiveGameServerSyncPending("Roster Refresh Delayed"); } catch (e) {}
+			return;
+		}
+
 		if (teamsReloadTimer) clearTimeout(teamsReloadTimer);
 		teamsReloadTimer = setTimeout(async () => {
 			teamsReloadTimer = null;
@@ -707,9 +745,15 @@ async function ensurePostUnlockSetup() {
 			"postgres_changes",
 			{ event: "*", schema: "public", table: "season_data", filter: "league_code=eq." + String(LEAGUE_CODE) },
 			async (payload) => {
-				// If deleted, clear locally too
-				if (payload.eventType === "DELETE") {
-				suppressAutoSync = true;
+									// If deleted, clear locally too — unless a local live game is active/saved.
+					if (payload.eventType === "DELETE") {
+					if (typeof hasLocalLiveGameToProtect === "function" && hasLocalLiveGameToProtect()) {
+						try { saveLiveGameForLifecycle("lifecycle"); } catch (e) {}
+						try { markLiveGameServerSyncDelayed(); } catch (e) {}
+						return;
+					}
+
+					suppressAutoSync = true;
 season = { playerStats: {}, teamRecords: {}, seasonSubs: [], subStats: {}, games: [] };
 schedule = { days: [], teamNames: [] };
 persistActiveGameLock(null);
@@ -878,6 +922,7 @@ async function syncSeasonToServer({ quiet = false } = {}) {
 		return true;
 	} catch (e) {
 		console.log("season_data sync failed:", e);
+		try { markLiveGameServerSyncDelayed(); } catch (statusErr) {}
 		if (!quiet) {
 			alert(
 				"Could not save to server.\n\n" +
