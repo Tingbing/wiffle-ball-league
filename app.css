@@ -229,6 +229,33 @@
     background: #1b1b1b;
   }
 
+  .live-sync-tag {
+    width: fit-content;
+    max-width: 100%;
+    margin: 6px 0 10px 0;
+  }
+
+  .sync-tag.status-ok,
+  .sync-tag.status-synced,
+  .sync-tag.status-restored {
+    color: #bff5bf;
+    border-color: #3f6f3f;
+    background: #162416;
+  }
+
+  .sync-tag.status-pending,
+  .sync-tag.status-stale {
+    color: #ffe0a3;
+    border-color: #80662c;
+    background: #2a2111;
+  }
+
+  .sync-tag.status-error {
+    color: #ffb3b3;
+    border-color: #884444;
+    background: #2a1515;
+  }
+
 .season-stats-hub-buttons {
 	display: grid;
 	grid-template-columns: repeat(2, minmax(0, 1fr));
