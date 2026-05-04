@@ -27,7 +27,22 @@ function showPublicMenu() {
 	updatePublicAccessUI();
 }
 
+function clearFinishedGameMemoryIfNeeded() {
+	if (!game?._finalizeInProgress) return false;
+
+	game = null;
+	gameHistory = [];
+	lastPlay = null;
+	pendingBattingResult = null;
+	playInputLock = false;
+	try { clearLiveGameAutosave(); } catch (e) {}
+
+	return true;
+}
+
 function showMainMenu() {
+	clearFinishedGameMemoryIfNeeded();
+
 	if (game) {
 		showGame();
 		try { updateGameScreen(); } catch (e) {}
@@ -57,6 +72,7 @@ function showTeamConfig() {
 }
 
 async function showGameSetup() {
+	clearFinishedGameMemoryIfNeeded();
 	if (game) {
 		showGame();
 		try { updateGameScreen(); } catch (e) {}
