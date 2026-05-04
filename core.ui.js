@@ -28,10 +28,18 @@ function showPublicMenu() {
 }
 
 function showMainMenu() {
+	if (game) {
+		showGame();
+		try { updateGameScreen(); } catch (e) {}
+		showNotification("Finish or End Game Early before leaving the recording screen.", 1600);
+		return;
+	}
+
 	if (isPublicViewOnlyMode()) {
 		showPublicMenu();
 		return;
 	}
+
 	hideAllScreens();
 	document.getElementById("mainMenu").classList.remove("hidden");
 	updatePublicAccessUI();
@@ -49,13 +57,26 @@ function showTeamConfig() {
 }
 
 async function showGameSetup() {
+	if (game) {
+		showGame();
+		try { updateGameScreen(); } catch (e) {}
+		showNotification("A game is already being recorded on this device.", 1400);
+		return;
+	}
+
+	if (!game && typeof hasValidLiveGameAutosave === "function" && hasValidLiveGameAutosave()) {
+		const restored = await maybeOfferLiveGameResume({ force: true, auto: true, source: "game-setup" });
+		if (restored) return;
+	}
+
 	if (isPublicViewOnlyMode()) {
 		alert("Sign in and enter the league code to record games.");
 		showPublicMenu();
 		return;
 	}
+
 	hideAllScreens();
-	
+
 	if (league.teams.length < 2) {
 		alert("You need at least 2 teams! Please configure teams first.");
 		showTeamConfig();
