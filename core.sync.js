@@ -337,6 +337,40 @@ function persistActiveGameLock(lockObj) {
 	try { refreshGameLockUI(); } catch (e) {}
 }
 
+function withTimeout(promise, timeoutMs = 2500, fallbackValue = false) {
+	let settled = false;
+	return new Promise(resolve => {
+		const timer = setTimeout(() => {
+			if (settled) return;
+			settled = true;
+			resolve(fallbackValue);
+		}, timeoutMs);
+
+		Promise.resolve(promise)
+			.then(value => {
+				if (settled) return;
+				settled = true;
+				clearTimeout(timer);
+				resolve(value);
+			})
+			.catch(error => {
+				if (settled) return;
+				settled = true;
+				clearTimeout(timer);
+				console.warn("Timed async action failed:", error);
+				resolve(fallbackValue);
+			});
+	});
+}
+
+async function releaseGameLockWithTimeout(lockId, { quiet = true, timeoutMs = 2500 } = {}) {
+	if (!lockId) {
+		persistActiveGameLock(null);
+		return true;
+	}
+	return await withTimeout(releaseGameLock(lockId, { quiet }), timeoutMs, false);
+}
+
 function getActiveGameLockLabel(lockObj = activeGameLock) {
 	if (!lockObj) return "";
 	if (lockObj.type === "scheduled") {
