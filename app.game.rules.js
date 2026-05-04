@@ -1,0 +1,189 @@
+// Wiffle Ball League - app.game.rules.js
+// Split from the source-of-truth app.game.js. Load after app.core.js in the required order.
+// Purpose: Overtime, inning labels, half-inning transitions, and regulation/overtime flow rules.
+
+function normalizeOvertimeState(value = null) {
+	const base = (value && typeof value === "object") ? value : {};
+	return {
+		active: base.active === true,
+		round: Math.max(0, Number(base.round || 0) || 0),
+		halfSetupKeys: (base.halfSetupKeys && typeof base.halfSetupKeys === "object") ? { ...base.halfSetupKeys } : {},
+		automaticRunners: (base.automaticRunners && typeof base.automaticRunners === "object") ? JSON.parse(JSON.stringify(base.automaticRunners)) : {}
+	};
+}
+
+function ensureOvertimeState() {
+	if (!game) return null;
+	game.overtime = normalizeOvertimeState(game.overtime);
+	return game.overtime;
+}
+
+function isOvertimeActive() {
+	return !!game?.overtime?.active || Number(game?.inning || 0) > 3;
+}
+
+function getOvertimeRoundForCurrentInning() {
+	return Math.max(1, Number(game?.inning || 4) - 3);
+}
+
+function getLastBatterInfoForCurrentTeam() {
+	const players = Array.isArray(game?.batting?.players) ? game.batting.players : [];
+	if (!players.length) return null;
+
+	const currentIndex = getCurrentBatterIndex();
+	const runnerIndex = ((currentIndex - 1) % players.length + players.length) % players.length;
+
+	return {
+		playerName: players[runnerIndex] || null,
+		runnerIndex
+	};
+}
+
+function startOvertimeHalfInning(reasonText = "") {
+	if (!game) return false;
+
+	const overtime = ensureOvertimeState();
+	overtime.active = true;
+	overtime.round = getOvertimeRoundForCurrentInning();
+	overtime.halfSetupKeys = overtime.halfSetupKeys || {};
+	overtime.automaticRunners = overtime.automaticRunners || {};
+
+	const halfKey = getCurrentHalfInningKey();
+	if (overtime.halfSetupKeys[halfKey]) return false;
+
+	const runnerInfo = getLastBatterInfoForCurrentTeam();
+	const runnerName = runnerInfo?.playerName || null;
+
+	game.bases = { first: null, second: null, third: null };
+	game.outs = 1;
+	game.halfInningRuns = 0;
+
+	if (runnerName) {
+		const runner = createBaseRunner(runnerName, false, game.batting, {
+	pitcherKey: null,
+	pitcherName: null,
+	teamName: game.fielding?.name || ""
+});
+
+runner.responsiblePitcherKey = null;
+runner.responsiblePitcherName = null;
+runner.awaitingOvertimePitcherResponsibility = true;
+runner.isAutomaticOvertimeRunner = true;
+runner.overtimeRound = overtime.round;
+runner.overtimeHalf = game.halfInning;
+runner.battingOrderIndex = runnerInfo.runnerIndex;
+
+		game.bases.second = runner;
+
+		overtime.automaticRunners[halfKey] = {
+			player: runnerName,
+			teamName: game.batting?.name || "",
+			statsKey: runner.statsKey || null,
+			round: overtime.round,
+			halfInning: game.halfInning,
+			battingOrderIndex: runnerInfo.runnerIndex
+		};
+	}
+
+	overtime.halfSetupKeys[halfKey] = true;
+
+	showNotification(
+		reasonText || `OT ${overtime.round}: ${game.batting.name} starts with 1 out and a runner on 2nd.`,
+		2200
+	);
+
+	return true;
+}
+
+function getLiveInningLabel() {
+	const halfText = game.halfInning === "top" ? "Top" : "Bottom";
+
+	if (isOvertimeActive()) {
+		return `${halfText} of OT ${getOvertimeRoundForCurrentInning()} | ${game.batting.name} Batting`;
+	}
+
+	return `${halfText} of Inning ${game.inning} | ${game.batting.name} Batting`;
+}
+
+function getLineScoreInningLabel(index) {
+	return index < 3 ? String(index + 1) : `OT${index - 2}`;
+}
+
+function ensureOvertimeHalfSetupAfterResume() {
+	if (!game || game?.overtime?.active !== true) return false;
+
+	const overtime = ensureOvertimeState();
+	const halfKey = getCurrentHalfInningKey();
+	if (!halfKey || overtime.halfSetupKeys?.[halfKey]) return false;
+
+	const hasRunnerOnBase = !!(game.bases?.first || game.bases?.second || game.bases?.third);
+	if (Number(game.outs || 0) !== 0 || hasRunnerOnBase) return false;
+
+	return startOvertimeHalfInning(
+		`Recovered OT ${getOvertimeRoundForCurrentInning()} setup: 1 out and a runner on 2nd.`
+	);
+}
+
+function endHalfInning(pitcherKey, reasonText) {
+	// innings pitched are derived from pitchOuts, so side changes should not hand out extra IP
+
+	game.bases.first = null;
+	game.bases.second = null;
+	game.bases.third = null;
+	game.outs = 0;
+	game.halfInningRuns = 0;
+
+	if (game.halfInning === "top") {
+		game.halfInning = "bottom";
+
+		let temp = game.batting;
+		game.batting = game.fielding;
+		game.fielding = temp;
+
+		setCurrentBatterIndex(getCurrentBatterIndex());
+		updatePitcherSelect();
+
+		if (isOvertimeActive()) {
+			ensureOvertimeState().round = getOvertimeRoundForCurrentInning();
+			startOvertimeHalfInning(
+				reasonText || `OT ${getOvertimeRoundForCurrentInning()}: ${game.batting.name} now gets the same runner-on-2nd setup.`
+			);
+		} else {
+			showNotification(reasonText || ("Side change! " + game.batting.name + " now batting."), 1500);
+		}
+
+		return;
+	}
+
+	game.halfInning = "top";
+
+	let temp = game.batting;
+	game.batting = game.fielding;
+	game.fielding = temp;
+
+	setCurrentBatterIndex(getCurrentBatterIndex());
+
+	game.inning++;
+
+	if (game.inning > 3) {
+		if (Number(game.team1Score || 0) !== Number(game.team2Score || 0)) {
+			finalizeCompletedGame();
+			return;
+		}
+
+		const overtime = ensureOvertimeState();
+		overtime.active = true;
+		overtime.round = getOvertimeRoundForCurrentInning();
+
+		updatePitcherSelect();
+
+		startOvertimeHalfInning(
+			reasonText || `Tie game after regulation — OT ${overtime.round} begins with 1 out and a runner on 2nd.`
+		);
+
+		return;
+	}
+
+	updatePitcherSelect();
+	showNotification(reasonText || ("Inning " + game.inning + " starting! " + game.batting.name + " batting."), 1500);
+}
