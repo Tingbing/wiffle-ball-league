@@ -1601,52 +1601,57 @@ function populateScheduleGameSelect() {
 }
 
 async function startSelectedScheduledGame() {
-	const guard = ensureScheduleUpToDateForSelection();
-	if (!guard.ok) {
-		alert(guard.selectionMessage || "Scheduled game selection is currently unavailable.");
-		refreshGameSetupScheduleCards();
-		return;
-	}
+	return await runGameStartAction(async () => {
+		const guard = ensureScheduleUpToDateForSelection();
+		if (!guard.ok) {
+			alert(guard.selectionMessage || "Scheduled game selection is currently unavailable.");
+			refreshGameSetupScheduleCards();
+			return false;
+		}
 
-	const gameSelect = document.getElementById("scheduleGameSelect");
-	if (!gameSelect || !gameSelect.value) return;
+		const gameSelect = document.getElementById("scheduleGameSelect");
+		if (!gameSelect || !gameSelect.value) return false;
 
-	const [dayIndexStr, seriesIndexStr, seriesGameIndexStr] = gameSelect.value.split("|");
-	const dayIndex = parseInt(dayIndexStr, 10);
-	const seriesIndex = parseInt(seriesIndexStr, 10);
-	const seriesGameIndex = parseInt(seriesGameIndexStr, 10);
+		const [dayIndexStr, seriesIndexStr, seriesGameIndexStr] = gameSelect.value.split("|");
+		const dayIndex = parseInt(dayIndexStr, 10);
+		const seriesIndex = parseInt(seriesIndexStr, 10);
+		const seriesGameIndex = parseInt(seriesGameIndexStr, 10);
 
-	const dayObj = schedule?.days?.[dayIndex];
-	const seriesEntry = dayObj?.games?.[seriesIndex];
-	const seriesGame = seriesEntry?.gamesInSeries?.[seriesGameIndex];
+		const dayObj = schedule?.days?.[dayIndex];
+		const seriesEntry = dayObj?.games?.[seriesIndex];
+		const seriesGame = seriesEntry?.gamesInSeries?.[seriesGameIndex];
 
-	if (!seriesEntry || !seriesGame) return alert("Could not find that scheduled series game.");
+		if (!seriesEntry || !seriesGame) {
+			alert("Could not find that scheduled series game.");
+			return false;
+		}
 
-	if (seriesGame.result) {
-		alert("That game was already recorded.");
-		populateScheduleGameSelect();
-		return;
-	}
+		if (seriesGame.result) {
+			alert("That game was already recorded.");
+			populateScheduleGameSelect();
+			return false;
+		}
 
-	if (isSeriesGameSkipped(seriesGame)) {
-		alert("That game was marked not played because the series ended early.");
-		populateScheduleGameSelect();
-		return;
-	}
+		if (isSeriesGameSkipped(seriesGame)) {
+			alert("That game was marked not played because the series ended early.");
+			populateScheduleGameSelect();
+			return false;
+		}
 
-	const validTeams = league.teams.filter(t => t.players.length > 0);
-	const t1 = validTeams.find(t => t.name === seriesEntry.away);
-	const t2 = validTeams.find(t => t.name === seriesEntry.home);
+		const validTeams = league.teams.filter(t => t.players.length > 0);
+		const t1 = validTeams.find(t => t.name === seriesEntry.away);
+		const t2 = validTeams.find(t => t.name === seriesEntry.home);
 
-	if (!t1 || !t2) {
-		alert("Could not match schedule teams to your team list.");
-		return;
-	}
+		if (!t1 || !t2) {
+			alert("Could not match schedule teams to your team list.");
+			return false;
+		}
 
-	await beginLockedGame(t1, t2, { dayIndex, seriesIndex, seriesGameIndex }, {
-		type: "scheduled",
-		dayNumber: Number(dayObj?.day || (dayIndex + 1)),
-		seriesNumber: Number(seriesEntry?.gameNumber || (seriesIndex + 1)),
-		seriesGameNumber: Number(seriesGame?.gameNumber || (seriesGameIndex + 1))
+		return await beginLockedGame(t1, t2, { dayIndex, seriesIndex, seriesGameIndex }, {
+			type: "scheduled",
+			dayNumber: Number(dayObj?.day || (dayIndex + 1)),
+			seriesNumber: Number(seriesEntry?.gameNumber || (seriesIndex + 1)),
+			seriesGameNumber: Number(seriesGame?.gameNumber || (seriesGameIndex + 1))
+		});
 	});
 }
