@@ -172,28 +172,25 @@ if (postseasonRef) {
 			: null;
 
 	if (scheduledRef) {
+		try {
+			const latestRow = typeof fetchSeasonRowFromServer === "function"
+				? await fetchSeasonRowFromServer({ quiet: true })
+				: null;
+			const latestSchedule = latestRow?.schedule_json ? ensureScheduleShape(deepCloneJson(latestRow.schedule_json)) : null;
+			const latestSeriesEntry = latestSchedule?.days?.[scheduledRef.dayIndex]?.games?.[scheduledRef.seriesIndex];
+			const latestSeriesGame = latestSeriesEntry?.gamesInSeries?.[scheduledRef.seriesGameIndex];
+
+			if ((latestSeriesGame?.result || latestSeriesGame?.skipped) && !existingEntry) {
+				alert("That scheduled game was already finalized on the server. Nothing new was saved.");
+				clearLiveGameAutosave();
+				return await releaseGameLock(game?._lockId || activeGameLock?.lockId || null, { quiet: true });
+			}
+		} catch (e) {
+			console.warn("Could not verify scheduled game before finalizing:", e);
+			try { markLiveGameServerSyncDelayed(); } catch (statusErr) {}
+		}
+
 		const scheduledSeriesEntry = schedule?.days?.[scheduledRef.dayIndex]?.games?.[scheduledRef.seriesIndex];
-		const scheduledSeriesGame = scheduledSeriesEntry?.gamesInSeries?.[scheduledRef.seriesGameIndex];
-		const teamsMatch =
-			!!scheduledSeriesEntry &&
-			(
-				(scheduledSeriesEntry.away === game?.team1?.name && scheduledSeriesEntry.home === game?.team2?.name) ||
-				(scheduledSeriesEntry.away === game?.team2?.name && scheduledSeriesEntry.home === game?.team1?.name)
-			);
-
-		if (!scheduledSeriesEntry || !scheduledSeriesGame || !teamsMatch) {
-			alert(
-				"This scheduled game could not be matched back to its exact season slot. Nothing was saved, so the schedule could not be corrupted. Refresh the season data before trying again."
-			);
-			return false;
-		}
-
-		if (scheduledSeriesGame.result && !existingEntry) {
-			alert("That scheduled game was already recorded. Nothing new was saved.");
-			clearLiveGameAutosave();
-			return await releaseGameLock(game?._lockId || activeGameLock?.lockId || null, { quiet: true });
-		}
-	}
 
 	if (existingEntry) {
 		if (!existingEntry.outcomeApplied) {
