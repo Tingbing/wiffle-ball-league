@@ -97,7 +97,7 @@ _scheduleRef: scheduleRef,
 	persistLiveGameAutosave();
 }
 
-async function beginLockedGame(t1, t2, scheduleRef = null, extraLockDetails = {}, gameContext = null) {
+async function beginLockedGame(t1, t2, scheduleRef = null, extraLockDetails = {}, gameContext = null, startActionId = null) {
 	const attempt = await acquireGameLock({
 		type: extraLockDetails?.type || (scheduleRef ? "scheduled" : (gameContext?.postseasonRef ? "postseason" : "manual")),
 		team1: t1?.name || "",
@@ -105,6 +105,11 @@ async function beginLockedGame(t1, t2, scheduleRef = null, extraLockDetails = {}
 		...extraLockDetails
 	});
 
+	if (!isCurrentGameStartAction(startActionId)) {
+		if (attempt?.ok) await releaseGameLockWithTimeout(attempt.lockId, { quiet: true, timeoutMs: 2500 });
+		return false;
+	}
+	
 	if (!attempt.ok) {
 		refreshGameLockUI();
 		const lockLabel = getActiveGameLockLabel(attempt.lock || activeGameLock);
@@ -148,12 +153,22 @@ async function beginLockedGame(t1, t2, scheduleRef = null, extraLockDetails = {}
 	}
 }
 
+		if (!isCurrentGameStartAction(startActionId)) {
+		await releaseGameLockWithTimeout(attempt.lockId, { quiet: true, timeoutMs: 2500 });
+		return false;
+	}
 	startGameWithTeams(t1, t2, scheduleRef, attempt.lock, gameContext);
 	return true;
 }
 
 let liveGameActionInProgress = false;
 let gameStartInProgress = false;
+let gameStartActionId = 0;
+let activeGameStartActionId = 0;
+
+function isCurrentGameStartAction(actionId) {
+	return !actionId || activeGameStartActionId === actionId;
+}
 
 function setLiveActionControlsBusy(isBusy) {
 	const selectors = [
@@ -212,7 +227,10 @@ async function runGameStartAction(fn) {
 		showNotification("Already starting a game. Please wait.", 1000);
 		return false;
 	}
+
 	gameStartInProgress = true;
+	const actionId = ++gameStartActionId;
+	activeGameStartActionId = actionId;
 
 	const manualBtn = document.getElementById("manualStartGameBtn");
 	const scheduledBtn = document.getElementById("startScheduledGameBtn");
@@ -220,18 +238,23 @@ async function runGameStartAction(fn) {
 	if (scheduledBtn) scheduledBtn.disabled = true;
 
 	try {
-		const result = await withTimeout(fn(), 7000, "__start_timeout__");
+		const result = await withTimeout(fn(actionId), 7000, "__start_timeout__");
+
 		if (result === "__start_timeout__") {
+			if (activeGameStartActionId === actionId) activeGameStartActionId = 0;
 			alert("Starting the game is taking too long. The app did not start a new game. Sync/reload and try again.");
 			return false;
 		}
+
 		return result;
 	} catch (error) {
 		console.error("Start game action failed:", error);
 		alert("The game could not start cleanly. No game was recorded. Try again after syncing/reloading.");
 		return false;
 	} finally {
+		if (activeGameStartActionId === actionId) activeGameStartActionId = 0;
 		gameStartInProgress = false;
+
 		if (!game) {
 			if (manualBtn) manualBtn.disabled = false;
 			if (scheduledBtn) scheduledBtn.disabled = false;
@@ -240,7 +263,7 @@ async function runGameStartAction(fn) {
 }
 
 async function startGame() {
-	return await runGameStartAction(async () => {
+	return await runGameStartAction(async (startActionId) => {
 		let validTeams = league.teams.filter(t => t.players.length > 0);
 
 		let team1Index = parseInt(document.getElementById("team1Select").value);
@@ -254,7 +277,7 @@ async function startGame() {
 		let t1 = validTeams[team1Index];
 		let t2 = validTeams[team2Index];
 
-		return await beginLockedGame(t1, t2, null, { type: "manual" });
+	return await beginLockedGame(t1, t2, null, { type: "manual" }, null, startActionId);
 	});
 }
 
