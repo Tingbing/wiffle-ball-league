@@ -5,14 +5,18 @@
 async function finalizeCompletedGame() {
 	if (!game || game._finalizeInProgress) return;
 	game._finalizeInProgress = true;
-
+	game._gameCompletePendingSave = true;
+	try { clearLiveGameAutosave(); } catch (e) {}
+	
 	const completedEntryId = getCompletedGameEntryId(game);
 	const lockReleased = await saveGameStats();
 	const savedEntry = findCompletedGameLogEntry(completedEntryId);
 	const savedOk = !!savedEntry && !!savedEntry.outcomeApplied;
 
-	if (!savedOk) {
+		if (!savedOk) {
 		game._finalizeInProgress = false;
+		game._gameCompletePendingSave = false;
+		try { persistLiveGameAutosave("finalize-failed"); } catch (e) {}
 		return;
 	}
 
