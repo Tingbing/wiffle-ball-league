@@ -22,6 +22,8 @@ function isOvertimeActive() {
 	if (!game) return false;
 
 	const inning = Number(game.inning || 0);
+	const overtime = game.overtime || {};
+
 	if (inning <= 3) {
 		if (game.overtime?.active) {
 			game.overtime.active = false;
@@ -30,7 +32,7 @@ function isOvertimeActive() {
 		return false;
 	}
 
-	return true;
+	return overtime.active === true;
 }
 
 function getOvertimeRoundForCurrentInning() {
@@ -155,6 +157,15 @@ function ensureOvertimeHalfSetupAfterResume() {
 
 function endHalfInning(pitcherKey, reasonText) {
 	// innings pitched are derived from pitchOuts, so side changes should not hand out extra IP
+	if (!game) return "none";
+
+	const endingHalf = game.halfInning;
+	const endingInning = Number(game.inning || 0);
+	const team1Score = Number(game.team1Score || 0);
+	const team2Score = Number(game.team2Score || 0);
+	const scoreIsTied = team1Score === team2Score;
+	const endingBottomHalf = endingHalf === "bottom";
+	const regulationOrLaterComplete = endingBottomHalf && endingInning >= 3;
 
 	game.bases.first = null;
 	game.bases.second = null;
@@ -162,7 +173,28 @@ function endHalfInning(pitcherKey, reasonText) {
 	game.outs = 0;
 	game.halfInningRuns = 0;
 
-	if (game.halfInning === "top") {
+	// Critical resume-safety rule:
+	// A non-tied game is complete at the end of the bottom half of inning 3+.
+	// Do NOT advance to inning 4 first. If the user leaves during the async save,
+	// inning 4 must not be autosaved and restored as fake overtime.
+	if (regulationOrLaterComplete && !scoreIsTied) {
+		if (game.overtime) {
+			game.overtime.active = false;
+			game.overtime.round = 0;
+		}
+
+		game._gameCompletePendingSave = true;
+
+		Promise.resolve(finalizeCompletedGame()).catch(error => {
+			console.error("Finalize completed game failed:", error);
+			game._gameCompletePendingSave = false;
+			showNotification("Game is complete, but saving had an error. Try syncing again.", 2500);
+		});
+
+		return "finalizing";
+	}
+
+	if (endingHalf === "top") {
 		game.halfInning = "bottom";
 
 		let temp = game.batting;
@@ -181,7 +213,7 @@ function endHalfInning(pitcherKey, reasonText) {
 			showNotification(reasonText || ("Side change! " + game.batting.name + " now batting."), 1500);
 		}
 
-		return;
+		return "side-change";
 	}
 
 	game.halfInning = "top";
@@ -191,15 +223,9 @@ function endHalfInning(pitcherKey, reasonText) {
 	game.fielding = temp;
 
 	setCurrentBatterIndex(getCurrentBatterIndex());
-
 	game.inning++;
 
 	if (game.inning > 3) {
-		if (Number(game.team1Score || 0) !== Number(game.team2Score || 0)) {
-			finalizeCompletedGame();
-			return;
-		}
-
 		const overtime = ensureOvertimeState();
 		overtime.active = true;
 		overtime.round = getOvertimeRoundForCurrentInning();
@@ -210,9 +236,10 @@ function endHalfInning(pitcherKey, reasonText) {
 			reasonText || `Tie game after regulation — OT ${overtime.round} begins with 1 out and a runner on 2nd.`
 		);
 
-		return;
+		return "overtime";
 	}
 
 	updatePitcherSelect();
 	showNotification(reasonText || ("Inning " + game.inning + " starting! " + game.batting.name + " batting."), 1500);
+	return "side-change";
 }
