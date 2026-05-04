@@ -373,11 +373,23 @@ async function finishAccessGrant() {
   try { clearAuthBootFlagsFromUrl(); } catch (e) {}
   document.getElementById("accessGate").classList.add("hidden");
   setPublicViewOnlyMode(false);
-  showMainMenu();
-  try { await maybeOfferLiveGameResume(); } catch (e) { console.warn("resume prompt failed:", e); }
+
+  let restored = false;
+  try {
+    restored = await maybeOfferLiveGameResume({ force: true, auto: true, source: "access-grant" });
+  } catch (e) {
+    console.warn("resume failed:", e);
+  }
+
+  if (!restored) showMainMenu();
 }
 
 function refreshVisibleReadOnlyScreens() {
+  if (typeof hasLocalLiveGameToProtect === "function" && hasLocalLiveGameToProtect()) {
+    try { refreshLiveGameStatusDisplay(); } catch (e) {}
+    return;
+  }
+
   try {
     const seasonStatsScreen = document.getElementById("seasonStatsScreen");
     const scheduleScreen = document.getElementById("scheduleScreen");
@@ -394,6 +406,11 @@ function refreshVisibleReadOnlyScreens() {
 }
 
 function refreshPublicViewInBackground() {
+  if (typeof hasLocalLiveGameToProtect === "function" && hasLocalLiveGameToProtect()) {
+    try { markLiveGameServerSyncPending("Public Refresh Delayed"); } catch (e) {}
+    return;
+  }
+
   setTimeout(async () => {
     try {
       await refreshPublicViewData({ quiet: true });
@@ -513,6 +530,17 @@ async function evaluateAccess() {
 
   CURRENT_EMAIL = (session?.user?.email || "").trim();
 
+  const hasSavedLiveGame = typeof hasValidLiveGameAutosave === "function" && hasValidLiveGameAutosave();
+  if (hasSavedLiveGame) {
+    document.getElementById("accessGate").classList.add("hidden");
+    setPublicViewOnlyMode(false);
+    if (session) setLeagueUnlocked(true);
+
+    const restored = await maybeOfferLiveGameResume({ force: true, auto: true, source: "access-evaluate" });
+    await updateAuthUI();
+    if (restored) return;
+  }
+
   if (!session) {
     setLeagueUnlocked(false);
     setPublicViewOnlyMode(true);
@@ -540,9 +568,7 @@ async function evaluateAccess() {
     return;
   }
 
-  // Normal boot behavior:
-  // always land on the public-first screen, even if this browser
-  // still has a remembered Supabase session from earlier.
+  // Normal boot behavior stays public-first only when there is no local live game.
   setPublicViewOnlyMode(true);
   document.getElementById("accessGate").classList.add("hidden");
   showPublicMenu();
@@ -707,12 +733,15 @@ function buildEmailRedirectUrl() {
 console.log("INIT STARTED");
 window.__INIT_STARTED = true;
 
-  // Force a safe public-first UI immediately,
-  // before any async startup work can stall.
+  // Force a safe public-first UI immediately only when no local live game exists.
+  // A saved live game must get first priority on iPhone return/reload.
+  const hasSavedLiveGameAtBoot = typeof hasValidLiveGameAutosave === "function" && hasValidLiveGameAutosave();
   try { hideAllScreens(); } catch (e) {}
   try { document.getElementById("accessGate")?.classList.add("hidden"); } catch (e) {}
-  try { setPublicViewOnlyMode(true); } catch (e) {}
-  try { showPublicMenu(); } catch (e) {}
+  if (!hasSavedLiveGameAtBoot) {
+    try { setPublicViewOnlyMode(true); } catch (e) {}
+    try { showPublicMenu(); } catch (e) {}
+  }
 
   // Ensure Supabase is initialized before any protected startup logic runs.
   if (!(await initializeSupabaseClient())) return;
