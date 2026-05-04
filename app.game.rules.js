@@ -19,7 +19,18 @@ function ensureOvertimeState() {
 }
 
 function isOvertimeActive() {
-	return !!game?.overtime?.active || Number(game?.inning || 0) > 3;
+	if (!game) return false;
+
+	const inning = Number(game.inning || 0);
+	if (inning <= 3) {
+		if (game.overtime?.active) {
+			game.overtime.active = false;
+			game.overtime.round = 0;
+		}
+		return false;
+	}
+
+	return true;
 }
 
 function getOvertimeRoundForCurrentInning() {
@@ -42,6 +53,24 @@ function getLastBatterInfoForCurrentTeam() {
 function startOvertimeHalfInning(reasonText = "") {
 	if (!game) return false;
 
+	const inning = Number(game.inning || 0);
+	const team1Score = Number(game.team1Score || 0);
+	const team2Score = Number(game.team2Score || 0);
+
+	if (inning <= 3) {
+		if (game.overtime) {
+			game.overtime.active = false;
+			game.overtime.round = 0;
+		}
+		return false;
+	}
+
+	if (game.halfInning === "top" && team1Score !== team2Score) {
+		if (game.overtime) game.overtime.active = false;
+		finalizeCompletedGame();
+		return false;
+	}
+
 	const overtime = ensureOvertimeState();
 	overtime.active = true;
 	overtime.round = getOvertimeRoundForCurrentInning();
@@ -60,18 +89,18 @@ function startOvertimeHalfInning(reasonText = "") {
 
 	if (runnerName) {
 		const runner = createBaseRunner(runnerName, false, game.batting, {
-	pitcherKey: null,
-	pitcherName: null,
-	teamName: game.fielding?.name || ""
-});
+			pitcherKey: null,
+			pitcherName: null,
+			teamName: game.fielding?.name || ""
+		});
 
-runner.responsiblePitcherKey = null;
-runner.responsiblePitcherName = null;
-runner.awaitingOvertimePitcherResponsibility = true;
-runner.isAutomaticOvertimeRunner = true;
-runner.overtimeRound = overtime.round;
-runner.overtimeHalf = game.halfInning;
-runner.battingOrderIndex = runnerInfo.runnerIndex;
+		runner.responsiblePitcherKey = null;
+		runner.responsiblePitcherName = null;
+		runner.awaitingOvertimePitcherResponsibility = true;
+		runner.isAutomaticOvertimeRunner = true;
+		runner.overtimeRound = overtime.round;
+		runner.overtimeHalf = game.halfInning;
+		runner.battingOrderIndex = runnerInfo.runnerIndex;
 
 		game.bases.second = runner;
 
