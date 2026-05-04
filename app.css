@@ -256,6 +256,33 @@
     background: #2a1515;
   }
 
+.live-sync-tag.status-pending::before,
+.sync-tag.status-pending::before {
+	content: "⏳";
+	display: inline-block;
+	margin-right: 6px;
+	animation: savingSpin 1s linear infinite;
+}
+
+.live-sync-tag.status-synced::before,
+.sync-tag.status-synced::before {
+	content: "✓";
+	display: inline-block;
+	margin-right: 6px;
+}
+
+.live-sync-tag.status-error::before,
+.sync-tag.status-error::before {
+	content: "⚠";
+	display: inline-block;
+	margin-right: 6px;
+}
+
+@keyframes savingSpin {
+	from { transform: rotate(0deg); }
+	to { transform: rotate(360deg); }
+}
+
 .season-stats-hub-buttons {
 	display: grid;
 	grid-template-columns: repeat(2, minmax(0, 1fr));
