@@ -168,6 +168,11 @@ function buildLiveGameSavePayload() {
 }
 
 function persistLiveGameAutosave(reason = "change") {
+	if (game?._finalizeInProgress || game?._gameCompletePendingSave) {
+		try { localStorage.removeItem(LIVE_GAME_SAVE_KEY); } catch (e) {}
+		return false;
+	}
+
 	const payload = buildLiveGameSavePayload();
 	if (!payload) return false;
 	try {
@@ -198,6 +203,7 @@ function hasValidLiveGameAutosave(snapshot = null) {
 	const saved = snapshot || readLiveGameAutosave();
 	if (!saved?.game) return false;
 	const savedGame = saved.game;
+		if (savedGame._finalizeInProgress || savedGame._gameCompletePendingSave) return false;
 	const hasTeams = !!savedGame.team1?.name && !!savedGame.team2?.name;
 	const hasGameState = Number.isInteger(Number(savedGame.inning)) && (savedGame.halfInning === "top" || savedGame.halfInning === "bottom");
 	const hasLock = !!(saved.lockId || savedGame._lockId || savedGame._lockInfo?.lockId);
