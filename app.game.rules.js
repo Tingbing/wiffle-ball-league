@@ -167,32 +167,44 @@ function endHalfInning(pitcherKey, reasonText) {
 	const endingBottomHalf = endingHalf === "bottom";
 	const regulationOrLaterComplete = endingBottomHalf && endingInning >= 3;
 
-	game.bases.first = null;
-	game.bases.second = null;
-	game.bases.third = null;
-	game.outs = 0;
-	game.halfInningRuns = 0;
-
 	// Critical resume-safety rule:
 	// A non-tied game is complete at the end of the bottom half of inning 3+.
-	// Do NOT advance to inning 4 first. If the user leaves during the async save,
-	// inning 4 must not be autosaved and restored as fake overtime.
+	// Do NOT clear bases, reset outs, or advance to inning 4 before the completed
+	// state has been saved locally. If the user leaves during the async save,
+	// the app must restore this completed game and retry finalizing.
 	if (regulationOrLaterComplete && !scoreIsTied) {
 		if (game.overtime) {
 			game.overtime.active = false;
 			game.overtime.round = 0;
 		}
 
+		game.outs = 2;
 		game._gameCompletePendingSave = true;
+		pendingBattingResult = null;
+
+		try { persistLiveGameAutosave("game-complete-pending-save"); } catch (e) {}
+		try { setLiveActionControlsBusy(true); } catch (e) {}
+		showNotification("Game complete. Saving result…", 1800);
 
 		Promise.resolve(finalizeCompletedGame()).catch(error => {
 			console.error("Finalize completed game failed:", error);
-			game._gameCompletePendingSave = false;
-			showNotification("Game is complete, but saving had an error. Try syncing again.", 2500);
+			if (game) {
+				game._finalizeInProgress = false;
+				game._gameCompletePendingSave = true;
+			}
+			try { setLiveActionControlsBusy(false); } catch (e) {}
+			try { persistLiveGameAutosave("finalize-failed"); } catch (e) {}
+			showNotification("Game is complete, but saving had an error. Try again before leaving.", 3000);
 		});
 
 		return "finalizing";
 	}
+
+	game.bases.first = null;
+	game.bases.second = null;
+	game.bases.third = null;
+	game.outs = 0;
+	game.halfInningRuns = 0;
 
 	if (endingHalf === "top") {
 		game.halfInning = "bottom";
