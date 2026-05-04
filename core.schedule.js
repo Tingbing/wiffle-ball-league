@@ -1601,7 +1601,7 @@ function populateScheduleGameSelect() {
 }
 
 async function startSelectedScheduledGame() {
-	return await runGameStartAction(async () => {
+	return await runGameStartAction(async (startActionId) => {
 		const guard = ensureScheduleUpToDateForSelection();
 		if (!guard.ok) {
 			alert(guard.selectionMessage || "Scheduled game selection is currently unavailable.");
@@ -1648,10 +1648,10 @@ async function startSelectedScheduledGame() {
 		}
 
 		return await beginLockedGame(t1, t2, { dayIndex, seriesIndex, seriesGameIndex }, {
-			type: "scheduled",
-			dayNumber: Number(dayObj?.day || (dayIndex + 1)),
-			seriesNumber: Number(seriesEntry?.gameNumber || (seriesIndex + 1)),
-			seriesGameNumber: Number(seriesGame?.gameNumber || (seriesGameIndex + 1))
-		});
+	type: "scheduled",
+	dayNumber: Number(dayObj?.day || (dayIndex + 1)),
+	seriesNumber: Number(seriesEntry?.gameNumber || (seriesIndex + 1)),
+	seriesGameNumber: Number(seriesGame?.gameNumber || (seriesGameIndex + 1))
+}, null, startActionId);
 	});
 }
