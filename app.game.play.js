@@ -784,10 +784,10 @@ if (!isOvertimeActive() && game.inning <= 2 && game.halfInningRuns >= 6) {
 }
 
 	if (game.outs >= 2) {
-		endHalfInning(pitcherKey, null);
+		const transitionResult = endHalfInning(pitcherKey, null);
 		pendingBattingResult = null;
 		keepLiveGameSectionsEnabled();
-		updateGameScreen();
+		if (transitionResult !== "finalizing") updateGameScreen();
 		return;
 	}
 
