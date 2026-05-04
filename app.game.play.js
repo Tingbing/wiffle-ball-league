@@ -127,21 +127,21 @@ async function beginLockedGame(t1, t2, scheduleRef = null, extraLockDetails = {}
 		);
 
 	if (!freshSeriesEntry || !freshSeriesGame || !freshTeamsMatch) {
-		await releaseGameLock(attempt.lockId, { quiet: true });
+		await releaseGameLockWithTimeout(attempt.lockId, { quiet: true, timeoutMs: 2500 });
 		applyServerSeasonRow(attempt.row, { source: "lock-acquire" });
 		alert("That scheduled slot changed on another device. The game was not started. Sync the schedule and pick the game again.");
 		return false;
 	}
 
 	if (freshSeriesGame?.result) {
-		await releaseGameLock(attempt.lockId, { quiet: true });
+		await releaseGameLockWithTimeout(attempt.lockId, { quiet: true, timeoutMs: 2500 });
 		applyServerSeasonRow(attempt.row, { source: "lock-acquire" });
 		alert("That game was already recorded on another device.");
 		return false;
 	}
 
 	if (freshSeriesGame?.skipped) {
-		await releaseGameLock(attempt.lockId, { quiet: true });
+		await releaseGameLockWithTimeout(attempt.lockId, { quiet: true, timeoutMs: 2500 });
 		applyServerSeasonRow(attempt.row, { source: "lock-acquire" });
 		alert("That game was marked not played because the series ended early.");
 		return false;
@@ -152,58 +152,168 @@ async function beginLockedGame(t1, t2, scheduleRef = null, extraLockDetails = {}
 	return true;
 }
 
-async function startGame() {
-	let validTeams = league.teams.filter(t => t.players.length > 0);
+let liveGameActionInProgress = false;
+let gameStartInProgress = false;
 
-	let team1Index = parseInt(document.getElementById("team1Select").value);
-	let team2Index = parseInt(document.getElementById("team2Select").value);
+function setLiveActionControlsBusy(isBusy) {
+	const selectors = [
+		"#gameScreen .live-button-grid button",
+		"#gameScreen .live-top-tools button:not(.undo-button)",
+		"#gameScreen .live-runner-out-card button",
+		"#gameScreen .live-manual-controls button",
+		"#gameScreen #pitcherSelect",
+		"#gameScreen #manualRunnerSelect",
+		"#gameScreen #manualTargetBaseSelect"
+	].join(",");
 
-	if (team1Index === team2Index) {
-		alert("Please select two different teams!");
-		return;
+	document.querySelectorAll(selectors).forEach(el => {
+		if (!el) return;
+		if (isBusy) {
+			if (!el.disabled) el.dataset.liveWasEnabled = "1";
+			el.disabled = true;
+		} else if (el.dataset.liveWasEnabled === "1") {
+			el.disabled = false;
+			delete el.dataset.liveWasEnabled;
+		}
+	});
+}
+
+function runLiveGameAction(actionLabel, fn) {
+	if (!game) return false;
+	if (liveGameActionInProgress || playInputLock) {
+		showNotification("Wait for the current play to finish.", 900);
+		return false;
 	}
 
-	let t1 = validTeams[team1Index];
-	let t2 = validTeams[team2Index];
+	liveGameActionInProgress = true;
+	playInputLock = true;
+	setLiveActionControlsBusy(true);
 
-	await beginLockedGame(t1, t2, null, { type: "manual" });
+	try {
+		const result = fn();
+		try { persistLiveGameAutosave(actionLabel || "play"); } catch (e) {}
+		return result;
+	} catch (error) {
+		console.error("Live game action failed:", error);
+		try { persistLiveGameAutosave("error"); } catch (e) {}
+		showNotification("That play hit an app error. Local save was kept.", 2200);
+		return false;
+	} finally {
+		setTimeout(() => {
+			liveGameActionInProgress = false;
+			playInputLock = false;
+			setLiveActionControlsBusy(false);
+		}, 220);
+	}
+}
+
+async function runGameStartAction(fn) {
+	if (gameStartInProgress) {
+		showNotification("Already starting a game. Please wait.", 1000);
+		return false;
+	}
+	gameStartInProgress = true;
+
+	const manualBtn = document.getElementById("manualStartGameBtn");
+	const scheduledBtn = document.getElementById("startScheduledGameBtn");
+	if (manualBtn) manualBtn.disabled = true;
+	if (scheduledBtn) scheduledBtn.disabled = true;
+
+	try {
+		const result = await withTimeout(fn(), 7000, "__start_timeout__");
+		if (result === "__start_timeout__") {
+			alert("Starting the game is taking too long. The app did not start a new game. Sync/reload and try again.");
+			return false;
+		}
+		return result;
+	} catch (error) {
+		console.error("Start game action failed:", error);
+		alert("The game could not start cleanly. No game was recorded. Try again after syncing/reloading.");
+		return false;
+	} finally {
+		gameStartInProgress = false;
+		if (!game) {
+			if (manualBtn) manualBtn.disabled = false;
+			if (scheduledBtn) scheduledBtn.disabled = false;
+		}
+	}
+}
+
+async function startGame() {
+	return await runGameStartAction(async () => {
+		let validTeams = league.teams.filter(t => t.players.length > 0);
+
+		let team1Index = parseInt(document.getElementById("team1Select").value);
+		let team2Index = parseInt(document.getElementById("team2Select").value);
+
+		if (team1Index === team2Index) {
+			alert("Please select two different teams!");
+			return false;
+		}
+
+		let t1 = validTeams[team1Index];
+		let t2 = validTeams[team2Index];
+
+		return await beginLockedGame(t1, t2, null, { type: "manual" });
+	});
 }
 
 async function endGameEarly() {
-	if (!game) return;
+	if (!game && !activeGameLock) return;
 	if (!confirm("End this game early? All progress for this game will be discarded.")) return;
 
-	const released = await releaseGameLock(game._lockId || activeGameLock?.lockId || null, { quiet: true });
-	if (!released) {
-		alert("Could not clear the live-game lock yet. Stay in the game and try End Game Early again.");
-		return;
-	}
+	const lockId = game?._lockId || activeGameLock?.lockId || null;
 
 	resetLiveGameSessionState();
+	try { persistActiveGameLock(null); } catch (e) {}
+	try { localStorage.removeItem(ACTIVE_GAME_LOCK_KEY); } catch (e) {}
+
 	showMainMenu();
+	showNotification("Game ended locally. Clearing server lock in the background…", 1800);
+
+	const released = await releaseGameLockWithTimeout(lockId, { quiet: true, timeoutMs: 2500 });
+	if (!released) {
+		alert("The game was cleared on this device. If another device still sees a locked game, use Emergency End Game from Game Setup after syncing.");
+		return false;
+	}
+
 	alert("Game ended early. No stats, schedule results, or standings were saved.");
+	return true;
 }
 
 async function emergencyEndGameFromSetup() {
-	if (!activeGameLock && !game) {
+	if (!activeGameLock && !game && !hasValidLiveGameAutosave()) {
 		alert("There is no active game to clear right now.");
 		return;
 	}
 
 	if (!confirm("Emergency End Game will clear the current live-game lock and discard the active game. Use this only if a game got stuck. Continue?")) return;
 
-	const released = await releaseGameLock(game?._lockId || activeGameLock?.lockId || null, { quiet: true });
-	if (!released) {
-		alert("Could not clear the live-game lock. Try again while signed in.");
-		return;
-	}
+	const lockId = game?._lockId || activeGameLock?.lockId || null;
 
 	resetLiveGameSessionState();
+	try { persistActiveGameLock(null); } catch (e) {}
+	try { localStorage.removeItem(ACTIVE_GAME_LOCK_KEY); } catch (e) {}
+
 	refreshGameLockUI();
+	showMainMenu();
+	showNotification("Stuck game cleared locally. Clearing server lock in the background…", 1800);
+
+	const released = await releaseGameLockWithTimeout(lockId, { quiet: true, timeoutMs: 2500 });
+	if (!released) {
+		alert("The stuck game was cleared on this device. If the server still shows a lock, sync/reload and press Emergency End Game once more.");
+		return false;
+	}
+
 	alert("The stuck live game was cleared. You can start a new game now.");
+	return true;
 }
 
 function undoLastAction() {
+	return runLiveGameAction("undo", () => applyUndoLastAction());
+}
+
+function applyUndoLastAction() {
   if (gameHistory.length > 0) {
     let previousState = gameHistory.pop();
     restoreGameState(previousState);
@@ -223,6 +333,10 @@ updatePitcherSelect();
 }
 
 function executeManualRunnerMove() {
+	return runLiveGameAction("manual runner move", () => applyExecuteManualRunnerMove());
+}
+
+function applyExecuteManualRunnerMove() {
 	if (!game) return;
 
 	const fromBase = document.getElementById("manualRunnerSelect")?.value;
@@ -304,6 +418,10 @@ function manualScoreFromThird() {
 }
 
 function clearBases() {
+	return runLiveGameAction("clear bases", () => applyClearBases());
+}
+
+function applyClearBases() {
 	if (!game) return;
 
 	gameHistory.push(saveGameState());
@@ -318,41 +436,41 @@ function clearBases() {
 }
 
 function recordBattingResult(result) {
-  if (!game || playInputLock) return;
+	return runLiveGameAction("play", () => {
+		if (result === "doublePlay" && countBaseRunners() < 2) {
+			showNotification("Need 2+ runners on base for a double play", 1500);
+			return false;
+		}
 
-  if (result === "doublePlay" && countBaseRunners() < 2) {
-    showNotification("Need 2+ runners on base for a double play", 1500);
-    return;
-  }
+		const batterIndex = getCurrentBatterIndex();
+		let currentBatter = game.batting.players[batterIndex];
+		let batterKey = getGameStatsKey(game.batting, currentBatter);
 
-  playInputLock = true;
-  try {
- const batterIndex = getCurrentBatterIndex();
-let currentBatter = game.batting.players[batterIndex];
-    let batterKey = getGameStatsKey(game.batting, currentBatter);
+		pendingBattingResult = {
+			result: result,
+			batter: currentBatter,
+			batterKey: batterKey
+		};
 
-    pendingBattingResult = {
-      result: result,
-      batter: currentBatter,
-      batterKey: batterKey
-    };
+		lastPlay = {
+			battingTeamName: game.batting.name,
+			fieldingTeamName: game.fielding.name,
+			pitcherIndex: parseInt(document.getElementById("pitcherSelect").value),
+			batterKey: batterKey,
+			batterName: currentBatter,
+			result: result
+		};
 
-    lastPlay = {
-      battingTeamName: game.batting.name,
-      fieldingTeamName: game.fielding.name,
-      pitcherIndex: parseInt(document.getElementById("pitcherSelect").value),
-      batterKey: batterKey,
-      batterName: currentBatter,
-      result: result
-    };
-
-    recordPitchingResult("clean");
-  } finally {
-    setTimeout(() => { playInputLock = false; }, 180);
-  }
+		recordPitchingResult("clean");
+		return true;
+	});
 }
 
 function confirmError() {
+	return runLiveGameAction("error", () => applyConfirmError());
+}
+
+function applyConfirmError() {
 	if (!lastPlay) return;
 
 	const fielders = Array.isArray(lastPlay.fieldingPlayers) && lastPlay.fieldingPlayers.length
