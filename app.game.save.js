@@ -133,8 +133,7 @@ if (postseasonRef) {
 		if (slot.status === "final" && !existingEntry) {
 			alert("That postseason game was already recorded. Nothing new was saved.");
 			clearLiveGameAutosave();
-			return await releaseGameLock(game?._lockId || activeGameLock?.lockId || null, { quiet: true });
-		}
+return await releaseGameLockWithTimeout(game?._lockId || activeGameLock?.lockId || null, { quiet: true, timeoutMs: 2500 });		}
 
 		const logId = existingEntry?.id || completedEntryId;
 		const postseasonApplied = applyPostseasonOutcomeOnce(postseasonRef.slotId, logId);
@@ -156,8 +155,9 @@ if (postseasonRef) {
 		saveSeason();
 		clearLiveGameAutosave();
 		queueServerSync("game", { immediate: true });
-		return await releaseGameLock(game?._lockId || activeGameLock?.lockId || null, { quiet: true });
-	}
+return await releaseGameLockWithTimeout(game?._lockId || activeGameLock?.lockId || null, { quiet: true, timeoutMs: 2500 });
+	
+}
 
 	const scheduledRef =
 		game?._scheduleRef &&
@@ -181,9 +181,9 @@ if (postseasonRef) {
 			const latestSeriesGame = latestSeriesEntry?.gamesInSeries?.[scheduledRef.seriesGameIndex];
 
 			if ((latestSeriesGame?.result || latestSeriesGame?.skipped) && !existingEntry) {
-				alert("That scheduled game was already finalized on the server. Nothing new was saved.");
+			alert("That scheduled game was already finalized on the server. Nothing new was saved.");
 				clearLiveGameAutosave();
-				return await releaseGameLock(game?._lockId || activeGameLock?.lockId || null, { quiet: true });
+return await releaseGameLockWithTimeout(game?._lockId || activeGameLock?.lockId || null, { quiet: true, timeoutMs: 2500 });
 			}
 		} catch (e) {
 			console.warn("Could not verify scheduled game before finalizing:", e);
@@ -210,7 +210,7 @@ if (postseasonRef) {
 		if (scheduledSeriesGame.result && !existingEntry) {
 			alert("That scheduled game was already recorded. Nothing new was saved.");
 			clearLiveGameAutosave();
-			return await releaseGameLock(game?._lockId || activeGameLock?.lockId || null, { quiet: true });
+return await releaseGameLockWithTimeout(game?._lockId || activeGameLock?.lockId || null, { quiet: true, timeoutMs: 2500 });
 		}
 	}
 	if (existingEntry) {
@@ -225,7 +225,7 @@ if (postseasonRef) {
 		}
 		clearLiveGameAutosave();
 		queueServerSync("game", { immediate: true });
-		return await releaseGameLock(game?._lockId || activeGameLock?.lockId || null, { quiet: true });
+return await releaseGameLockWithTimeout(game?._lockId || activeGameLock?.lockId || null, { quiet: true, timeoutMs: 2500 });
 	}
 
 	for (let key in game.gameStats) {
@@ -267,8 +267,7 @@ if (postseasonRef) {
 	saveSeason();
 	clearLiveGameAutosave();
 	queueServerSync("game", { immediate: true });
-	return await releaseGameLock(game?._lockId || activeGameLock?.lockId || null, { quiet: true });
-}
+return await releaseGameLockWithTimeout(game?._lockId || activeGameLock?.lockId || null, { quiet: true, timeoutMs: 2500 });}
 
 	function displayGameOver() {
 		showGameOver();
