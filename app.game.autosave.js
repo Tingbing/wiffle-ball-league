@@ -1,10 +1,99 @@
 // Wiffle Ball League - app.game.autosave.js
 // Split from the source-of-truth app.game.js. Load after app.core.js in the required order.
-// Purpose: Live-game crash/reload autosave, resume, and UI-state restore helpers.
+// Purpose: Live-game crash/reload autosave, resume, lifecycle protection, and UI-state restore helpers.
 
 const LIVE_GAME_SAVE_KEY = "wiggleLiveGameStateV1";
+const LIVE_GAME_STATUS_KEY = "wiggleLiveGameStatusV1";
 
 let liveGameResumePromptShown = false;
+let liveGameRestoreInProgress = false;
+let liveGameLocalAuthoritative = false;
+let liveGameLifecycleWired = false;
+let lastLiveGameLocalSaveAt = null;
+let lastLiveGameServerSyncAt = null;
+let liveGameStatusState = "idle";
+
+function getLiveStatusDefaultMessage(state) {
+	if (state === "ok") return "Local Save OK";
+	if (state === "pending") return "Local Save OK • Sync Pending";
+	if (state === "synced") return "Synced";
+	if (state === "restored") return "Restored Saved Game";
+	if (state === "error") return "Server Sync Delayed";
+	if (state === "stale") return "Viewing Stale Read-Only Data";
+	return "";
+}
+
+function setLiveGameStatus(state, message = "", options = {}) {
+	liveGameStatusState = state || "idle";
+	const text = message || getLiveStatusDefaultMessage(liveGameStatusState);
+	const shouldShow = !!text && liveGameStatusState !== "idle";
+	const ids = ["syncDataTag", "liveSyncStatusTag"];
+
+	ids.forEach(id => {
+		const el = document.getElementById(id);
+		if (!el) return;
+		el.innerText = text;
+		el.classList.toggle("hidden", !shouldShow);
+		el.classList.remove("status-ok", "status-pending", "status-synced", "status-restored", "status-error", "status-stale");
+		if (shouldShow) el.classList.add("status-" + liveGameStatusState);
+	});
+
+	try {
+		localStorage.setItem(LIVE_GAME_STATUS_KEY, JSON.stringify({
+			state: liveGameStatusState,
+			message: text,
+			updatedAt: new Date().toISOString(),
+			lastLocalSaveAt: lastLiveGameLocalSaveAt,
+			lastServerSyncAt: lastLiveGameServerSyncAt
+		}));
+	} catch (e) {}
+
+	if (options.notify && text) {
+		try { showNotification(text, options.duration || 1600); } catch (e) {}
+	}
+}
+
+function refreshLiveGameStatusDisplay() {
+	if (game || hasValidLiveGameAutosave()) {
+		setLiveGameStatus(liveGameStatusState === "idle" ? "pending" : liveGameStatusState);
+		return;
+	}
+
+	try {
+		const raw = localStorage.getItem(LIVE_GAME_STATUS_KEY);
+		const saved = raw ? JSON.parse(raw) : null;
+		if (saved?.state && saved?.message) {
+			setLiveGameStatus(saved.state, saved.message);
+		}
+	} catch (e) {}
+}
+
+function markLiveGameServerSyncPending(reason = "") {
+	if (game || hasValidLiveGameAutosave()) {
+		setLiveGameStatus("pending", reason ? `Local Save OK • Sync Pending (${reason})` : "Local Save OK • Sync Pending");
+	}
+}
+
+function markLiveGameServerSyncSuccess() {
+	lastLiveGameServerSyncAt = new Date().toISOString();
+	if (game || hasValidLiveGameAutosave()) {
+		setLiveGameStatus("pending", "Local Save OK • Server Backup Pending");
+	} else {
+		setLiveGameStatus("synced", "Synced");
+	}
+}
+
+function markLiveGameServerSyncDelayed() {
+	if (game || hasValidLiveGameAutosave()) {
+		setLiveGameStatus("error", "Server Sync Delayed • Local Save OK");
+	} else {
+		setLiveGameStatus("error", "Server Sync Delayed");
+	}
+}
+
+function markReadOnlyDataStale() {
+	setLiveGameStatus("stale", "Viewing Stale Read-Only Data");
+}
 
 function captureSelectedPitcherState() {
 	if (!game) return;
@@ -64,8 +153,10 @@ function buildLiveGameSavePayload() {
 	if (!game) return null;
 	captureSelectedPitcherState();
 	return {
-		version: 1,
+		version: 2,
 		savedAt: new Date().toISOString(),
+		localRevision: Date.now(),
+		localAuthoritative: true,
 		lockId: game._lockId || activeGameLock?.lockId || null,
 		gameInstanceId: game._gameInstanceId || null,
 		game: cloneJson(game),
@@ -76,14 +167,18 @@ function buildLiveGameSavePayload() {
 	};
 }
 
-function persistLiveGameAutosave() {
+function persistLiveGameAutosave(reason = "change") {
 	const payload = buildLiveGameSavePayload();
 	if (!payload) return false;
 	try {
 		localStorage.setItem(LIVE_GAME_SAVE_KEY, JSON.stringify(payload));
+		lastLiveGameLocalSaveAt = payload.savedAt;
+		liveGameLocalAuthoritative = true;
+		setLiveGameStatus("pending", reason === "lifecycle" ? "Local Save OK • Background Safe" : "Local Save OK • Sync Pending");
 		return true;
 	} catch (e) {
 		console.warn("live game autosave failed:", e);
+		setLiveGameStatus("error", "Local Save Failed", { notify: true, duration: 2200 });
 		return false;
 	}
 }
@@ -99,46 +194,88 @@ function readLiveGameAutosave() {
 	}
 }
 
+function hasValidLiveGameAutosave(snapshot = null) {
+	const saved = snapshot || readLiveGameAutosave();
+	if (!saved?.game) return false;
+	const savedGame = saved.game;
+	const hasTeams = !!savedGame.team1?.name && !!savedGame.team2?.name;
+	const hasGameState = Number.isInteger(Number(savedGame.inning)) && (savedGame.halfInning === "top" || savedGame.halfInning === "bottom");
+	const hasLock = !!(saved.lockId || savedGame._lockId || savedGame._lockInfo?.lockId);
+	return hasTeams && hasGameState && hasLock;
+}
+
+function hasLocalLiveGameToProtect() {
+	return !!game || hasValidLiveGameAutosave();
+}
+
+function isLiveGameRestoreInProgress() {
+	return !!liveGameRestoreInProgress;
+}
+
+function shouldProtectLiveGameFromServerApply(source = "") {
+	if (isLiveGameRestoreInProgress()) return true;
+	if (game) return true;
+	if (!hasValidLiveGameAutosave()) return false;
+	return ["public-view", "hydrate", "realtime", "sync-race", "conflict-recovery", "startup", "menu-refresh"].includes(source);
+}
+
 function clearLiveGameAutosave() {
 	try { localStorage.removeItem(LIVE_GAME_SAVE_KEY); } catch (e) {}
+	liveGameLocalAuthoritative = false;
+	if (!game) setLiveGameStatus("synced", "Synced");
 }
 
-function resumeLiveGameFromAutosave(snapshot) {
+function resumeLiveGameFromAutosave(snapshot, options = {}) {
 	if (!snapshot?.game) return false;
 
-	game = cloneJson(snapshot.game);
-	gameHistory = Array.isArray(snapshot.gameHistory) ? snapshot.gameHistory.slice() : [];
-	pendingBattingResult = cloneJson(snapshot.pendingBattingResult) || null;
-	lastPlay = cloneJson(snapshot.lastPlay) || null;
-	playInputLock = false;
+	liveGameRestoreInProgress = true;
+	try {
+		try { setPublicViewOnlyMode(false); } catch (e) {}
+		try { setLeagueUnlocked(true); } catch (e) {}
+		try { document.getElementById("accessGate")?.classList.add("hidden"); } catch (e) {}
 
-	game._lockId = game._lockId || snapshot.lockId || activeGameLock?.lockId || null;
-	game.bases = game.bases || { first: null, second: null, third: null };
-	game.gameStats = game.gameStats || {};
-	game.currentInningPitchers = game.currentInningPitchers || {};
-	game.batterIndexByTeam = game.batterIndexByTeam || {
-	[game.team1?.name || "Team 1"]: 0,
-	[game.team2?.name || "Team 2"]: 0
-};
-game.overtime = normalizeOvertimeState(game.overtime);
+		game = cloneJson(snapshot.game);
+		gameHistory = Array.isArray(snapshot.gameHistory) ? snapshot.gameHistory.slice() : [];
+		pendingBattingResult = cloneJson(snapshot.pendingBattingResult) || null;
+		lastPlay = cloneJson(snapshot.lastPlay) || null;
+		playInputLock = false;
 
-keepLiveGameSectionsEnabled();
-showGame();
-updatePitcherSelect();
-ensureOvertimeHalfSetupAfterResume();
-updateGameScreen();
-applyLiveGameUiState(snapshot.uiState || {});
-	document.getElementById("undoButton").disabled = gameHistory.length === 0;
-	persistLiveGameAutosave();
-	showNotification("Recovered saved live game", 1500);
-	return true;
+		game._lockId = game._lockId || snapshot.lockId || activeGameLock?.lockId || null;
+		if (game._lockInfo?.lockId) persistActiveGameLock(game._lockInfo);
+		game.bases = game.bases || { first: null, second: null, third: null };
+		game.gameStats = game.gameStats || {};
+		game.currentInningPitchers = game.currentInningPitchers || {};
+		game.batterIndexByTeam = game.batterIndexByTeam || {
+			[game.team1?.name || "Team 1"]: 0,
+			[game.team2?.name || "Team 2"]: 0
+		};
+		game.overtime = normalizeOvertimeState(game.overtime);
+
+		keepLiveGameSectionsEnabled();
+		showGame();
+		updatePitcherSelect();
+		ensureOvertimeHalfSetupAfterResume();
+		updateGameScreen();
+		applyLiveGameUiState(snapshot.uiState || {});
+		document.getElementById("undoButton").disabled = gameHistory.length === 0;
+		persistLiveGameAutosave("restore");
+		setLiveGameStatus("restored", "Restored Saved Game", { notify: true, duration: 1800 });
+		return true;
+	} finally {
+		liveGameRestoreInProgress = false;
+	}
 }
 
-async function maybeOfferLiveGameResume() {
-	if (game || isPublicViewOnlyMode()) return;
+async function maybeOfferLiveGameResume(options = {}) {
+	const { force = false, auto = false, source = "resume" } = options;
+	if (game) {
+		refreshLiveGameStatusDisplay();
+		return true;
+	}
 
 	const snapshot = readLiveGameAutosave();
-	if (!snapshot?.game) return;
+	if (!hasValidLiveGameAutosave(snapshot)) return false;
+	if (isPublicViewOnlyMode() && !force && !auto) return false;
 
 	const snapshotLockId =
 		snapshot.lockId ||
@@ -148,32 +285,16 @@ async function maybeOfferLiveGameResume() {
 
 	if (!snapshotLockId) {
 		clearLiveGameAutosave();
-		return;
+		return false;
 	}
 
 	let resolvedLock = activeGameLock || null;
 
-	// First try to recover the lock from the saved snapshot itself
 	if ((!resolvedLock || resolvedLock.lockId !== snapshotLockId) && snapshot.game?._lockInfo?.lockId === snapshotLockId) {
 		persistActiveGameLock(snapshot.game._lockInfo);
 		resolvedLock = snapshot.game._lockInfo;
 	}
 
-	// Then try server state if needed
-	if ((!resolvedLock || resolvedLock.lockId !== snapshotLockId) && typeof fetchSeasonRowFromServer === "function") {
-		try {
-			const row = await fetchSeasonRowFromServer({ quiet: true });
-			const serverLock = row?.active_game_lock || null;
-			if (serverLock?.lockId === snapshotLockId) {
-				persistActiveGameLock(serverLock);
-				resolvedLock = serverLock;
-			}
-		} catch (e) {
-			console.warn("resume lock fetch failed:", e);
-		}
-	}
-
-	// Last fallback: rebuild a local lock from the snapshot instead of deleting the autosave
 	if (!resolvedLock || resolvedLock.lockId !== snapshotLockId) {
 		const scheduleRef = snapshot.game?._scheduleRef || null;
 		const fallbackLock = snapshot.game?._lockInfo || {
@@ -201,22 +322,89 @@ async function maybeOfferLiveGameResume() {
 		const seriesGame =
 			schedule?.days?.[scheduleRef.dayIndex]?.games?.[scheduleRef.seriesIndex]?.gamesInSeries?.[scheduleRef.seriesGameIndex];
 
-		if (seriesGame?.result) {
+		if (seriesGame?.result || seriesGame?.skipped) {
 			clearLiveGameAutosave();
-			return;
+			return false;
 		}
 	}
 
-	if (liveGameResumePromptShown) return;
-	liveGameResumePromptShown = true;
+	if (!auto) {
+		if (liveGameResumePromptShown) return false;
+		liveGameResumePromptShown = true;
 
-	const label =
-		getActiveGameLockLabel(resolvedLock) ||
-		`${snapshot.game?.team1?.name || "Team 1"} vs ${snapshot.game?.team2?.name || "Team 2"}`;
+		const label =
+			getActiveGameLockLabel(resolvedLock) ||
+			`${snapshot.game?.team1?.name || "Team 1"} vs ${snapshot.game?.team2?.name || "Team 2"}`;
 
-	if (!confirm(`A live game save was found on this device.\n\n${label}\n\nResume this in-progress game?`)) {
-		return;
+		if (!confirm(`A live game save was found on this device.\n\n${label}\n\nResume this in-progress game?`)) {
+			return false;
+		}
 	}
 
-	resumeLiveGameFromAutosave(snapshot);
+	const restored = resumeLiveGameFromAutosave(snapshot, { source });
+	if (restored && typeof verifyRestoredLiveGameAgainstServer === "function") {
+		setTimeout(() => verifyRestoredLiveGameAgainstServer(snapshot), 0);
+	}
+	return restored;
 }
+
+async function verifyRestoredLiveGameAgainstServer(snapshot) {
+	const scheduleRef = snapshot?.game?._scheduleRef;
+	if (!scheduleRef || typeof fetchSeasonRowFromServer !== "function") return true;
+	if (!Number.isInteger(scheduleRef.dayIndex) || !Number.isInteger(scheduleRef.seriesIndex) || !Number.isInteger(scheduleRef.seriesGameIndex)) return true;
+
+	try {
+		const row = await fetchSeasonRowFromServer({ quiet: true });
+		const serverSchedule = row?.schedule_json ? ensureScheduleShape(deepCloneJson(row.schedule_json)) : null;
+		const serverGame = serverSchedule?.days?.[scheduleRef.dayIndex]?.games?.[scheduleRef.seriesIndex]?.gamesInSeries?.[scheduleRef.seriesGameIndex];
+		if (serverGame?.result || serverGame?.skipped) {
+			setLiveGameStatus("error", "Server already has this game finalized");
+			alert("This scheduled game appears to already be finalized on the server. Do not finalize this restored copy unless you are sure the server result is wrong.");
+			return false;
+		}
+	} catch (e) {
+		markLiveGameServerSyncDelayed();
+	}
+	return true;
+}
+
+function saveLiveGameForLifecycle(reason = "lifecycle") {
+	if (!game) return false;
+	return persistLiveGameAutosave(reason);
+}
+
+function restoreLiveGameAfterReturn(reason = "return") {
+	refreshLiveGameStatusDisplay();
+	if (game) {
+		persistLiveGameAutosave("lifecycle");
+		setLiveGameStatus("restored", "Returned to Saved Game", { notify: true, duration: 1400 });
+		return true;
+	}
+	return maybeOfferLiveGameResume({ force: true, auto: true, source: reason });
+}
+
+function installLiveGameLifecycleAutosave() {
+	if (liveGameLifecycleWired) return;
+	liveGameLifecycleWired = true;
+
+	document.addEventListener("visibilitychange", () => {
+		if (document.visibilityState === "hidden") {
+			saveLiveGameForLifecycle("lifecycle");
+		} else if (document.visibilityState === "visible") {
+			restoreLiveGameAfterReturn("visibility-return");
+		}
+	});
+
+	window.addEventListener("pagehide", () => saveLiveGameForLifecycle("lifecycle"));
+	window.addEventListener("beforeunload", () => saveLiveGameForLifecycle("lifecycle"));
+	window.addEventListener("pageshow", () => restoreLiveGameAfterReturn("pageshow"));
+	window.addEventListener("focus", () => {
+		if (hasValidLiveGameAutosave() || game) restoreLiveGameAfterReturn("focus-return");
+	});
+
+	try {
+		document.addEventListener("freeze", () => saveLiveGameForLifecycle("lifecycle"));
+	} catch (e) {}
+}
+
+installLiveGameLifecycleAutosave();
