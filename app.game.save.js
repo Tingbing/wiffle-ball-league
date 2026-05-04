@@ -3,10 +3,17 @@
 // Purpose: Completed-game log creation, stat saving, schedule/standings application, and game-over screen.
 
 async function finalizeCompletedGame() {
-	if (!game || game._finalizeInProgress) return;
+	if (!game) return;
+
+	if (game._finalizeInProgress) {
+		showNotification("Game is already saving. Please wait.", 1200);
+		return;
+	}
+
 	game._finalizeInProgress = true;
 	game._gameCompletePendingSave = true;
-	try { clearLiveGameAutosave(); } catch (e) {}
+	try { persistLiveGameAutosave("finalize-started"); } catch (e) {}
+	try { setLiveActionControlsBusy(true); } catch (e) {}
 	
 	const completedEntryId = getCompletedGameEntryId(game);
 	const lockReleased = await saveGameStats();
@@ -15,8 +22,10 @@ async function finalizeCompletedGame() {
 
 		if (!savedOk) {
 		game._finalizeInProgress = false;
-		game._gameCompletePendingSave = false;
+		game._gameCompletePendingSave = true;
 		try { persistLiveGameAutosave("finalize-failed"); } catch (e) {}
+		try { setLiveActionControlsBusy(false); } catch (e) {}
+		showNotification("Game complete, but final save did not finish. Try again before leaving.", 3000);
 		return;
 	}
 
@@ -25,6 +34,7 @@ async function finalizeCompletedGame() {
 	}
 
 	displayGameOver();
+	try { clearLiveGameAutosave(); } catch (e) {}
 }
 
 function buildCompletedGameLogEntry() {
@@ -178,8 +188,8 @@ return await releaseGameLockWithTimeout(game?._lockId || activeGameLock?.lockId 
 	if (scheduledRef) {
 		try {
 			const latestRow = typeof fetchSeasonRowFromServer === "function"
-				? await fetchSeasonRowFromServer({ quiet: true })
-				: null;
+	? await withTimeout(fetchSeasonRowFromServer({ quiet: true }), 2500, null)
+	: null;
 			const latestSchedule = latestRow?.schedule_json ? ensureScheduleShape(deepCloneJson(latestRow.schedule_json)) : null;
 			const latestSeriesEntry = latestSchedule?.days?.[scheduledRef.dayIndex]?.games?.[scheduledRef.seriesIndex];
 			const latestSeriesGame = latestSeriesEntry?.gamesInSeries?.[scheduledRef.seriesGameIndex];
