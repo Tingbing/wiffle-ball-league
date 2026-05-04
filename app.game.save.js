@@ -192,6 +192,27 @@ if (postseasonRef) {
 
 		const scheduledSeriesEntry = schedule?.days?.[scheduledRef.dayIndex]?.games?.[scheduledRef.seriesIndex];
 
+				const scheduledSeriesGame = scheduledSeriesEntry?.gamesInSeries?.[scheduledRef.seriesGameIndex];
+		const teamsMatch =
+			!!scheduledSeriesEntry &&
+			(
+				(scheduledSeriesEntry.away === game?.team1?.name && scheduledSeriesEntry.home === game?.team2?.name) ||
+				(scheduledSeriesEntry.away === game?.team2?.name && scheduledSeriesEntry.home === game?.team1?.name)
+			);
+
+		if (!scheduledSeriesEntry || !scheduledSeriesGame || !teamsMatch) {
+			alert(
+				"This scheduled game could not be matched back to its exact season slot. Nothing was saved, so the schedule could not be corrupted. Refresh the season data before trying again."
+			);
+			return false;
+		}
+
+		if (scheduledSeriesGame.result && !existingEntry) {
+			alert("That scheduled game was already recorded. Nothing new was saved.");
+			clearLiveGameAutosave();
+			return await releaseGameLock(game?._lockId || activeGameLock?.lockId || null, { quiet: true });
+		}
+	}
 	if (existingEntry) {
 		if (!existingEntry.outcomeApplied) {
 			const outcomeApplied = applyGameOutcomeOnce();
