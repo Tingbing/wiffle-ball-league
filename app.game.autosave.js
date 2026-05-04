@@ -168,18 +168,20 @@ function buildLiveGameSavePayload() {
 }
 
 function persistLiveGameAutosave(reason = "change") {
-	if (game?._finalizeInProgress || game?._gameCompletePendingSave) {
-		try { localStorage.removeItem(LIVE_GAME_SAVE_KEY); } catch (e) {}
-		return false;
-	}
-
 	const payload = buildLiveGameSavePayload();
 	if (!payload) return false;
+
 	try {
 		localStorage.setItem(LIVE_GAME_SAVE_KEY, JSON.stringify(payload));
 		lastLiveGameLocalSaveAt = payload.savedAt;
 		liveGameLocalAuthoritative = true;
-		setLiveGameStatus("pending", reason === "lifecycle" ? "Local Save OK • Background Safe" : "Local Save OK • Sync Pending");
+
+		if (game?._gameCompletePendingSave || game?._finalizeInProgress) {
+			setLiveGameStatus("pending", "Game Complete • Saving");
+		} else {
+			setLiveGameStatus("pending", reason === "lifecycle" ? "Local Save OK • Background Safe" : "Local Save OK • Sync Pending");
+		}
+
 		return true;
 	} catch (e) {
 		console.warn("live game autosave failed:", e);
@@ -203,7 +205,6 @@ function hasValidLiveGameAutosave(snapshot = null) {
 	const saved = snapshot || readLiveGameAutosave();
 	if (!saved?.game) return false;
 	const savedGame = saved.game;
-		if (savedGame._finalizeInProgress || savedGame._gameCompletePendingSave) return false;
 	const hasTeams = !!savedGame.team1?.name && !!savedGame.team2?.name;
 	const hasGameState = Number.isInteger(Number(savedGame.inning)) && (savedGame.halfInning === "top" || savedGame.halfInning === "bottom");
 	const hasLock = !!(saved.lockId || savedGame._lockId || savedGame._lockInfo?.lockId);
@@ -241,10 +242,18 @@ function resumeLiveGameFromAutosave(snapshot, options = {}) {
 		try { document.getElementById("accessGate")?.classList.add("hidden"); } catch (e) {}
 
 		game = cloneJson(snapshot.game);
-		gameHistory = Array.isArray(snapshot.gameHistory) ? snapshot.gameHistory.slice() : [];
-		pendingBattingResult = cloneJson(snapshot.pendingBattingResult) || null;
-		lastPlay = cloneJson(snapshot.lastPlay) || null;
-		playInputLock = false;
+gameHistory = Array.isArray(snapshot.gameHistory) ? snapshot.gameHistory.slice() : [];
+pendingBattingResult = cloneJson(snapshot.pendingBattingResult) || null;
+lastPlay = cloneJson(snapshot.lastPlay) || null;
+playInputLock = false;
+
+const shouldAutoFinishRestoredGame = !!(game._finalizeInProgress || game._gameCompletePendingSave);
+if (shouldAutoFinishRestoredGame) {
+	game._finalizeInProgress = false;
+	game._gameCompletePendingSave = true;
+	pendingBattingResult = null;
+	playInputLock = false;
+}
 
 		game._lockId = game._lockId || snapshot.lockId || activeGameLock?.lockId || null;
 		if (game._lockInfo?.lockId) persistActiveGameLock(game._lockInfo);
@@ -265,8 +274,33 @@ function resumeLiveGameFromAutosave(snapshot, options = {}) {
 		applyLiveGameUiState(snapshot.uiState || {});
 		document.getElementById("undoButton").disabled = gameHistory.length === 0;
 		persistLiveGameAutosave("restore");
-		setLiveGameStatus("restored", "Restored Saved Game", { notify: true, duration: 1800 });
-		return true;
+
+if (shouldAutoFinishRestoredGame) {
+	setLiveGameStatus("pending", "Restored Complete Game • Saving", { notify: true, duration: 1800 });
+	try { setLiveActionControlsBusy(true); } catch (e) {}
+
+	setTimeout(() => {
+		if (!game) return;
+
+		game._finalizeInProgress = false;
+		game._gameCompletePendingSave = true;
+		Promise.resolve(finalizeCompletedGame()).catch(error => {
+			console.error("Auto-finish restored completed game failed:", error);
+			if (game) {
+				game._finalizeInProgress = false;
+				game._gameCompletePendingSave = true;
+			}
+			try { setLiveActionControlsBusy(false); } catch (e) {}
+			try { persistLiveGameAutosave("auto-finish-failed"); } catch (e) {}
+			showNotification("Game restored, but final save failed. Try again before leaving.", 3000);
+		});
+	}, 0);
+
+	return true;
+}
+
+setLiveGameStatus("restored", "Restored Saved Game", { notify: true, duration: 1800 });
+return true;
 	} finally {
 		liveGameRestoreInProgress = false;
 	}
