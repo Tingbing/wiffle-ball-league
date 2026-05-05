@@ -699,13 +699,17 @@ function queueServerSync(reason, { immediate = false } = {}) {
 	if (serverSyncTimer) clearTimeout(serverSyncTimer);
 
 	const run = async () => {
-		serverSyncTimer = null;
-		const ok = await syncSeasonToServer({ quiet: true });
-		try {
-			if (ok) markLiveGameServerSyncSuccess();
-			else markLiveGameServerSyncDelayed();
-		} catch (e) {}
-	};
+	serverSyncTimer = null;
+
+	const ok = await withAppWorking("Syncing…", async () => {
+		return await syncSeasonToServer({ quiet: true });
+	});
+
+	try {
+		if (ok) markLiveGameServerSyncSuccess();
+		else markLiveGameServerSyncDelayed();
+	} catch (e) {}
+};
 
 	if (immediate) run();
 	else serverSyncTimer = setTimeout(run, 1400);
