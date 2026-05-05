@@ -43,8 +43,11 @@ async function finalizeCompletedGame(options = {}) {
 	}
 
 	displayGameOver();
-	try { clearLiveGameAutosave(); } catch (e) {}
+	// Note: autosave is intentionally NOT cleared here. The background sync
+	// scheduled by completeAndExit clears it once the sync confirms. Clearing
+	// it here would defeat reload-recovery if the sync fails.
 }
+
 
 function buildCompletedGameLogEntry() {
 	if (!game?.team1?.name || !game?.team2?.name) return null;
@@ -361,16 +364,13 @@ function scheduleFinalizeBackgroundSync(lockId) {
 	setTimeout(async () => {
 		try { markLiveGameServerSyncPending("finalize"); } catch (e) {}
 
-		// 15s outer cap. runServerSyncSilent already retries internally.
+		// No outer race here. The single-flight wrapper inside syncSeasonToServer
+		// caps at 30s, and the inner Supabase calls each have their own timeouts.
 		let synced = false;
 		try {
-			synced = await withTimeout(
-				typeof runServerSyncSilent === "function"
-					? runServerSyncSilent("finalize")
-					: syncSeasonToServer({ quiet: true }),
-				15000,
-				false
-			);
+			synced = typeof runServerSyncSilent === "function"
+				? await runServerSyncSilent("finalize")
+				: await syncSeasonToServer({ quiet: true });
 		} catch (e) {
 			console.warn("[wbl] background finalize sync error:", e);
 		}
@@ -383,11 +383,7 @@ function scheduleFinalizeBackgroundSync(lockId) {
 
 		// Sync confirmed → safe to release lock and clear autosave.
 		try {
-			await withTimeout(
-				releaseGameLockReliably(lockId, { quiet: true }),
-				10000,
-				false
-			);
+			await releaseGameLockReliably(lockId, { quiet: true });
 		} catch (e) {
 			console.warn("[wbl] background lock release error:", e);
 		}
@@ -395,3 +391,4 @@ function scheduleFinalizeBackgroundSync(lockId) {
 		try { markLiveGameServerSyncSuccess(); } catch (e) {}
 	}, 0);
 }
+
