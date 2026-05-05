@@ -129,10 +129,12 @@ function saveCompletedGameLog(extraFields = {}) {
 	return nextEntry;
 }
 
-async function saveGameStats() {
+async function saveGameStats(options = {}) {
+	const { allowTie = false } = options;
 	const failureResult = { savedOk: false, lockReleased: false };
+	const isTied = Number(game?.team1Score || 0) === Number(game?.team2Score || 0);
 
-	if (Number(game?.team1Score || 0) === Number(game?.team2Score || 0)) {
+	if (isTied && !allowTie) {
 		alert("This game is still tied. Continue overtime until one team wins.");
 		return failureResult;
 	}
@@ -141,6 +143,11 @@ async function saveGameStats() {
 	const completedEntryId = completedEntry?.id || null;
 	const existingEntry = findCompletedGameLogEntry(completedEntryId);
 	const postseasonRef = game?._postseasonRef?.slotId ? { ...game._postseasonRef } : null;
+
+	if (postseasonRef && isTied) {
+		alert("Postseason games cannot end in a tie. Keep playing until one team wins.");
+		return failureResult;
+	}
 
 	// Shared cleanup-and-exit. Awaits server sync, THEN releases the lock so
 	// another tab cannot acquire the lock and overwrite an unsynced finalized game.
