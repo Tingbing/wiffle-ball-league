@@ -368,9 +368,12 @@ function scheduleFinalizeBackgroundSync(lockId) {
 		// caps at 30s, and the inner Supabase calls each have their own timeouts.
 		let synced = false;
 		try {
-			synced = typeof runServerSyncSilent === "function"
-				? await runServerSyncSilent("finalize")
-				: await syncSeasonToServer({ quiet: true });
+			// Final game save should NOT depend on the normal background autosync gate.
+// This must try the real server save directly, because game-finalize lock
+// cleanup is more important than regular background syncing.
+synced = typeof syncSeasonToServer === "function"
+	? await syncSeasonToServer({ quiet: true })
+	: false;
 		} catch (e) {
 			console.warn("[wbl] background finalize sync error:", e);
 		}
