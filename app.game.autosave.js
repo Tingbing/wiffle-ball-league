@@ -54,13 +54,21 @@ function setLiveGameStatus(state, message = "", options = {}) {
 }
 
 let appWorkingCount = 0;
+let appWorkingMessages = [];
 
-function setAppWorking(isWorking, message = "Working…") {
-	appWorkingCount += isWorking ? 1 : -1;
-	if (appWorkingCount < 0) appWorkingCount = 0;
+function setAppWorking(isWorking, message = null) {
+	if (isWorking) {
+		appWorkingCount++;
+		appWorkingMessages.push(message || "Working…");
+	} else {
+		appWorkingCount = Math.max(0, appWorkingCount - 1);
+		appWorkingMessages.pop();
+	}
 
 	const shouldShow = appWorkingCount > 0;
-	const text = shouldShow ? message : "Synced";
+	const text = shouldShow
+		? (appWorkingMessages[appWorkingMessages.length - 1] || "Working…")
+		: "Synced";
 
 	["syncDataTag", "liveSyncStatusTag"].forEach(id => {
 		const el = document.getElementById(id);
