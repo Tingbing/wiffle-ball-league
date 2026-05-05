@@ -731,18 +731,49 @@ function clearServerSyncRetry() {
 	serverSyncRetryTimer = null;
 }
 
+const MAX_SERVER_SYNC_RETRY_ATTEMPTS = 4;
+
 function scheduleServerSyncRetry(reason) {
 	if (syncConflictState) return;
+	if (serverSyncRetryAttempt >= MAX_SERVER_SYNC_RETRY_ATTEMPTS) return;
 	clearServerSyncRetry();
 
 	const idx = Math.min(serverSyncRetryAttempt, SERVER_SYNC_RETRY_DELAYS_MS.length - 1);
 	const delay = SERVER_SYNC_RETRY_DELAYS_MS[idx];
 	serverSyncRetryAttempt++;
 
-	serverSyncRetryTimer = setTimeout(() => {
+	serverSyncRetryTimer = setTimeout(async () => {
 		serverSyncRetryTimer = null;
-		queueServerSync(reason ? `${reason}-retry-${serverSyncRetryAttempt}` : "retry", { immediate: true });
+		await runServerSyncSilent(reason ? `${reason}-retry-${serverSyncRetryAttempt}` : "retry");
 	}, delay);
+}
+
+async function runServerSyncSilent(reason) {
+	if (!autoSyncEnabled) return false;
+	if (suppressAutoSync) return false;
+	if (syncConflictState) return false;
+	if (!isLeagueUnlocked() || !getStoredName()) return false;
+
+	try { markLiveGameServerSyncPending(reason || "retry"); } catch (e) {}
+
+	let ok = false;
+	try {
+		ok = await syncSeasonToServer({ quiet: true });
+	} catch (e) {
+		ok = false;
+	}
+
+	try {
+		if (ok) {
+			serverSyncRetryAttempt = 0;
+			markLiveGameServerSyncSuccess();
+		} else {
+			markLiveGameServerSyncDelayed();
+			scheduleServerSyncRetry(reason);
+		}
+	} catch (e) {}
+
+	return ok;
 }
 
 function queueServerSync(reason, { immediate = false } = {}) {
