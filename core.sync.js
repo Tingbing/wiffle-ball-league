@@ -722,31 +722,71 @@ async function hydrateFromServerIfNewer() {
 	}
 }
 
-function queueServerSync(reason, { immediate = false } = {}) {
-	if (!autoSyncEnabled) return;
-	if (suppressAutoSync) return;
+let serverSyncRetryAttempt = 0;
+let serverSyncRetryTimer = null;
+const SERVER_SYNC_RETRY_DELAYS_MS = [1000, 2500, 6000, 15000];
+
+function clearServerSyncRetry() {
+	if (serverSyncRetryTimer) clearTimeout(serverSyncRetryTimer);
+	serverSyncRetryTimer = null;
+}
+
+function scheduleServerSyncRetry(reason) {
 	if (syncConflictState) return;
-	if (!isLeagueUnlocked() || !getStoredName()) return;
+	clearServerSyncRetry();
+
+	const idx = Math.min(serverSyncRetryAttempt, SERVER_SYNC_RETRY_DELAYS_MS.length - 1);
+	const delay = SERVER_SYNC_RETRY_DELAYS_MS[idx];
+	serverSyncRetryAttempt++;
+
+	serverSyncRetryTimer = setTimeout(() => {
+		serverSyncRetryTimer = null;
+		queueServerSync(reason ? `${reason}-retry-${serverSyncRetryAttempt}` : "retry", { immediate: true });
+	}, delay);
+}
+
+function queueServerSync(reason, { immediate = false } = {}) {
+	if (!autoSyncEnabled) return Promise.resolve(false);
+	if (suppressAutoSync) return Promise.resolve(false);
+	if (syncConflictState) return Promise.resolve(false);
+	if (!isLeagueUnlocked() || !getStoredName()) return Promise.resolve(false);
 
 	try { markLiveGameServerSyncPending(reason || "changes"); } catch (e) {}
 
-	if (serverSyncTimer) clearTimeout(serverSyncTimer);
+	if (serverSyncTimer) {
+		clearTimeout(serverSyncTimer);
+		serverSyncTimer = null;
+	}
+	clearServerSyncRetry();
 
 	const run = async () => {
-	serverSyncTimer = null;
+		serverSyncTimer = null;
 
-	const ok = await withAppWorking("Syncing…", async () => {
-		return await syncSeasonToServer({ quiet: true });
+		const ok = await withAppWorking("Syncing…", async () => {
+			return await syncSeasonToServer({ quiet: true });
+		});
+
+		try {
+			if (ok) {
+				serverSyncRetryAttempt = 0;
+				markLiveGameServerSyncSuccess();
+			} else {
+				markLiveGameServerSyncDelayed();
+				scheduleServerSyncRetry(reason);
+			}
+		} catch (e) {}
+
+		return ok;
+	};
+
+	if (immediate) return run();
+
+	return new Promise(resolve => {
+		serverSyncTimer = setTimeout(async () => {
+			const result = await run();
+			resolve(result);
+		}, 1400);
 	});
-
-	try {
-		if (ok) markLiveGameServerSyncSuccess();
-		else markLiveGameServerSyncDelayed();
-	} catch (e) {}
-};
-
-	if (immediate) run();
-	else serverSyncTimer = setTimeout(run, 1400);
 }
 
 async function ensurePostUnlockSetup() {
