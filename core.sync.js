@@ -310,14 +310,82 @@ async function refreshPublicViewData({ quiet = true } = {}) {
 	let teamsReloadTimer = null;
 
 	let serverSyncTimer = null;
+let manualSyncInProgress = false;
+let orphanLockCleanupPromise = null;
 
-	function setSyncButtonEnabled(enabled) {
-		const btn = document.getElementById("resaveStatsBtn");
-		if (!btn) return;
-		btn.disabled = !enabled;
-		btn.style.opacity = enabled ? "1" : "0.6";
-		btn.style.pointerEvents = enabled ? "auto" : "none";
+function ensureSyncSpinnerStyles() {
+	if (document.getElementById("wbl-sync-spinner-style")) return;
+
+	const style = document.createElement("style");
+	style.id = "wbl-sync-spinner-style";
+	style.textContent = `
+		@keyframes wblSyncSpin {
+			from { transform: rotate(0deg); }
+			to { transform: rotate(360deg); }
+		}
+
+		.wbl-sync-spinner {
+			display: inline-block;
+			width: 14px;
+			height: 14px;
+			border: 2px solid rgba(255,255,255,0.35);
+			border-top-color: white;
+			border-radius: 50%;
+			animation: wblSyncSpin 0.75s linear infinite;
+			vertical-align: middle;
+		}
+
+		.wbl-syncing {
+			cursor: wait !important;
+			opacity: 0.8 !important;
+		}
+	`;
+	document.head.appendChild(style);
+}
+
+function setSyncButtonBusy(isBusy, label = "Syncing") {
+	const btn = document.getElementById("resaveStatsBtn");
+	if (!btn) return;
+
+	ensureSyncSpinnerStyles();
+
+	if (isBusy) {
+		if (!btn.dataset.originalHtml) {
+			btn.dataset.originalHtml = btn.innerHTML || "↻";
+		}
+
+		btn.classList.add("wbl-syncing");
+		btn.disabled = true;
+		btn.style.pointerEvents = "none";
+		btn.style.opacity = "0.75";
+		btn.setAttribute("aria-busy", "true");
+		btn.title = label;
+		btn.innerHTML = `<span class="wbl-sync-spinner" aria-hidden="true"></span>`;
+		return;
 	}
+
+	btn.classList.remove("wbl-syncing");
+	btn.disabled = false;
+	btn.style.pointerEvents = "auto";
+	btn.style.opacity = "1";
+	btn.removeAttribute("aria-busy");
+	btn.title = "Sync data";
+	btn.innerHTML = btn.dataset.originalHtml || "↻";
+	delete btn.dataset.originalHtml;
+}
+
+function setSyncButtonEnabled(enabled) {
+	const btn = document.getElementById("resaveStatsBtn");
+	if (!btn) return;
+
+	if (btn.classList.contains("wbl-syncing")) return;
+
+	const canUse = !!enabled && !manualSyncInProgress;
+
+	btn.disabled = !canUse;
+	btn.style.opacity = canUse ? "1" : "0.6";
+	btn.style.pointerEvents = canUse ? "auto" : "none";
+}
 
 	function getLocalUpdatedAtMs() {
 		const s = Date.parse(season?._meta?.updated_at || "") || 0;
@@ -1129,7 +1197,12 @@ try {
 			updated_at: payload.updated_at
 		});
 
-		persistActiveGameLock(savedRow?.active_game_lock || activeGameLock || null);
+		// If the server says the lock is null, do not revive the old local lock.
+if (savedRow && Object.prototype.hasOwnProperty.call(savedRow, "active_game_lock")) {
+	persistActiveGameLock(savedRow.active_game_lock || null);
+} else {
+	persistActiveGameLock(activeGameLock || null);
+}
 
 		if (!quiet) showNotification("✅ Season stats saved to server", 1800);
 		return true;
@@ -1147,20 +1220,103 @@ try {
 	}
 }
 
-async function manualResaveAllStats() {
-	if (!(await requireLogin())) return;
+async function clearOrphanGameLockFromMainMenu() {
+	const hasLiveAutosave = typeof hasValidLiveGameAutosave === "function" && hasValidLiveGameAutosave();
 
-	setSyncButtonEnabled(false);
+	// Exact stuck state:
+	// no active game + no valid autosave + lock still exists.
+	if (game || !activeGameLock?.lockId || hasLiveAutosave) {
+		return null;
+	}
+
+	if (orphanLockCleanupPromise) {
+		return await orphanLockCleanupPromise;
+	}
+
+	orphanLockCleanupPromise = (async () => {
+		const lockId = activeGameLock.lockId;
+
+		try { markLiveGameServerSyncPending("lock cleanup"); } catch (e) {}
+
+		try {
+			if (serverSyncTimer) {
+				clearTimeout(serverSyncTimer);
+				serverSyncTimer = null;
+			}
+		} catch (e) {}
+
+		try { clearServerSyncRetry(); } catch (e) {}
+
+		let released = false;
+
+		try {
+			released = await releaseGameLockReliably(lockId, { quiet: true });
+		} catch (e) {
+			console.warn("[wbl] orphan lock cleanup failed:", e);
+			released = false;
+		}
+
+		if (released) {
+			try { persistActiveGameLock(null); } catch (e) {}
+			try { clearLiveGameAutosave(); } catch (e) {}
+			try { refreshGameLockUI(); } catch (e) {}
+			try { markLiveGameServerSyncSuccess(); } catch (e) {}
+			return true;
+		}
+
+		try {
+			const row = await withTimeout(fetchSeasonRowFromServer({ quiet: true }), 8000, null);
+			const serverLockId = row?.active_game_lock_id || row?.active_game_lock?.lockId || null;
+
+			if (!serverLockId || serverLockId !== lockId) {
+				persistActiveGameLock(null);
+				refreshGameLockUI();
+				try { markLiveGameServerSyncSuccess(); } catch (e) {}
+				return true;
+			}
+
+			persistActiveGameLock(row.active_game_lock || activeGameLock);
+		} catch (e) {
+			console.warn("[wbl] could not verify orphan lock cleanup:", e);
+		}
+
+		try { markLiveGameServerSyncDelayed(); } catch (e) {}
+		return false;
+	})();
+
+	try {
+		return await orphanLockCleanupPromise;
+	} finally {
+		orphanLockCleanupPromise = null;
+	}
+}
+
+async function manualResaveAllStats() {
+	if (manualSyncInProgress) {
+		showNotification("Sync is already running…", 1200);
+		return false;
+	}
+
+	if (!(await requireLogin())) return false;
+
+	manualSyncInProgress = true;
+	setSyncButtonBusy(true, "Syncing data...");
 	showNotification("🔄 Syncing data…", 1200);
 
 	try {
-		// If stats already saved but the game lock stayed stuck, let the sync button fix that too.
-		if (!game && activeGameLock && !(typeof hasValidLiveGameAutosave === "function" && hasValidLiveGameAutosave())) {
-			const released = await releaseGameLockReliably(activeGameLock.lockId, { quiet: true });
-			if (released) {
-				refreshGameLockUI();
-				showNotification("✅ Game lock cleared", 1500);
-			}
+		const orphanLockResult = await clearOrphanGameLockFromMainMenu();
+
+		if (orphanLockResult === true) {
+			showNotification("✅ Game lock cleared", 1500);
+			return true;
+		}
+
+		if (orphanLockResult === false) {
+			alert(
+				"The game stats are saved, but the game lock could not be cleared yet.\n\n" +
+				"Check your connection and press Sync again. The app will not start another overlapping sync."
+			);
+			return false;
 		}
 
 		try { await load(); } catch (e) {}
@@ -1173,8 +1329,16 @@ async function manualResaveAllStats() {
 
 		if (row && serverMs > localMs + 1000) {
 			applyServerSeasonRow(row);
-			alert("✅ Data was synced.");
-			return;
+
+			const cleanupAfterPull = await clearOrphanGameLockFromMainMenu();
+
+			if (cleanupAfterPull === true) {
+				showNotification("✅ Data synced and game lock cleared", 1600);
+			} else {
+				alert("✅ Data was synced.");
+			}
+
+			return true;
 		}
 
 		try { saveSeason({ skipServerSync: true }); } catch (e) {}
@@ -1185,18 +1349,25 @@ async function manualResaveAllStats() {
 		});
 
 		if (ok) {
-			// One more lock cleanup attempt after sync, in case the local lock was refreshed from server.
-			if (!game && activeGameLock && !(typeof hasValidLiveGameAutosave === "function" && hasValidLiveGameAutosave())) {
-				await releaseGameLockReliably(activeGameLock.lockId, { quiet: true });
-				refreshGameLockUI();
+			const cleanupAfterSave = await clearOrphanGameLockFromMainMenu();
+
+			if (cleanupAfterSave === true) {
+				showNotification("✅ Data synced and game lock cleared", 1600);
+			} else {
+				alert("✅ Data was synced.");
 			}
 
-			alert("✅ Data was synced.");
+			return true;
 		}
+
+		return false;
 	} catch (error) {
 		console.error("manualResaveAllStats failed:", error);
 		alert("Sync hit an error. Local data is still saved on this device.");
+		return false;
 	} finally {
+		manualSyncInProgress = false;
+		setSyncButtonBusy(false);
 		setSyncButtonEnabled(true);
 	}
 }
