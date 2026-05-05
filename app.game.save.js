@@ -360,22 +360,23 @@ async function saveGameStats(options = {}) {
 		container.appendChild(team2PitchingCard);
 	}
 
+
 function scheduleFinalizeBackgroundSync(lockId) {
 	setTimeout(async () => {
 		try { markLiveGameServerSyncPending("finalize"); } catch (e) {}
 
-		// No outer race here. The single-flight wrapper inside syncSeasonToServer
-		// caps at 30s, and the inner Supabase calls each have their own timeouts.
 		let synced = false;
+
 		try {
 			// Final game save should NOT depend on the normal background autosync gate.
-// This must try the real server save directly, because game-finalize lock
-// cleanup is more important than regular background syncing.
-synced = typeof syncSeasonToServer === "function"
-	? await syncSeasonToServer({ quiet: true })
-	: false;
+			// This must try the real server save directly, because game-finalize lock
+			// cleanup is more important than regular background syncing.
+			synced = typeof syncSeasonToServer === "function"
+				? await syncSeasonToServer({ quiet: true })
+				: false;
 		} catch (e) {
 			console.warn("[wbl] background finalize sync error:", e);
+			synced = false;
 		}
 
 		if (!synced) {
@@ -384,14 +385,25 @@ synced = typeof syncSeasonToServer === "function"
 			return;
 		}
 
-		// Sync confirmed → safe to release lock and clear autosave.
-		try {
-			await releaseGameLockReliably(lockId, { quiet: true });
-		} catch (e) {
-			console.warn("[wbl] background lock release error:", e);
+		let released = true;
+
+		if (lockId) {
+			try {
+				released = await releaseGameLockReliably(lockId, { quiet: true });
+			} catch (e) {
+				console.warn("[wbl] background lock release error:", e);
+				released = false;
+			}
 		}
+
+		if (!released) {
+			try { markLiveGameServerSyncDelayed(); } catch (e) {}
+			console.warn("[wbl] final stats synced, but game lock release did not confirm. Autosave kept for Sync retry.");
+			return;
+		}
+
+		try { persistActiveGameLock(null); } catch (e) {}
 		try { clearLiveGameAutosave(); } catch (e) {}
 		try { markLiveGameServerSyncSuccess(); } catch (e) {}
 	}, 0);
 }
-
