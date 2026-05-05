@@ -583,12 +583,22 @@ async function fetchSeasonRowFromServer({ quiet = true, publicView = false } = {
 			? "season_json,schedule_json,updated_at"
 			: "season_json,schedule_json,updated_at,active_game_lock,active_game_lock_id";
 
-		const { data, error } = await supabaseClient
-			.from(tableName)
-			.select(selectCols)
-			.eq("league_code", String(LEAGUE_CODE))
-			.maybeSingle();
+		const result = await withTimeout(
+			supabaseClient
+				.from(tableName)
+				.select(selectCols)
+				.eq("league_code", String(LEAGUE_CODE))
+				.maybeSingle(),
+			8000,
+			null
+		);
 
+		if (!result) {
+			if (!quiet) console.warn(`[wbl] fetch ${tableName} timed out`);
+			return null;
+		}
+
+		const { data, error } = result;
 		if (error) throw error;
 		return data || null;
 	} catch (e) {
@@ -596,6 +606,7 @@ async function fetchSeasonRowFromServer({ quiet = true, publicView = false } = {
 		return null;
 	}
 }
+
 
 function applyServerSeasonRow(row, { force = false, source = "server" } = {}) {
 	if (!row) return false;
@@ -958,7 +969,28 @@ return;
 /* ================================
    MANUAL + AUTOMATIC SERVER SAVE
 ================================== */
+let inflightSyncPromise = null;
+
 async function syncSeasonToServer({ quiet = false } = {}) {
+	// Single-flight: if a sync is already running, every new caller joins it.
+	// This prevents concurrent supabase update() calls from racing on the same row.
+	if (inflightSyncPromise) {
+		return inflightSyncPromise;
+	}
+
+	inflightSyncPromise = (async () => {
+		try {
+			return await withTimeout(runSyncSeasonToServerOnce({ quiet }), 30000, false);
+		} finally {
+			inflightSyncPromise = null;
+		}
+	})();
+
+	return inflightSyncPromise;
+}
+
+async function runSyncSeasonToServerOnce({ quiet = false } = {}) {
+
 	if (syncConflictState) {
 		if (!quiet) {
 			alert("This tab is blocked from saving because newer data was detected elsewhere. Load the latest data first.");
@@ -972,9 +1004,16 @@ async function syncSeasonToServer({ quiet = false } = {}) {
 	const ok = await requireLogin();
 	if (!ok) return false;
 
-	try {
-		const { data } = await supabaseClient.auth.getSession();
+try {
+		const sessionResult = await withTimeout(supabaseClient.auth.getSession(), 5000, null);
+		if (!sessionResult) {
+			console.warn("[wbl] auth.getSession timed out");
+			try { markLiveGameServerSyncDelayed(); } catch (e) {}
+			return false;
+		}
+		const { data } = sessionResult;
 		const userId = data?.session?.user?.id || null;
+
 
 	const latestRow = await withTimeout(fetchSeasonRowFromServer({ quiet: true }), 8000, null);
 		const latestInfo = latestRow ? getRowRevisionInfo(latestRow) : null;
