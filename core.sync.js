@@ -1006,34 +1006,56 @@ async function syncSeasonToServer({ quiet = false } = {}) {
 	}
 }
 
-	async function manualResaveAllStats() {
-  if (!(await requireLogin())) return;
+async function manualResaveAllStats() {
+	if (!(await requireLogin())) return;
 
-  setSyncButtonEnabled(false);
-  showNotification("🔄 Syncing data…", 1200);
+	setSyncButtonEnabled(false);
+	showNotification("🔄 Syncing data…", 1200);
 
-  // Always refresh teams from Supabase so you see latest adds/deletes
-  try { await load(); } catch (e) {}
-  try { syncTeamRecordsWithLeague(); } catch (e) {}
-  try { update(); } catch (e) {}
+	try {
+		// If stats already saved but the game lock stayed stuck, let the sync button fix that too.
+		if (!game && activeGameLock && !(typeof hasValidLiveGameAutosave === "function" && hasValidLiveGameAutosave())) {
+			const released = await releaseGameLockReliably(activeGameLock.lockId, { quiet: true });
+			if (released) {
+				refreshGameLockUI();
+				showNotification("✅ Game lock cleared", 1500);
+			}
+		}
 
-  // If server has a newer snapshot, pull it down instead of overwriting
-  const row = await fetchSeasonRowFromServer({ quiet: true });
-  const serverMs = row ? (Date.parse(row.updated_at || "") || 0) : 0;
-  const localMs = getLocalUpdatedAtMs();
+		try { await load(); } catch (e) {}
+		try { syncTeamRecordsWithLeague(); } catch (e) {}
+		try { update(); } catch (e) {}
 
-  if (row && serverMs > localMs + 1000) {
-    applyServerSeasonRow(row);
-    setSyncButtonEnabled(true);
-    alert("✅ Data was synced.");
-    return;
-  }
+		const row = await withTimeout(fetchSeasonRowFromServer({ quiet: true }), 6000, null);
+		const serverMs = row ? (Date.parse(row.updated_at || "") || 0) : 0;
+		const localMs = getLocalUpdatedAtMs();
 
-  // Otherwise push local snapshot up
-  try { saveSeason({ skipServerSync: true }); } catch (e) {}
-  try { saveSchedule({ skipServerSync: true }); } catch (e) {}
+		if (row && serverMs > localMs + 1000) {
+			applyServerSeasonRow(row);
+			alert("✅ Data was synced.");
+			return;
+		}
 
-  const ok = await syncSeasonToServer({ quiet: false });
-  setSyncButtonEnabled(true);
-  if (ok) alert("✅ Data was synced.");
+		try { saveSeason({ skipServerSync: true }); } catch (e) {}
+		try { saveSchedule({ skipServerSync: true }); } catch (e) {}
+
+		const ok = await withAppWorking("Syncing…", async () => {
+			return await syncSeasonToServer({ quiet: false });
+		});
+
+		if (ok) {
+			// One more lock cleanup attempt after sync, in case the local lock was refreshed from server.
+			if (!game && activeGameLock && !(typeof hasValidLiveGameAutosave === "function" && hasValidLiveGameAutosave())) {
+				await releaseGameLockReliably(activeGameLock.lockId, { quiet: true });
+				refreshGameLockUI();
+			}
+
+			alert("✅ Data was synced.");
+		}
+	} catch (error) {
+		console.error("manualResaveAllStats failed:", error);
+		alert("Sync hit an error. Local data is still saved on this device.");
+	} finally {
+		setSyncButtonEnabled(true);
+	}
 }
