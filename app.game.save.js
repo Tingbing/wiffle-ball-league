@@ -149,19 +149,20 @@ async function saveGameStats(options = {}) {
 		return failureResult;
 	}
 
-	// Shared cleanup-and-exit. Awaits server sync, THEN releases the lock so
-	// another tab cannot acquire the lock and overwrite an unsynced finalized game.
+// Shared cleanup-and-exit. Local save happens synchronously; server sync
+	// and lock release are deferred to the background so the user gets to the
+	// Game Over screen without waiting on the network. The autosave is kept
+	// until the background sync confirms — that way a failed sync can be
+	// retried on reload without losing data.
 	const completeAndExit = async ({ alreadyFinalized = false } = {}) => {
 		if (!alreadyFinalized) {
 			try { saveSeason({ skipServerSync: true }); } catch (e) {}
 		}
-		clearLiveGameAutosave();
-
-		try { await queueServerSync("game", { immediate: true }); } catch (e) {}
 
 		const lockId = game?._lockId || activeGameLock?.lockId || null;
-		const lockReleased = await releaseGameLockReliably(lockId, { quiet: true });
-		return { savedOk: true, lockReleased };
+		scheduleFinalizeBackgroundSync(lockId);
+
+		return { savedOk: true, lockReleased: true };
 	};
 
 	// ============== POSTSEASON GAMES ==============
@@ -355,3 +356,42 @@ async function saveGameStats(options = {}) {
 		team2PitchingCard.appendChild(team2PitchingTable);
 		container.appendChild(team2PitchingCard);
 	}
+
+function scheduleFinalizeBackgroundSync(lockId) {
+	setTimeout(async () => {
+		try { markLiveGameServerSyncPending("finalize"); } catch (e) {}
+
+		// 15s outer cap. runServerSyncSilent already retries internally.
+		let synced = false;
+		try {
+			synced = await withTimeout(
+				typeof runServerSyncSilent === "function"
+					? runServerSyncSilent("finalize")
+					: syncSeasonToServer({ quiet: true }),
+				15000,
+				false
+			);
+		} catch (e) {
+			console.warn("[wbl] background finalize sync error:", e);
+		}
+
+		if (!synced) {
+			try { markLiveGameServerSyncDelayed(); } catch (e) {}
+			console.warn("[wbl] finalize sync did not confirm; autosave kept for retry. Press Sync on the main menu to retry.");
+			return;
+		}
+
+		// Sync confirmed → safe to release lock and clear autosave.
+		try {
+			await withTimeout(
+				releaseGameLockReliably(lockId, { quiet: true }),
+				10000,
+				false
+			);
+		} catch (e) {
+			console.warn("[wbl] background lock release error:", e);
+		}
+		try { clearLiveGameAutosave(); } catch (e) {}
+		try { markLiveGameServerSyncSuccess(); } catch (e) {}
+	}, 0);
+}
