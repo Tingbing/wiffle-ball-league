@@ -243,7 +243,7 @@ async function runGameStartAction(fn) {
 
 	try {
 	const result = await withAppWorking("Starting game…", async () => {
-	return await withTimeout(fn(actionId), 7000, "__start_timeout__");
+return await withTimeout(fn(actionId), 12000, "__start_timeout__");
 });
 
 		if (result === "__start_timeout__") {
@@ -288,25 +288,28 @@ async function startGame() {
 }
 
 async function endGameEarly() {
-	if (!game && !activeGameLock) return;
-	if (!confirm("End this game early? All progress for this game will be discarded.")) return;
-
-	const lockId = game?._lockId || activeGameLock?.lockId || null;
-
-	resetLiveGameSessionState();
-	try { persistActiveGameLock(null); } catch (e) {}
-	try { localStorage.removeItem(ACTIVE_GAME_LOCK_KEY); } catch (e) {}
-
-	showMainMenu();
-	showNotification("Game ended locally. Clearing server lock in the background…", 1800);
-
-	const released = await releaseGameLockWithTimeout(lockId, { quiet: true, timeoutMs: 2500 });
-	if (!released) {
-		alert("The game was cleared on this device. If another device still sees a locked game, use Emergency End Game from Game Setup after syncing.");
-		return false;
+	if (!game) {
+		// No live game; if there's just a stale lock, offer to clear it.
+		if (!activeGameLock) return;
+		if (!confirm("There is no live game on this device, but a server lock is still active. Clear it now?")) return;
+		const orphanLockId = activeGameLock?.lockId || null;
+		try { persistActiveGameLock(null); } catch (e) {}
+		try { localStorage.removeItem(ACTIVE_GAME_LOCK_KEY); } catch (e) {}
+		showMainMenu();
+		await releaseGameLockWithTimeout(orphanLockId, { quiet: true, timeoutMs: 2500 });
+		return true;
 	}
 
-	alert("Game ended early. No stats, schedule results, or standings were saved.");
+	const t1Score = Number(game.team1Score || 0);
+	const t2Score = Number(game.team2Score || 0);
+	const isTied = t1Score === t2Score;
+
+	const summary = `Current score: ${game.team1.name} ${t1Score} — ${game.team2.name} ${t2Score}`;
+	const tiePart = isTied ? "\n\nThe game is currently tied — it will be saved as a tie." : "";
+
+	if (!confirm(`End this game now and save the current stats?\n\n${summary}${tiePart}`)) return;
+
+	await finalizeCompletedGame({ allowTie: true });
 	return true;
 }
 
