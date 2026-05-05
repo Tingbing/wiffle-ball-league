@@ -147,10 +147,11 @@ if (postseasonRef) {
 			return false;
 		}
 
-		if (slot.status === "final" && !existingEntry) {
+	if (slot.status === "final" && !existingEntry) {
 			alert("That postseason game was already recorded. Nothing new was saved.");
 			clearLiveGameAutosave();
-return await releaseGameLockReliably(game?._lockId || activeGameLock?.lockId || null, { quiet: true });
+			return await releaseGameLockReliably(game?._lockId || activeGameLock?.lockId || null, { quiet: true });
+		}
 
 		const logId = existingEntry?.id || completedEntryId;
 		const postseasonApplied = applyPostseasonOutcomeOnce(postseasonRef.slotId, logId);
@@ -282,9 +283,10 @@ return await releaseGameLockReliably(game?._lockId || activeGameLock?.lockId || 
 
 	markCompletedGameOutcomeApplied(completedEntryId);
 	saveSeason();
-	clearLiveGameAutosave();
-	queueServerSync("game", { immediate: true });
-return await releaseGameLockReliably(game?._lockId || activeGameLock?.lockId || null, { quiet: true });
+clearLiveGameAutosave();
+		queueServerSync("game", { immediate: true });
+		return await releaseGameLockReliably(game?._lockId || activeGameLock?.lockId || null, { quiet: true });
+	}
 
 	function displayGameOver() {
 		showGameOver();
