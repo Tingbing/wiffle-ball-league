@@ -2,7 +2,8 @@
 // Split from the source-of-truth app.game.js. Load after app.core.js in the required order.
 // Purpose: Completed-game log creation, stat saving, schedule/standings application, and game-over screen.
 
-async function finalizeCompletedGame() {
+async function finalizeCompletedGame(options = {}) {
+	const { allowTie = false } = options;
 	if (!game) return;
 
 	if (game._finalizeInProgress) {
@@ -16,14 +17,23 @@ async function finalizeCompletedGame() {
 	try { setLiveActionControlsBusy(true); } catch (e) {}
 	try { setAppWorking(true, "Saving final game…"); } catch (e) {}
 
-	const result = await saveGameStats();
+	let result = { savedOk: false, lockReleased: false };
+	try {
+		result = await saveGameStats({ allowTie });
+	} catch (error) {
+		console.error("Finalize completed game error:", error);
+		result = { savedOk: false, lockReleased: false };
+	} finally {
+		try { setAppWorking(false); } catch (e) {}
+	}
 
 	if (!result.savedOk) {
-		game._finalizeInProgress = false;
-		game._gameCompletePendingSave = true;
+		if (game) {
+			game._finalizeInProgress = false;
+			game._gameCompletePendingSave = true;
+		}
 		try { persistLiveGameAutosave("finalize-failed"); } catch (e) {}
 		try { setLiveActionControlsBusy(false); } catch (e) {}
-		try { setAppWorking(false); } catch (e) {}
 		showNotification("Game complete, but final save did not finish. Try again before leaving.", 3000);
 		return;
 	}
@@ -34,7 +44,6 @@ async function finalizeCompletedGame() {
 
 	displayGameOver();
 	try { clearLiveGameAutosave(); } catch (e) {}
-	try { setAppWorking(false); } catch (e) {}
 }
 
 function buildCompletedGameLogEntry() {
