@@ -289,7 +289,6 @@ async function startGame() {
 
 async function endGameEarly() {
 	if (!game) {
-		// No live game; if there's just a stale lock, offer to clear it.
 		if (!activeGameLock) return;
 		if (!confirm("There is no live game on this device, but a server lock is still active. Clear it now?")) return;
 		const orphanLockId = activeGameLock?.lockId || null;
@@ -303,11 +302,31 @@ async function endGameEarly() {
 	const t1Score = Number(game.team1Score || 0);
 	const t2Score = Number(game.team2Score || 0);
 	const isTied = t1Score === t2Score;
-
 	const summary = `Current score: ${game.team1.name} ${t1Score} — ${game.team2.name} ${t2Score}`;
-	const tiePart = isTied ? "\n\nThe game is currently tied — it will be saved as a tie." : "";
 
-	if (!confirm(`End this game now and save the current stats?\n\n${summary}${tiePart}`)) return;
+	if (isTied) {
+		const firstWarn = confirm(
+			"⚠️ THIS GAME IS TIED.\n\n" +
+			summary + "\n\n" +
+			"Saving a tied game early can MESS UP standings, seeding, and the playoff bracket.\n\n" +
+			"In real play you should only End & Save when there is a clear winner. Continue playing or break the tie unless you absolutely have no other option.\n\n" +
+			"Press OK only if you understand and accept the risk."
+		);
+		if (!firstWarn) return;
+
+		const finalConfirm = confirm(
+			"Last warning.\n\n" +
+			"This will save the game as a TIE. It will NOT credit either team with a win or loss, and the schedule slot will be marked as a tie.\n\n" +
+			"Are you absolutely sure you want to save this tied game?"
+		);
+		if (!finalConfirm) return;
+	} else {
+		const winner = t1Score > t2Score ? game.team1.name : game.team2.name;
+		const ok = confirm(
+			`End this game now and save the current stats?\n\n${summary}\n\n${winner} will be credited with the win.`
+		);
+		if (!ok) return;
+	}
 
 	await finalizeCompletedGame({ allowTie: true });
 	return true;
