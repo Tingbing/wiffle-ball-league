@@ -195,11 +195,10 @@ function setLiveActionControlsBusy(isBusy) {
 
 function runLiveGameAction(actionLabel, fn) {
 	if (!game) return false;
-	if (liveGameActionInProgress || playInputLock) {
-		showNotification("Wait for the current play to finish.", 900);
-		return false;
-	}
-
+if (liveGameActionInProgress || playInputLock) {
+	showNotification("Play is still saving — tap again after it finishes.", 900);
+	return false;
+}
 	liveGameActionInProgress = true;
 	playInputLock = true;
 	setLiveActionControlsBusy(true);
