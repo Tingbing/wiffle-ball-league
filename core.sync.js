@@ -371,6 +371,40 @@ async function releaseGameLockWithTimeout(lockId, { quiet = true, timeoutMs = 25
 	return await withTimeout(releaseGameLock(lockId, { quiet }), timeoutMs, false);
 }
 
+async function releaseGameLockReliably(lockId, { quiet = true } = {}) {
+	if (!lockId) {
+		persistActiveGameLock(null);
+		return true;
+	}
+
+	for (let attempt = 1; attempt <= 3; attempt++) {
+		const released = await withTimeout(
+			releaseGameLock(lockId, { quiet }),
+			8000,
+			false
+		);
+
+		if (released) {
+			persistActiveGameLock(null);
+			return true;
+		}
+
+		try {
+			const row = await withTimeout(fetchSeasonRowFromServer({ quiet: true }), 5000, null);
+			const serverLockId = row?.active_game_lock_id || row?.active_game_lock?.lockId || null;
+
+			if (!serverLockId || serverLockId !== lockId) {
+				persistActiveGameLock(null);
+				return true;
+			}
+		} catch (e) {}
+
+		await new Promise(resolve => setTimeout(resolve, 600 * attempt));
+	}
+
+	return false;
+}
+
 function getActiveGameLockLabel(lockObj = activeGameLock) {
 	if (!lockObj) return "";
 	if (lockObj.type === "scheduled") {
