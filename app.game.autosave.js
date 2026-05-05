@@ -53,6 +53,35 @@ function setLiveGameStatus(state, message = "", options = {}) {
 	}
 }
 
+let appWorkingCount = 0;
+
+function setAppWorking(isWorking, message = "Working…") {
+	appWorkingCount += isWorking ? 1 : -1;
+	if (appWorkingCount < 0) appWorkingCount = 0;
+
+	const shouldShow = appWorkingCount > 0;
+	const text = shouldShow ? message : "Synced";
+
+	["syncDataTag", "liveSyncStatusTag"].forEach(id => {
+		const el = document.getElementById(id);
+		if (!el) return;
+
+		el.innerText = text;
+		el.classList.toggle("hidden", !shouldShow && id === "liveSyncStatusTag");
+		el.classList.remove("status-ok", "status-pending", "status-synced", "status-restored", "status-error", "status-stale");
+		el.classList.add(shouldShow ? "status-pending" : "status-synced");
+	});
+}
+
+async function withAppWorking(message, fn) {
+	setAppWorking(true, message);
+	try {
+		return await fn();
+	} finally {
+		setAppWorking(false);
+	}
+}
+
 function refreshLiveGameStatusDisplay() {
 	if (game || hasValidLiveGameAutosave()) {
 		setLiveGameStatus(liveGameStatusState === "idle" ? "pending" : liveGameStatusState);
