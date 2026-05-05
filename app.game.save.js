@@ -14,6 +14,7 @@ async function finalizeCompletedGame() {
 	game._gameCompletePendingSave = true;
 	try { persistLiveGameAutosave("finalize-started"); } catch (e) {}
 	try { setLiveActionControlsBusy(true); } catch (e) {}
+	try { setAppWorking(true, "Saving final game…"); } catch (e) {}
 	
 	const completedEntryId = getCompletedGameEntryId(game);
 	const lockReleased = await saveGameStats();
@@ -25,6 +26,7 @@ async function finalizeCompletedGame() {
 		game._gameCompletePendingSave = true;
 		try { persistLiveGameAutosave("finalize-failed"); } catch (e) {}
 		try { setLiveActionControlsBusy(false); } catch (e) {}
+			try { setAppWorking(false); } catch (e) {}
 		showNotification("Game complete, but final save did not finish. Try again before leaving.", 3000);
 		return;
 	}
@@ -35,6 +37,7 @@ async function finalizeCompletedGame() {
 
 	displayGameOver();
 	try { clearLiveGameAutosave(); } catch (e) {}
+	try { setAppWorking(false); } catch (e) {}
 }
 
 function buildCompletedGameLogEntry() {
