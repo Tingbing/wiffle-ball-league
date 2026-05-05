@@ -31,9 +31,9 @@ async function finalizeCompletedGame() {
 		return;
 	}
 
-	if (!lockReleased) {
-		alert("Game stats were saved, but the live-game lock could not be cleared. Please sync again before anyone starts another game.");
-	}
+if (!lockReleased) {
+	alert("Game stats were saved, but the live-game lock could not be cleared automatically. Use the Sync button on the main menu to retry clearing the lock. If that still fails, use Emergency End Game.");
+}
 
 	displayGameOver();
 	try { clearLiveGameAutosave(); } catch (e) {}
