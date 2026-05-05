@@ -243,7 +243,9 @@ async function runGameStartAction(fn) {
 	if (scheduledBtn) scheduledBtn.disabled = true;
 
 	try {
-		const result = await withTimeout(fn(actionId), 7000, "__start_timeout__");
+	const result = await withAppWorking("Starting game…", async () => {
+	return await withTimeout(fn(actionId), 7000, "__start_timeout__");
+});
 
 		if (result === "__start_timeout__") {
 			if (activeGameStartActionId === actionId) activeGameStartActionId = 0;
