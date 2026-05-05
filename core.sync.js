@@ -662,18 +662,29 @@ function applyServerSeasonRow(row, { force = false, source = "server" } = {}) {
 		return false;
 	}
 
-	if (!force && localDirty && !sameOrOlderData) {
-	if (source === "public-view" && !Object.prototype.hasOwnProperty.call(row, "active_game_lock")) {
-		try { refreshGameLockUI(); } catch (e) {}
-	} else {
-		persistActiveGameLock(row.active_game_lock || null);
-	}
+	if (!force && localDirty) {
+		// Newer server changes than our last-known baseline → real conflict.
+		if (!sameOrOlderData) {
+			if (source === "public-view" && !Object.prototype.hasOwnProperty.call(row, "active_game_lock")) {
+				try { refreshGameLockUI(); } catch (e) {}
+			} else {
+				persistActiveGameLock(row.active_game_lock || null);
+			}
+			return scheduleConflictNotice(
+				"A newer server snapshot was detected while this tab still had unsynced local changes.",
+				{ source, row }
+			);
+		}
 
-	return scheduleConflictNotice(
-		"A newer server snapshot was detected while this tab still had unsynced local changes.",
-		{ source, row }
-	);
-}
+		// Local has unsynced edits but the server isn't actually newer than what
+		// we already saw. Do NOT overwrite local with the older server snapshot —
+		// that wipes out unsynced finalized games. Keep local; push it later.
+		if (Object.prototype.hasOwnProperty.call(row, "active_game_lock")) {
+			persistActiveGameLock(row.active_game_lock || null);
+		}
+		try { queueServerSync(`hydrate-keep-local-${source}`, { immediate: false }); } catch (e) {}
+		return false;
+	}
 
 		suppressAutoSync = true;
 	season = ensureSeasonShape(info.seasonJson);
@@ -965,7 +976,7 @@ async function syncSeasonToServer({ quiet = false } = {}) {
 		const { data } = await supabaseClient.auth.getSession();
 		const userId = data?.session?.user?.id || null;
 
-		const latestRow = await fetchSeasonRowFromServer({ quiet: true });
+	const latestRow = await withTimeout(fetchSeasonRowFromServer({ quiet: true }), 8000, null);
 		const latestInfo = latestRow ? getRowRevisionInfo(latestRow) : null;
 
 		const currentSeasonRev = getSeasonRevisionFrom(season);
@@ -1014,10 +1025,19 @@ async function syncSeasonToServer({ quiet = false } = {}) {
 				query = query.eq("updated_at", latestInfo.updatedAt);
 			}
 
-			const { data: updatedRow, error } = await query
-				.select("season_json,schedule_json,updated_at,active_game_lock,active_game_lock_id")
-				.maybeSingle();
+	const updateResult = await withTimeout(
+				query.select("season_json,schedule_json,updated_at,active_game_lock,active_game_lock_id").maybeSingle(),
+				10000,
+				null
+			);
 
+			if (!updateResult) {
+				console.warn("[wbl] season_data update timed out");
+				try { markLiveGameServerSyncDelayed(); } catch (e) {}
+				return false;
+			}
+
+			const { data: updatedRow, error } = updateResult;
 			if (error) throw error;
 
 			if (!updatedRow) {
@@ -1033,12 +1053,23 @@ async function syncSeasonToServer({ quiet = false } = {}) {
 
 			savedRow = updatedRow;
 		} else {
-			const { data: insertedRow, error } = await supabaseClient
-				.from("season_data")
-				.upsert(payload, { onConflict: "league_code" })
-				.select("season_json,schedule_json,updated_at,active_game_lock,active_game_lock_id")
-				.maybeSingle();
+		const upsertResult = await withTimeout(
+				supabaseClient
+					.from("season_data")
+					.upsert(payload, { onConflict: "league_code" })
+					.select("season_json,schedule_json,updated_at,active_game_lock,active_game_lock_id")
+					.maybeSingle(),
+				10000,
+				null
+			);
 
+			if (!upsertResult) {
+				console.warn("[wbl] season_data upsert timed out");
+				try { markLiveGameServerSyncDelayed(); } catch (e) {}
+				return false;
+			}
+
+			const { data: insertedRow, error } = upsertResult;
 			if (error) throw error;
 			savedRow = insertedRow;
 		}
