@@ -1238,3 +1238,24 @@
 		width: 100%;
 	}
 }
+
+/* Required pitcher selection lock */
+.live-pitcher-required-notice {
+	background: #332812;
+	border: 1px solid #7a5a1f;
+	border-radius: 10px;
+	padding: 10px 12px;
+	color: #ffd98a;
+	font-weight: bold;
+	line-height: 1.35;
+}
+
+.live-pitcher-card #confirmPitcherButton {
+	width: 100%;
+	margin-top: 8px;
+}
+
+.live-pitcher-card.pitcher-required {
+	border-color: #7a5a1f;
+	box-shadow: 0 0 0 1px rgba(255, 217, 138, 0.18);
+}
