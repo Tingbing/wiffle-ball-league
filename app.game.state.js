@@ -57,7 +57,10 @@ function saveGameState() {
 		batterIndex: game.batterIndex,
 		batterIndexByTeam: JSON.parse(JSON.stringify(game.batterIndexByTeam || {})),
 		currentPitcher: game.currentPitcher,
-		bases: {
+pitcherSelectionRequired: game.pitcherSelectionRequired === true,
+pitcherSelectionRequiredHalfInningKey: game.pitcherSelectionRequiredHalfInningKey || "",
+pitcherSelectionConfirmedHalfInningKey: game.pitcherSelectionConfirmedHalfInningKey || "",
+bases: {
 			first: game.bases.first ? { ...game.bases.first } : null,
 			second: game.bases.second ? { ...game.bases.second } : null,
 			third: game.bases.third ? { ...game.bases.third } : null
@@ -87,8 +90,11 @@ function restoreGameState(stateString) {
 		[game.team1.name]: 0,
 		[game.team2.name]: 0
 	};
-	game.currentPitcher = state.currentPitcher;
-	game.bases = state.bases;
+game.currentPitcher = state.currentPitcher;
+game.pitcherSelectionRequired = state.pitcherSelectionRequired === true;
+game.pitcherSelectionRequiredHalfInningKey = state.pitcherSelectionRequiredHalfInningKey || "";
+game.pitcherSelectionConfirmedHalfInningKey = state.pitcherSelectionConfirmedHalfInningKey || "";
+game.bases = state.bases;
 	game.gameStats = state.gameStats;
 	game.batting = state.batting;
 	game.fielding = state.fielding;
