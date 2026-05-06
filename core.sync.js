@@ -160,7 +160,19 @@ function shouldIgnoreSameBrowserConflictDuringLiveGame(detail = {}) {
 	const source = detail?.source || "";
 	const kind = detail?.kind || "";
 
-	return source === "storage" || kind === "season" || kind === "schedule";
+	// During a live game, defer all automatically-triggered conflict sources.
+	// Storage-event conflicts are same-browser (harmless). Server-preflight and
+	// sync-race conflicts are transient write races — they must not block live game
+	// saves. Only genuine manual multi-device conflicts (confirmed by user action)
+	// should ever interrupt a live game, and those go through manualResaveAllStats.
+	return (
+		source === "storage" ||
+		source === "server-preflight" ||
+		source === "server-race" ||
+		source === "sync-race" ||
+		kind === "season" ||
+		kind === "schedule"
+	);
 }
 
 function scheduleConflictNotice(reason, detail = {}) {
@@ -180,40 +192,30 @@ function scheduleConflictNotice(reason, detail = {}) {
 		};
 	}
 
-	if (serverSyncTimer) {
+if (serverSyncTimer) {
 		clearTimeout(serverSyncTimer);
 		serverSyncTimer = null;
 	}
-	setSyncButtonEnabled(false);
-	if (syncConflictAlertShown) return false;
 
-	syncConflictAlertShown = true;
-	setTimeout(async () => {
-		try {
-			const shouldRecover = confirm(
-				"Data conflict detected.\n\n" +
-				reason + "\n\n" +
-				"This tab is blocked from saving so it cannot overwrite newer data.\n\n" +
-				"Press OK to load the latest saved data now. Press Cancel to keep viewing this stale tab without saving."
-			);
-			if (shouldRecover) await resolveSyncConflictByReloadingLatest({ quiet: false });
-		} catch (e) {
-			console.warn("conflict recovery prompt failed:", e);
-		} finally {
-			syncConflictAlertShown = false;
-		}
-	}, 0);
+	// Keep the Sync button enabled — it acts as the "tap to resolve" action.
+	// Do NOT show a blocking confirm() dialog. A same-phone background/restore
+	// on iOS Safari triggers this path and a modal dialog blocks the whole app.
+	// manualResaveAllStats() handles resolution when the user taps Sync.
+	try { showNotification("⚠️ Sync conflict — tap Sync to resolve", 3500); } catch (e) {}
 
 	return false;
 }
 
 function assertCanWriteLocalSnapshot(kind) {
-	syncStateFromHead();
-	if (syncConflictState) return false;
-
+	// Live-game local writes are always allowed, regardless of any prior conflict state.
+	// The live game's local autosave is authoritative and must never be blocked by
+	// a conflict that was flagged before or during the game.
 	if (typeof hasLocalLiveGameToProtect === "function" && hasLocalLiveGameToProtect()) {
 		return true;
 	}
+
+	syncStateFromHead();
+	if (syncConflictState) return false;
 
 	const head = readLocalSyncHead();
 	if (!head) return true;
@@ -1079,13 +1081,19 @@ async function syncSeasonToServer({ quiet = false } = {}) {
 
 async function runSyncSeasonToServerOnce({ quiet = false } = {}) {
 
-	if (syncConflictState && typeof hasLocalLiveGameToProtect === "function" && hasLocalLiveGameToProtect() && syncConflictState?.detail?.source === "storage") {
+	// During an active live game, clear any automatically-flagged conflict state
+	// (storage event, server-preflight race, etc.) so the completed game can still
+	// sync its stats to the server. All these sources are transient; the live game's
+	// locally-saved completed data takes priority.
+	if (syncConflictState && typeof hasLocalLiveGameToProtect === "function" && hasLocalLiveGameToProtect()) {
 		clearSyncConflictState();
 	}
 
 	if (syncConflictState) {
+		// Conflict state is still set with no live game — do not push stale data.
+		// manualResaveAllStats() will resolve this when the user taps Sync.
 		if (!quiet) {
-			alert("This tab is blocked from saving because newer data was detected elsewhere. Load the latest data first.");
+			showNotification("⚠️ Sync conflict — tap Sync to resolve", 3000);
 		}
 		return false;
 	}
@@ -1321,7 +1329,22 @@ async function manualResaveAllStats() {
 		return false;
 	}
 
-	if (!(await requireLogin())) return false;
+if (!(await requireLogin())) return false;
+
+	// If a conflict was flagged (e.g. from a background/restore cycle on iPhone),
+	// resolve it now before attempting to sync. Same-browser storage conflicts are
+	// safe to clear directly. Real server conflicts are resolved by comparing server
+	// vs local revisions and keeping whichever is genuinely newer.
+	if (syncConflictState) {
+		if (syncConflictState?.detail?.source === "storage") {
+			// Same-browser, same-device — always safe to clear and proceed.
+			clearSyncConflictState();
+		} else {
+			// Real conflict: pull server, compare, apply the newer snapshot,
+			// then proceed to push if local is still ahead.
+			try { await resolveSyncConflictByReloadingLatest({ quiet: true }); } catch (e) {}
+		}
+	}
 
 	manualSyncInProgress = true;
 	setSyncButtonBusy(true, "Syncing data...");
