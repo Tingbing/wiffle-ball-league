@@ -214,9 +214,10 @@ function endHalfInning(pitcherKey, reasonText) {
 		game.fielding = temp;
 
 		setCurrentBatterIndex(getCurrentBatterIndex());
-		updatePitcherSelect();
+updatePitcherSelect();
+requirePitcherSelectionForCurrentHalfInning("side-change");
 
-		if (isOvertimeActive()) {
+if (isOvertimeActive()) {
 			ensureOvertimeState().round = getOvertimeRoundForCurrentInning();
 			startOvertimeHalfInning(
 				reasonText || `OT ${getOvertimeRoundForCurrentInning()}: ${game.batting.name} now gets the same runner-on-2nd setup.`
@@ -242,16 +243,17 @@ function endHalfInning(pitcherKey, reasonText) {
 		overtime.active = true;
 		overtime.round = getOvertimeRoundForCurrentInning();
 
-		updatePitcherSelect();
+updatePitcherSelect();
+requirePitcherSelectionForCurrentHalfInning("overtime");
 
-		startOvertimeHalfInning(
+startOvertimeHalfInning(
 			reasonText || `Tie game after regulation — OT ${overtime.round} begins with 1 out and a runner on 2nd.`
 		);
 
 		return "overtime";
 	}
-
-	updatePitcherSelect();
-	showNotification(reasonText || ("Inning " + game.inning + " starting! " + game.batting.name + " batting."), 1500);
+updatePitcherSelect();
+requirePitcherSelectionForCurrentHalfInning("side-change");
+showNotification(reasonText || ("Inning " + game.inning + " starting! " + game.batting.name + " batting."), 1500);
 	return "side-change";
 }
