@@ -40,7 +40,10 @@ game = {
 		[activeTeam2.name]: 0
 	},
 	currentPitcher: null,
-	bases: { first: null, second: null, third: null },
+pitcherSelectionRequired: true,
+pitcherSelectionRequiredHalfInningKey: "1-top",
+pitcherSelectionConfirmedHalfInningKey: "",
+bases: { first: null, second: null, third: null },
 	gameStats: {},
 	currentInningPitchers: {},
 	halfInningRuns: 0,
@@ -92,9 +95,10 @@ _scheduleRef: scheduleRef,
 	document.getElementById("undoButton").disabled = true;
 	keepLiveGameSectionsEnabled();
 	showGame();
-	updatePitcherSelect();
-	updateGameScreen();
-	persistLiveGameAutosave();
+updatePitcherSelect();
+requirePitcherSelectionForCurrentHalfInning("game-start");
+updateGameScreen();
+persistLiveGameAutosave();
 }
 
 async function beginLockedGame(t1, t2, scheduleRef = null, extraLockDetails = {}, gameContext = null, startActionId = null) {
@@ -175,9 +179,8 @@ function setLiveActionControlsBusy(isBusy) {
 		"#gameScreen .live-button-grid button",
 		"#gameScreen .live-top-tools button:not(.undo-button)",
 		"#gameScreen .live-runner-out-card button",
-		"#gameScreen .live-manual-controls button",
-		"#gameScreen #pitcherSelect",
-		"#gameScreen #manualRunnerSelect",
+"#gameScreen .live-manual-controls button",
+"#gameScreen #manualRunnerSelect",
 		"#gameScreen #manualTargetBaseSelect"
 	].join(",");
 
@@ -191,10 +194,19 @@ function setLiveActionControlsBusy(isBusy) {
 			delete el.dataset.liveWasEnabled;
 		}
 	});
+
+	if (!isBusy && typeof applyPitcherSelectionLockState === "function") {
+		applyPitcherSelectionLockState();
+	}
 }
 
 function runLiveGameAction(actionLabel, fn) {
 	if (!game) return false;
+	if (typeof isPitcherSelectionBlockingPlayInput === "function" && isPitcherSelectionBlockingPlayInput()) {
+		showNotification("Select/confirm the pitcher before recording plays.", 1400);
+		if (typeof applyPitcherSelectionLockState === "function") applyPitcherSelectionLockState();
+		return false;
+	}
 if (liveGameActionInProgress || playInputLock) {
 	showNotification("Play is still saving — tap again after it finishes.", 900);
 	return false;
@@ -221,7 +233,8 @@ if (liveGameActionInProgress || playInputLock) {
 			// final save is pending. End Game Early remains outside this control group.
 			if (game?._finalizeInProgress || game?._gameCompletePendingSave) return;
 
-			setLiveActionControlsBusy(false);
+				setLiveActionControlsBusy(false);
+			if (typeof applyPitcherSelectionLockState === "function") applyPitcherSelectionLockState();
 		}, 220);
 	}
 }
