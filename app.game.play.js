@@ -202,7 +202,8 @@ function setLiveActionControlsBusy(isBusy) {
 
 function runLiveGameAction(actionLabel, fn) {
 	if (!game) return false;
-	if (typeof isPitcherSelectionBlockingPlayInput === "function" && isPitcherSelectionBlockingPlayInput()) {
+	const canRunWhilePitcherSelectionIsRequired = actionLabel === "undo";
+	if (!canRunWhilePitcherSelectionIsRequired && typeof isPitcherSelectionBlockingPlayInput === "function" && isPitcherSelectionBlockingPlayInput()) {
 		showNotification("Select/confirm the pitcher before recording plays.", 1400);
 		if (typeof applyPitcherSelectionLockState === "function") applyPitcherSelectionLockState();
 		return false;
