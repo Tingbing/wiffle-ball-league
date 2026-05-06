@@ -201,6 +201,27 @@ async function showPastGameLog() {
 	}
 }
 
+async function showManualGameStatEditor() {
+	if (game) {
+		showGame();
+		try { updateGameScreen(); } catch (e) {}
+		alert("Finish or End Game Early before editing completed game stats.");
+		return;
+	}
+
+	const unlocked = typeof isLeagueUnlocked === "function" ? isLeagueUnlocked() : !isPublicViewOnlyMode();
+	if (isPublicViewOnlyMode() || !unlocked) {
+		alert("Sign in and enter the league code to edit completed game stats.");
+		showPublicMenu();
+		return;
+	}
+
+	hideAllScreens();
+	document.getElementById("manualGameStatEditorScreen").classList.remove("hidden");
+	updatePublicAccessUI();
+	try { displayManualGameStatEditor(); } catch (e) { console.warn("displayManualGameStatEditor failed:", e); }
+}
+
 async function showPostseason() {
 	hideAllScreens();
 	document.getElementById("postseasonScreen").classList.remove("hidden");
@@ -231,6 +252,7 @@ function hideAllScreens() {
 	document.getElementById("teamStatsScreen").classList.add("hidden");
 	document.getElementById("rankingsScreen").classList.add("hidden");
 	document.getElementById("pastGameLogScreen").classList.add("hidden");
+	document.getElementById("manualGameStatEditorScreen")?.classList.add("hidden");
 	document.getElementById("scheduleScreen").classList.add("hidden");
 	document.getElementById("postseasonScreen").classList.add("hidden");
 	document.getElementById("activeUsersScreen").classList.add("hidden");
