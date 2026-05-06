@@ -159,7 +159,7 @@ async function saveGameStats(options = {}) {
 	// retried on reload without losing data.
 	const completeAndExit = async ({ alreadyFinalized = false } = {}) => {
 		if (!alreadyFinalized) {
-			try { saveSeason({ skipServerSync: true }); } catch (e) {}
+		try { saveSeason({ skipServerSync: true, allowConflictBypass: true }); } catch (e) {}
 		}
 
 		const lockId = game?._lockId || activeGameLock?.lockId || null;
@@ -296,7 +296,7 @@ async function saveGameStats(options = {}) {
 	}
 
 	saveCompletedGameLog({ outcomeApplied: false });
-	saveSeason({ skipServerSync: true });
+	saveSeason({ skipServerSync: true, allowConflictBypass: true });
 
 	const outcomeApplied = applyGameOutcomeOnce();
 	if (!outcomeApplied) {
