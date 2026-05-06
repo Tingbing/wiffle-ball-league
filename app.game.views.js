@@ -1978,7 +1978,7 @@ function createPastGameDetails(entry) {
 	}
 
 	const teamsGrid = document.createElement("div");
-	teamsGrid.className = "past-game-team-grid";
+teamsGrid.className = "manual-game-editor-team-grid";
 	teamsGrid.appendChild(createPastGameTeamCard(entry, entry.team1Name, entry.team1Score));
 	teamsGrid.appendChild(createPastGameTeamCard(entry, entry.team2Name, entry.team2Score));
 	wrap.appendChild(teamsGrid);
@@ -2212,7 +2212,7 @@ function createManualGameStatEditorTable(entry, teamName, kind) {
 	wrap.className = "manual-game-editor-table-wrap";
 
 	const table = document.createElement("table");
-	table.className = "stats-table manual-game-editor-table";
+table.className = "stats-table responsive manual-game-editor-table";
 	wrap.appendChild(table);
 
 	const thead = document.createElement("thead");
@@ -2229,13 +2229,14 @@ function createManualGameStatEditorTable(entry, teamName, kind) {
 	rows.forEach(row => {
 		const tr = document.createElement("tr");
 
-		const nameCell = document.createElement("td");
-		nameCell.textContent = getPastGamePlayerDisplayName(row.stats);
-		tr.appendChild(nameCell);
-
+	const nameCell = document.createElement("td");
+nameCell.textContent = getPastGamePlayerDisplayName(row.stats);
+nameCell.dataset.label = "Player";
+tr.appendChild(nameCell);
 		fields.forEach(field => {
-			const td = document.createElement("td");
-			const input = document.createElement("input");
+		const td = document.createElement("td");
+td.dataset.label = field.label;
+const input = document.createElement("input");
 			input.type = "number";
 			input.min = "0";
 			input.step = "1";
@@ -2440,7 +2441,7 @@ function displayManualGameStatEditor(selectedGameId = "") {
 	}
 
 	const teamsGrid = document.createElement("div");
-	teamsGrid.className = "past-game-team-grid";
+teamsGrid.className = "manual-game-editor-team-grid";
 	teamsGrid.appendChild(createManualGameStatEditorTeamCard(entry, entry.team1Name));
 	teamsGrid.appendChild(createManualGameStatEditorTeamCard(entry, entry.team2Name));
 	container.appendChild(teamsGrid);
