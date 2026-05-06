@@ -146,22 +146,22 @@ function applyPitcherSelectionLockState() {
 	if (game && (game._finalizeInProgress || game._gameCompletePendingSave)) return;
 
 	const locked = !!(game && game.pitcherSelectionRequired === true);
-	const selectors = [
-		"#gameScreen .live-button-grid button",
-		"#gameScreen .live-top-tools button",
-		"#gameScreen .live-runner-out-card button",
-		"#gameScreen .live-manual-controls button",
-		"#gameScreen #manualRunnerSelect",
-		"#gameScreen #manualTargetBaseSelect"
-	].join(",");
+const selectors = [
+	"#gameScreen .live-button-grid button",
+	"#gameScreen .live-top-tools button:not(.undo-button)",
+	"#gameScreen .live-runner-out-card button",
+	"#gameScreen .live-manual-controls button",
+	"#gameScreen #manualRunnerSelect",
+	"#gameScreen #manualTargetBaseSelect"
+].join(",");
 
 	document.querySelectorAll(selectors).forEach(el => {
 		if (!el) return;
 		el.disabled = locked;
 	});
 
-	const undoButton = document.getElementById("undoButton");
-	if (undoButton) undoButton.disabled = locked || gameHistory.length === 0;
+const undoButton = document.getElementById("undoButton");
+if (undoButton) undoButton.disabled = gameHistory.length === 0;
 
 	const pitcherSelect = document.getElementById("pitcherSelect");
 	if (pitcherSelect) pitcherSelect.disabled = false;
