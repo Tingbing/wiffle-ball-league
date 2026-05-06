@@ -93,7 +93,11 @@
 		</button>
 
 		<button class="menu-button" onclick="showPostseason()">
-	🏆 Postseason
+  🏆 Postseason
+</button>
+
+		<button id="manualGameStatEditorMenuBtn" class="menu-button" onclick="showManualGameStatEditor()">
+  ✏️ Edit Past Game Stats
 </button>
 
 	<button class="small-link" onclick="beginFullAccessFlow()">
@@ -462,6 +466,7 @@
 		<div class="season-stats-hub-buttons">
 			<button class="menu-button" onclick="showRankings()">🏆 Rankings</button>
 			<button class="menu-button" onclick="showPastGameLog()">🗂️ Past Game Log</button>
+			<button id="manualGameStatEditorHubBtn" class="menu-button" onclick="showManualGameStatEditor()">✏️ Edit Past Game Stats</button>
 			<button class="menu-button" onclick="showPlayerStats()">👤 Player Stats</button>
 			<button class="menu-button" onclick="showTeamStats()">📋 Team Stats</button>
 		</div>
@@ -514,6 +519,13 @@
 
 	<h2>🗂️ Past Game Log</h2>
 	<div id="pastGameLogContainer"></div>
+</div>
+
+<div id="manualGameStatEditorScreen" class="hidden">
+	<button class="back-button" onclick="showSeasonStats()">← Back to Season Stats</button>
+
+	<h2>✏️ Edit Past Game Stats</h2>
+	<div id="manualGameStatEditorContainer"></div>
 </div>
 <!-- SCHEDULE SCREEN -->
 
