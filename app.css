@@ -1201,22 +1201,33 @@
 	-webkit-overflow-scrolling: touch;
 }
 
+.manual-game-editor-team-grid {
+	display: grid;
+	grid-template-columns: 1fr;
+	gap: 14px;
+}
+
 .manual-game-editor-table input[type="number"] {
-	width: 74px;
+	width: 56px;
 	box-sizing: border-box;
 	margin: 0;
-	padding: 7px 8px;
+	padding: 6px 6px;
 	background: #181818;
 	color: #fff;
 	border: 1px solid #555;
 	border-radius: 8px;
 }
 
-.manual-game-editor-table td:first-child,
-.manual-game-editor-table th:first-child {
-	min-width: 130px;
+.manual-game-editor-table th,
+.manual-game-editor-table td {
+	padding: 6px;
+	font-size: 14px;
 }
 
+.manual-game-editor-table td:first-child,
+.manual-game-editor-table th:first-child {
+	min-width: 100px;
+}
 @media (max-width: 720px) {
 	.manual-game-editor-actions {
 		flex-direction: column;
