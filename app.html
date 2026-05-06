@@ -389,10 +389,12 @@
 
 			<div class="live-right-column">
 				<div id="pitchingSection" class="card live-pitcher-card">
-					<h3>Select Pitcher</h3>
-					<select id="pitcherSelect" onchange="updatePitcherDisplay()"></select>
-					<p id="pitcherText"></p>
-				</div>
+	<h3>Select Pitcher</h3>
+	<p id="pitcherRequiredNotice" class="live-pitcher-required-notice hidden">Select/confirm the pitcher for this half-inning before recording plays.</p>
+	<select id="pitcherSelect" onchange="updatePitcherDisplay()"></select>
+	<button id="confirmPitcherButton" class="live-secondary-button" type="button" onclick="confirmCurrentPitcherSelection()">Confirm Pitcher</button>
+	<p id="pitcherText"></p>
+</div>
 
 				<div class="card live-results-card">
 					<h3>Record Batting Result</h3>
