@@ -154,7 +154,23 @@ async function resolveSyncConflictByReloadingLatest({ quiet = false } = {}) {
 	return true;
 }
 
+function shouldIgnoreSameBrowserConflictDuringLiveGame(detail = {}) {
+	if (!(typeof hasLocalLiveGameToProtect === "function" && hasLocalLiveGameToProtect())) return false;
+
+	const source = detail?.source || "";
+	const kind = detail?.kind || "";
+
+	return source === "storage" || kind === "season" || kind === "schedule";
+}
+
 function scheduleConflictNotice(reason, detail = {}) {
+	if (shouldIgnoreSameBrowserConflictDuringLiveGame(detail)) {
+		syncStateFromHead();
+		try { markLiveGameServerSyncPending("Live Game Protected"); } catch (e) {}
+		try { setSyncButtonEnabled(true); } catch (e) {}
+		return false;
+	}
+
 	if (!syncConflictState) {
 		syncConflictState = {
 			reason,
@@ -194,6 +210,10 @@ function scheduleConflictNotice(reason, detail = {}) {
 function assertCanWriteLocalSnapshot(kind) {
 	syncStateFromHead();
 	if (syncConflictState) return false;
+
+	if (typeof hasLocalLiveGameToProtect === "function" && hasLocalLiveGameToProtect()) {
+		return true;
+	}
 
 	const head = readLocalSyncHead();
 	if (!head) return true;
@@ -1059,6 +1079,10 @@ async function syncSeasonToServer({ quiet = false } = {}) {
 
 async function runSyncSeasonToServerOnce({ quiet = false } = {}) {
 
+	if (syncConflictState && typeof hasLocalLiveGameToProtect === "function" && hasLocalLiveGameToProtect() && syncConflictState?.detail?.source === "storage") {
+		clearSyncConflictState();
+	}
+
 	if (syncConflictState) {
 		if (!quiet) {
 			alert("This tab is blocked from saving because newer data was detected elsewhere. Load the latest data first.");
@@ -1066,9 +1090,9 @@ async function runSyncSeasonToServerOnce({ quiet = false } = {}) {
 		return false;
 	}
 
-	try { saveSeason({ skipServerSync: true, touchMeta: false, bumpRevision: false }); } catch (e) {}
-	try { saveSchedule({ skipServerSync: true, touchMeta: false, bumpRevision: false }); } catch (e) {}
-
+	const liveGameConflictBypass = typeof hasLocalLiveGameToProtect === "function" && hasLocalLiveGameToProtect();
+try { saveSeason({ skipServerSync: true, touchMeta: false, bumpRevision: false, allowConflictBypass: liveGameConflictBypass }); } catch (e) {}
+try { saveSchedule({ skipServerSync: true, touchMeta: false, bumpRevision: false, allowConflictBypass: liveGameConflictBypass }); } catch (e) {}
 	const ok = await requireLogin();
 	if (!ok) return false;
 
@@ -1341,8 +1365,9 @@ async function manualResaveAllStats() {
 			return true;
 		}
 
-		try { saveSeason({ skipServerSync: true }); } catch (e) {}
-		try { saveSchedule({ skipServerSync: true }); } catch (e) {}
+const liveGameConflictBypass = typeof hasLocalLiveGameToProtect === "function" && hasLocalLiveGameToProtect();
+try { saveSeason({ skipServerSync: true, allowConflictBypass: liveGameConflictBypass }); } catch (e) {}
+try { saveSchedule({ skipServerSync: true, allowConflictBypass: liveGameConflictBypass }); } catch (e) {}
 
 		const ok = await withAppWorking("Syncing…", async () => {
 			return await syncSeasonToServer({ quiet: false });
