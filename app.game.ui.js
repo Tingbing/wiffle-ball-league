@@ -85,8 +85,100 @@ function applyConfirmRunnerOut() {
 	updateGameScreen();
 }
 
+function getSelectedPitcherIndex() {
+	const select = document.getElementById("pitcherSelect");
+	const pitcherIndex = parseInt(select?.value, 10);
+	if (!Number.isInteger(pitcherIndex) || pitcherIndex < 0) return -1;
+	if (!Array.isArray(game?.fielding?.players) || !game.fielding.players[pitcherIndex]) return -1;
+	return pitcherIndex;
+}
+
+function hasValidSelectedPitcher() {
+	return getSelectedPitcherIndex() >= 0;
+}
+
+function isPitcherSelectionBlockingPlayInput() {
+	if (!game || game._finalizeInProgress || game._gameCompletePendingSave) return false;
+	ensurePitcherSelectionRequirementForCurrentHalfInning("check", { silent: true });
+	return game?.pitcherSelectionRequired === true || !hasValidSelectedPitcher();
+}
+
+function requirePitcherSelectionForCurrentHalfInning(reason = "", options = {}) {
+	if (!game || game._finalizeInProgress || game._gameCompletePendingSave) return false;
+	game.pitcherSelectionRequired = true;
+	game.pitcherSelectionRequiredHalfInningKey = getCurrentHalfInningKey();
+	document.getElementById("errorPicker")?.classList.add("hidden");
+	document.getElementById("outPicker")?.classList.add("hidden");
+	applyPitcherSelectionLockState();
+	if (!options.silent) {
+		showNotification("Select/confirm the pitcher before recording plays.", 1800);
+	}
+	try { persistLiveGameAutosave(reason || "pitcher-required"); } catch (e) {}
+	return true;
+}
+
+function ensurePitcherSelectionRequirementForCurrentHalfInning(reason = "", options = {}) {
+	if (!game || game._finalizeInProgress || game._gameCompletePendingSave) {
+		applyPitcherSelectionLockState();
+		return false;
+	}
+
+	const halfInningKey = getCurrentHalfInningKey();
+	const confirmedKey = game.pitcherSelectionConfirmedHalfInningKey || "";
+	const currentPitcherKey = game.currentPitcher?.halfInningKey || "";
+	const validPitcher = hasValidSelectedPitcher();
+
+	if (game.pitcherSelectionRequired === true && game.pitcherSelectionRequiredHalfInningKey === halfInningKey) {
+		applyPitcherSelectionLockState();
+		return true;
+	}
+
+	if (!validPitcher || (confirmedKey !== halfInningKey && currentPitcherKey !== halfInningKey)) {
+		return requirePitcherSelectionForCurrentHalfInning(reason || "pitcher-required", options);
+	}
+
+	game.pitcherSelectionRequired = false;
+	applyPitcherSelectionLockState();
+	return false;
+}
+
+function applyPitcherSelectionLockState() {
+	if (game && (game._finalizeInProgress || game._gameCompletePendingSave)) return;
+
+	const locked = !!(game && game.pitcherSelectionRequired === true);
+	const selectors = [
+		"#gameScreen .live-button-grid button",
+		"#gameScreen .live-top-tools button",
+		"#gameScreen .live-runner-out-card button",
+		"#gameScreen .live-manual-controls button",
+		"#gameScreen #manualRunnerSelect",
+		"#gameScreen #manualTargetBaseSelect"
+	].join(",");
+
+	document.querySelectorAll(selectors).forEach(el => {
+		if (!el) return;
+		el.disabled = locked;
+	});
+
+	const undoButton = document.getElementById("undoButton");
+	if (undoButton) undoButton.disabled = locked || gameHistory.length === 0;
+
+	const pitcherSelect = document.getElementById("pitcherSelect");
+	if (pitcherSelect) pitcherSelect.disabled = false;
+
+	const confirmButton = document.getElementById("confirmPitcherButton");
+	if (confirmButton) confirmButton.disabled = !game || !hasValidSelectedPitcher();
+
+	const notice = document.getElementById("pitcherRequiredNotice");
+	if (notice) notice.classList.toggle("hidden", !locked);
+
+	const pitchingSection = document.getElementById("pitchingSection");
+	if (pitchingSection) pitchingSection.classList.toggle("pitcher-required", locked);
+}
+
 function updatePitcherSelect() {
 	let select = document.getElementById("pitcherSelect");
+	if (!select || !game?.fielding?.players) return;
 	select.innerHTML = "";
 
 	game.fielding.players.forEach((player, i) => {
@@ -97,21 +189,54 @@ function updatePitcherSelect() {
 	});
 
 	let halfInningKey = game.inning + "-" + game.halfInning;
-	if (game.currentInningPitchers[halfInningKey] !== undefined) {
+	if (game.currentInningPitchers && game.currentInningPitchers[halfInningKey] !== undefined) {
 		select.selectedIndex = game.currentInningPitchers[halfInningKey];
+	} else {
+		select.selectedIndex = 0;
 	}
 
-	updatePitcherDisplay();
+	updatePitcherDisplay({ renderOnly: true });
 }
 
-function updatePitcherDisplay() {
+function updatePitcherDisplay(options = {}) {
 	let select = document.getElementById("pitcherSelect");
-	let pitcherIndex = parseInt(select.value);
-	let pitcher = game.fielding.players[pitcherIndex];
-	document.getElementById("pitcherText").innerText = "Pitching: " + pitcher;
+	if (!select || !game?.fielding?.players) return;
+	let pitcherIndex = getSelectedPitcherIndex();
+	let pitcher = pitcherIndex >= 0 ? game.fielding.players[pitcherIndex] : null;
+	document.getElementById("pitcherText").innerText = pitcher ? "Pitching: " + pitcher : "Pitching: Select pitcher";
+
+	if (options.renderOnly) {
+		applyPitcherSelectionLockState();
+		return;
+	}
+
+	if (!pitcher) {
+		requirePitcherSelectionForCurrentHalfInning("invalid-pitcher", { silent: true });
+		return;
+	}
+
+	const halfInningKey = getCurrentHalfInningKey();
+	game.currentInningPitchers = game.currentInningPitchers || {};
+	game.currentInningPitchers[halfInningKey] = pitcherIndex;
+	game.currentPitcher = {
+		halfInningKey,
+		pitcherIndex,
+		pitcherName: pitcher,
+		teamName: game.fielding?.name || null
+	};
+	game.pitcherSelectionRequired = false;
+	game.pitcherSelectionRequiredHalfInningKey = "";
+	game.pitcherSelectionConfirmedHalfInningKey = halfInningKey;
 	rememberPitcherOfRecordForFieldingTeam();
-	captureSelectedPitcherState();
-	persistLiveGameAutosave();
+	applyPitcherSelectionLockState();
+	persistLiveGameAutosave("pitcher-selected");
+}
+
+function confirmCurrentPitcherSelection() {
+	updatePitcherDisplay();
+	if (!game?.pitcherSelectionRequired && hasValidSelectedPitcher()) {
+		showNotification("Pitcher confirmed. Play buttons unlocked.", 1200);
+	}
 }
 
 function updateGameScreen() {
@@ -128,9 +253,11 @@ document.getElementById("inningText").innerText = getLiveInningLabel();
 	let player = game.batting.players[batterIndex] || "No Player";
 	document.getElementById("batterText").innerText = player;
 
-	updateBasesDisplay();
-	updateManualRunnerControls();
-	persistLiveGameAutosave();
+updateBasesDisplay();
+updateManualRunnerControls();
+ensurePitcherSelectionRequirementForCurrentHalfInning("screen-update", { silent: true });
+applyPitcherSelectionLockState();
+persistLiveGameAutosave();
 }
 
 	function updateBasesDisplay() {
