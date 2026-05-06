@@ -2125,3 +2125,452 @@ function displayPastGameLog() {
 	gameSelect.addEventListener("change", renderSelectedGame);
 	renderSelectedGame();
 }
+
+/* ================================
+   MANUAL COMPLETED-GAME STAT EDITOR
+================================== */
+const MANUAL_GAME_STAT_EDITOR_BATTING_FIELDS = [
+	{ key: "atBats", label: "AB" },
+	{ key: "hits", label: "H" },
+	{ key: "singles", label: "1B" },
+	{ key: "doubles", label: "2B" },
+	{ key: "triples", label: "3B" },
+	{ key: "homeRuns", label: "HR" },
+	{ key: "rbis", label: "RBI" },
+	{ key: "runsScored", label: "R" },
+	{ key: "walks", label: "BB" },
+	{ key: "hitByPitch", label: "HBP" },
+	{ key: "strikeouts", label: "SO" },
+	{ key: "outs", label: "Outs" },
+	{ key: "fieldingErrors", label: "E" }
+];
+
+const MANUAL_GAME_STAT_EDITOR_PITCHING_FIELDS = [
+	{ key: "pitchOuts", label: "Pitch Outs" },
+	{ key: "pitchStrikeouts", label: "K" },
+	{ key: "runsAllowed", label: "R" },
+	{ key: "earnedRunsAllowed", label: "ER" }
+];
+
+function getManualGameStatEditorEditableFields(kind) {
+	const source = kind === "pitching"
+		? MANUAL_GAME_STAT_EDITOR_PITCHING_FIELDS
+		: MANUAL_GAME_STAT_EDITOR_BATTING_FIELDS;
+	const validFields = Array.isArray(STATS_BACKUP_NUMERIC_FIELDS) ? STATS_BACKUP_NUMERIC_FIELDS : [];
+	return source.filter(field => validFields.includes(field.key));
+}
+
+function getManualGameStatEditorEntries() {
+	const storedGames = Array.isArray(season?.games) ? season.games : [];
+	return getPastGameLogEntries()
+		.filter(entry => entry?.seasonPhase !== "postseason" && !entry?.postseasonRef)
+		.map(entry => {
+		const storedIndex = storedGames.findIndex(storedEntry => storedEntry && storedEntry.id === entry.id);
+		const storedEntry = storedIndex >= 0 ? storedGames[storedIndex] : null;
+		const editable = !!storedEntry && Array.isArray(storedEntry.playerStats) && storedEntry.playerStats.length > 0;
+		return {
+			entry,
+			storedIndex,
+			editable,
+			meta: getPastGameBrowserMeta(entry)
+		};
+	});
+}
+
+function getManualGameStatEditorOptionLabel(item) {
+	const entry = item?.entry || {};
+	const meta = item?.meta || getPastGameBrowserMeta(entry);
+	const dateText = formatPastGameDate(entry.playedAt);
+	const scoreText = `${entry.team1Name || "Team 1"} ${Number(entry.team1Score || 0)} - ${Number(entry.team2Score || 0)} ${entry.team2Name || "Team 2"}`;
+	const editText = item?.editable ? "" : " (score only - not editable)";
+	return `${meta.dayLabel} • ${meta.seriesLabel} • ${meta.gameLabel} • ${dateText} • ${scoreText}${editText}`;
+}
+
+function getManualGameStatEditorRowsForTeam(entry, teamName) {
+	const order = Array.isArray(entry?.lineups?.[teamName]) ? entry.lineups[teamName] : [];
+	return (entry?.playerStats || [])
+		.map((stats, statIndex) => ({ stats, statIndex }))
+		.filter(row => row.stats?.teamName === teamName)
+		.sort((a, b) => {
+			const aIndex = order.indexOf(a.stats?.playerName);
+			const bIndex = order.indexOf(b.stats?.playerName);
+
+			if (aIndex !== bIndex) {
+				if (aIndex === -1) return 1;
+				if (bIndex === -1) return -1;
+				return aIndex - bIndex;
+			}
+
+			return String(a.stats?.playerName || "").localeCompare(String(b.stats?.playerName || ""));
+		});
+}
+
+function createManualGameStatEditorTable(entry, teamName, kind) {
+	const fields = getManualGameStatEditorEditableFields(kind);
+	const rows = getManualGameStatEditorRowsForTeam(entry, teamName);
+	const wrap = document.createElement("div");
+	wrap.className = "manual-game-editor-table-wrap";
+
+	const table = document.createElement("table");
+	table.className = "stats-table manual-game-editor-table";
+	wrap.appendChild(table);
+
+	const thead = document.createElement("thead");
+	const headerRow = document.createElement("tr");
+	["Player", ...fields.map(field => field.label)].forEach(label => {
+		const th = document.createElement("th");
+		th.textContent = label;
+		headerRow.appendChild(th);
+	});
+	thead.appendChild(headerRow);
+	table.appendChild(thead);
+
+	const tbody = document.createElement("tbody");
+	rows.forEach(row => {
+		const tr = document.createElement("tr");
+
+		const nameCell = document.createElement("td");
+		nameCell.textContent = getPastGamePlayerDisplayName(row.stats);
+		tr.appendChild(nameCell);
+
+		fields.forEach(field => {
+			const td = document.createElement("td");
+			const input = document.createElement("input");
+			input.type = "number";
+			input.min = "0";
+			input.step = "1";
+			input.inputMode = "numeric";
+			input.value = String(Math.max(0, Math.trunc(Number(row.stats?.[field.key] || 0))));
+			input.dataset.manualGameId = String(entry.id || "");
+			input.dataset.statIndex = String(row.statIndex);
+			input.dataset.statField = field.key;
+			input.setAttribute("aria-label", `${getPastGamePlayerDisplayName(row.stats)} ${field.label}`);
+			td.appendChild(input);
+			tr.appendChild(td);
+		});
+
+		tbody.appendChild(tr);
+	});
+	table.appendChild(tbody);
+
+	if (!rows.length) {
+		const empty = document.createElement("p");
+		empty.className = "season-stats-note";
+		empty.textContent = `No saved ${kind} lines were found for ${teamName}.`;
+		wrap.appendChild(empty);
+	}
+
+	return wrap;
+}
+
+function createManualGameStatEditorTeamCard(entry, teamName) {
+	const stack = document.createElement("div");
+	stack.className = "season-stats-stack";
+
+	const battingCard = document.createElement("div");
+	battingCard.className = "card";
+	battingCard.innerHTML = `<h4 style="margin-top:0;">${teamName} Batting / Fielding</h4>`;
+	battingCard.appendChild(createManualGameStatEditorTable(entry, teamName, "batting"));
+	stack.appendChild(battingCard);
+
+	const pitchingCard = document.createElement("div");
+	pitchingCard.className = "card";
+	pitchingCard.innerHTML = `<h4 style="margin-top:0;">${teamName} Pitching</h4>`;
+	pitchingCard.appendChild(createManualGameStatEditorTable(entry, teamName, "pitching"));
+	stack.appendChild(pitchingCard);
+
+	return stack;
+}
+
+function getManualGameStatEditorRebuildBlockReason() {
+	const regularLogs = (Array.isArray(season?.games) ? season.games : []).filter(entry =>
+		entry && entry.seasonPhase !== "postseason" && !entry.postseasonRef
+	);
+	const scoreOnlyRegularLogs = regularLogs.filter(entry =>
+		!Array.isArray(entry.playerStats) || entry.playerStats.length === 0
+	);
+	if (scoreOnlyRegularLogs.length) {
+		return "At least one regular-season game log is score-only and does not have saved playerStats. Rebuilding totals now could remove stats from that older game.";
+	}
+
+	if (typeof buildRecordedScheduleGameIds === "function") {
+		const recordedIds = buildRecordedScheduleGameIds(schedule);
+		const detailedIds = new Set(
+			regularLogs
+				.filter(entry => Array.isArray(entry.playerStats) && entry.playerStats.length > 0)
+				.map(entry => String(entry.id || "").trim())
+				.filter(Boolean)
+		);
+		const missingDetailedScheduledLogs = recordedIds.filter(id => !detailedIds.has(id));
+		if (missingDetailedScheduledLogs.length) {
+			return "At least one recorded scheduled game does not have a detailed saved playerStats log. Rebuilding totals now could make season totals incomplete.";
+		}
+	}
+
+	return "";
+}
+
+function normalizeManualGameStatEditorInputValue(input) {
+	const raw = String(input?.value || "").trim();
+	if (!raw) return null;
+	const value = Number(raw);
+	if (!Number.isFinite(value) || value < 0 || !Number.isInteger(value)) return null;
+	return value;
+}
+
+function rebuildSeasonTotalsAfterManualGameStatEdit() {
+	const rebuilt = rebuildSeasonStatBucketsFromGameLogs(season);
+	season.playerStats = rebuilt.playerStats || {};
+	season.subStats = rebuilt.subStats || {};
+	season.seasonSubs = Array.isArray(rebuilt.seasonSubs) ? rebuilt.seasonSubs : [];
+
+	try { rebuildCurrentTeamRecordsFromSavedResults({ preserveWhenNoSource: true }); } catch (e) {
+		console.warn("Manual game editor could not rebuild team records:", e);
+	}
+}
+
+function displayManualGameStatEditor(selectedGameId = "") {
+	const container = document.getElementById("manualGameStatEditorContainer");
+	if (!container) return;
+
+	container.innerHTML = "";
+
+	const unlocked = typeof isLeagueUnlocked === "function" ? isLeagueUnlocked() : !isPublicViewOnlyMode();
+	if (isPublicViewOnlyMode() || !unlocked) {
+		container.innerHTML = `
+			<div class="card">
+				<p class="season-stats-empty">Sign in and enter the league code to edit completed game stats.</p>
+			</div>
+		`;
+		return;
+	}
+
+	const introCard = document.createElement("div");
+	introCard.className = "card";
+	introCard.innerHTML = `
+		<h3 style="margin-top:0;">Manual Game Stat Editor</h3>
+		<div class="manual-game-editor-warning">
+			⚠️ Use this only to fix tracking mistakes after a game is complete. Saving corrections rewrites that one saved game log, then rebuilds regular-season player totals from the completed game logs.
+		</div>
+		<p class="season-stats-note" style="margin-top:10px;">
+			This editor uses the current saved player stat fields: AB, H, 1B, 2B, 3B, HR, RBI, R, BB, HBP, SO, batting outs, fielding errors, pitching outs, pitching strikeouts, runs allowed, and earned runs allowed.
+		</p>
+	`;
+	container.appendChild(introCard);
+
+	const entries = getManualGameStatEditorEntries();
+	if (!entries.length) {
+		const emptyCard = document.createElement("div");
+		emptyCard.className = "card";
+		emptyCard.innerHTML = `<p class="season-stats-empty">No completed games have been logged yet.</p>`;
+		container.appendChild(emptyCard);
+		return;
+	}
+
+	const browserCard = document.createElement("div");
+	browserCard.className = "card";
+	browserCard.innerHTML = `<h3 style="margin-top:0;">Choose Completed Game</h3>`;
+	container.appendChild(browserCard);
+
+	const select = document.createElement("select");
+	select.id = "manualGameStatEditorSelect";
+	select.className = "season-stats-select";
+	entries.forEach(item => {
+		const option = document.createElement("option");
+		option.value = String(item.entry.id || "");
+		option.textContent = getManualGameStatEditorOptionLabel(item);
+		select.appendChild(option);
+	});
+	browserCard.appendChild(select);
+
+	const chosenId = selectedGameId && entries.some(item => item.entry.id === selectedGameId)
+		? selectedGameId
+		: (entries[0]?.entry?.id || "");
+	select.value = chosenId;
+	select.addEventListener("change", () => displayManualGameStatEditor(select.value));
+
+	const selectedItem = entries.find(item => item.entry.id === select.value) || entries[0];
+	const entry = selectedItem?.entry || null;
+
+	if (!entry) return;
+
+	const summaryCard = document.createElement("div");
+	summaryCard.className = "card";
+	summaryCard.innerHTML = `
+		<h3 style="margin-top:0;">${entry.team1Name} vs ${entry.team2Name}</h3>
+		<p class="season-stats-note">
+			${formatPastGameDate(entry.playedAt)} ${formatPastGameTime(entry.playedAt) || ""} • ${getPastGameScheduleSlotLabel(entry)}
+		</p>
+		<div class="past-game-scoreboard">
+			<div class="past-game-score-team">
+				<div class="past-game-score-name">${entry.team1Name}</div>
+				<div class="past-game-score-value">${entry.team1Score}</div>
+			</div>
+			<div class="past-game-score-divider">–</div>
+			<div class="past-game-score-team">
+				<div class="past-game-score-name">${entry.team2Name}</div>
+				<div class="past-game-score-value">${entry.team2Score}</div>
+			</div>
+		</div>
+	`;
+	container.appendChild(summaryCard);
+
+	if (!selectedItem.editable) {
+		const lockedCard = document.createElement("div");
+		lockedCard.className = "card";
+		lockedCard.innerHTML = `
+			<h3 style="margin-top:0;">This game cannot be edited</h3>
+			<p class="season-stats-note">This completed game does not have a detailed saved playerStats array in season.games. It may be an older score-only schedule result, so there are no player lines to safely edit.</p>
+		`;
+		container.appendChild(lockedCard);
+		return;
+	}
+
+	const blockReason = getManualGameStatEditorRebuildBlockReason();
+	if (blockReason) {
+		const blockedCard = document.createElement("div");
+		blockedCard.className = "card";
+		blockedCard.innerHTML = `
+			<h3 style="margin-top:0;">Rebuild is not safe yet</h3>
+			<p class="season-stats-note">${blockReason}</p>
+			<p class="season-stats-note">No changes were made. This protects the current season totals from being rebuilt with incomplete game-log data.</p>
+		`;
+		container.appendChild(blockedCard);
+		return;
+	}
+
+	const teamsGrid = document.createElement("div");
+	teamsGrid.className = "past-game-team-grid";
+	teamsGrid.appendChild(createManualGameStatEditorTeamCard(entry, entry.team1Name));
+	teamsGrid.appendChild(createManualGameStatEditorTeamCard(entry, entry.team2Name));
+	container.appendChild(teamsGrid);
+
+	const actionsCard = document.createElement("div");
+	actionsCard.className = "card";
+	const actions = document.createElement("div");
+	actions.className = "manual-game-editor-actions";
+	actionsCard.appendChild(actions);
+
+	const saveBtn = document.createElement("button");
+	saveBtn.className = "menu-button";
+	saveBtn.type = "button";
+	saveBtn.textContent = "💾 Save Corrections";
+	saveBtn.addEventListener("click", () => saveManualGameStatEditorCorrections(entry.id));
+	actions.appendChild(saveBtn);
+
+	const cancelBtn = document.createElement("button");
+	cancelBtn.className = "small-link";
+	cancelBtn.type = "button";
+	cancelBtn.textContent = "Cancel Changes";
+	cancelBtn.addEventListener("click", () => displayManualGameStatEditor(entry.id));
+	actions.appendChild(cancelBtn);
+
+	const pastLogBtn = document.createElement("button");
+	pastLogBtn.className = "small-link";
+	pastLogBtn.type = "button";
+	pastLogBtn.textContent = "Back to Past Game Log";
+	pastLogBtn.addEventListener("click", () => showPastGameLog());
+	actions.appendChild(pastLogBtn);
+
+	container.appendChild(actionsCard);
+}
+
+async function saveManualGameStatEditorCorrections(entryId) {
+	const unlocked = typeof isLeagueUnlocked === "function" ? isLeagueUnlocked() : !isPublicViewOnlyMode();
+	if (isPublicViewOnlyMode() || !unlocked) {
+		alert("Sign in and enter the league code to edit completed game stats.");
+		return false;
+	}
+
+	if (game) {
+		alert("Finish or End Game Early before editing completed game stats.");
+		return false;
+	}
+
+	const blockReason = getManualGameStatEditorRebuildBlockReason();
+	if (blockReason) {
+		alert("Manual stat editing is blocked because rebuilding season totals is not safe yet. " + blockReason);
+		return false;
+	}
+
+	season.games = Array.isArray(season.games) ? season.games : [];
+	const gameIndex = season.games.findIndex(entry => entry && entry.id === entryId);
+	if (gameIndex < 0) {
+		alert("That completed game could not be found in season.games. Nothing was saved.");
+		return false;
+	}
+
+	const nextEntry = deepCloneJson(season.games[gameIndex]);
+	if (!nextEntry || !Array.isArray(nextEntry.playerStats) || !nextEntry.playerStats.length) {
+		alert("This game does not have detailed player stats to edit.");
+		return false;
+	}
+
+	const editableFields = new Set([
+		...getManualGameStatEditorEditableFields("batting").map(field => field.key),
+		...getManualGameStatEditorEditableFields("pitching").map(field => field.key)
+	]);
+
+	const inputs = Array.from(document.querySelectorAll("#manualGameStatEditorContainer input[data-manual-game-id]"))
+		.filter(input => input.dataset.manualGameId === String(entryId));
+	for (const input of inputs) {
+		const statIndex = Number(input.dataset.statIndex);
+		const field = input.dataset.statField;
+		const value = normalizeManualGameStatEditorInputValue(input);
+
+		if (!Number.isInteger(statIndex) || !nextEntry.playerStats[statIndex] || !editableFields.has(field) || value === null) {
+			alert("Every edited stat must be a whole number of 0 or higher. Nothing was saved.");
+			return false;
+		}
+
+		nextEntry.playerStats[statIndex][field] = value;
+	}
+
+	nextEntry.playerStats = nextEntry.playerStats.map(rawStats => {
+		const stats = { ...rawStats };
+		STATS_BACKUP_NUMERIC_FIELDS.forEach(field => {
+			stats[field] = Math.max(0, Math.trunc(Number(stats[field] || 0)));
+		});
+		syncPitchingInnings(stats);
+		return stats;
+	});
+
+	const confirmMessage =
+		"Save these corrected stats for this completed game?\n\n" +
+		"This will update the saved game log, rebuild regular-season player totals from all detailed completed game logs, refresh the stats screens, and sync the season data.";
+
+	if (!confirm(confirmMessage)) return false;
+
+	season.games[gameIndex] = nextEntry;
+	rebuildSeasonTotalsAfterManualGameStatEdit();
+
+	const savedLocally = saveSeason({ skipServerSync: true });
+	if (!savedLocally) {
+		alert("The app stopped this save because a newer/conflicting local snapshot was detected. Nothing was synced.");
+		return false;
+	}
+
+	let synced = false;
+	try {
+		synced = await withAppWorking("Saving corrections…", async () => {
+			return await syncSeasonToServer({ quiet: true });
+		});
+	} catch (error) {
+		console.warn("Manual game stat editor sync failed:", error);
+		synced = false;
+	}
+
+	try { displayManualGameStatEditor(entryId); } catch (e) {}
+	try { if (!document.getElementById("seasonStatsScreen")?.classList.contains("hidden")) displaySeasonStats(); } catch (e) {}
+	try { if (!document.getElementById("rankingsScreen")?.classList.contains("hidden")) displayRankings(); } catch (e) {}
+	try { if (!document.getElementById("pastGameLogScreen")?.classList.contains("hidden")) displayPastGameLog(); } catch (e) {}
+
+	if (synced) {
+		alert("✅ Game stat corrections saved, season totals rebuilt, and data synced.");
+	} else {
+		try { queueServerSync("manual-game-stat-editor", { immediate: true }); } catch (e) {}
+		alert("Corrections were saved locally and season totals were rebuilt, but server sync was not confirmed. Press the Sync button when your connection is good.");
+	}
+
+	return true;
+}
