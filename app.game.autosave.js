@@ -303,18 +303,23 @@ if (shouldAutoFinishRestoredGame) {
 		if (game._lockInfo?.lockId) persistActiveGameLock(game._lockInfo);
 		game.bases = game.bases || { first: null, second: null, third: null };
 		game.gameStats = game.gameStats || {};
-		game.currentInningPitchers = game.currentInningPitchers || {};
-		game.batterIndexByTeam = game.batterIndexByTeam || {
+	game.currentInningPitchers = game.currentInningPitchers || {};
+game.pitcherSelectionRequired = game.pitcherSelectionRequired === true;
+game.pitcherSelectionRequiredHalfInningKey = game.pitcherSelectionRequiredHalfInningKey || "";
+game.pitcherSelectionConfirmedHalfInningKey = game.pitcherSelectionConfirmedHalfInningKey || "";
+game.batterIndexByTeam = game.batterIndexByTeam || {
 			[game.team1?.name || "Team 1"]: 0,
 			[game.team2?.name || "Team 2"]: 0
 		};
 		game.overtime = normalizeOvertimeState(game.overtime);
 
 		keepLiveGameSectionsEnabled();
-		showGame();
-		updatePitcherSelect();
-		ensureOvertimeHalfSetupAfterResume();
-		updateGameScreen();
+	showGame();
+updatePitcherSelect();
+ensurePitcherSelectionRequirementForCurrentHalfInning("resume");
+ensureOvertimeHalfSetupAfterResume();
+ensurePitcherSelectionRequirementForCurrentHalfInning("resume");
+updateGameScreen();
 		applyLiveGameUiState(snapshot.uiState || {});
 		document.getElementById("undoButton").disabled = gameHistory.length === 0;
 		persistLiveGameAutosave("restore");
