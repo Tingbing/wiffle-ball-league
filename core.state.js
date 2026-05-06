@@ -78,6 +78,12 @@ function hasFullAppAccess() {
 function updatePublicAccessUI() {
 	const adminCard = document.getElementById("seasonStatsAdminCard");
 	if (adminCard) adminCard.classList.toggle("hidden", publicViewOnlyMode);
+
+	const manualEditorMenuBtn = document.getElementById("manualGameStatEditorMenuBtn");
+	if (manualEditorMenuBtn) manualEditorMenuBtn.classList.toggle("hidden", publicViewOnlyMode);
+
+	const manualEditorHubBtn = document.getElementById("manualGameStatEditorHubBtn");
+	if (manualEditorHubBtn) manualEditorHubBtn.classList.toggle("hidden", publicViewOnlyMode);
 }
 
 /* ================================
