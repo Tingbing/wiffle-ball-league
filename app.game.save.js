@@ -2,6 +2,109 @@
 // Split from the source-of-truth app.game.js. Load after app.core.js in the required order.
 // Purpose: Completed-game log creation, stat saving, schedule/standings application, and game-over screen.
 
+function getCurrentGameDebugId(fallbackEntry = null) {
+	return fallbackEntry?.id
+		|| (typeof getCompletedGameEntryId === "function" ? getCompletedGameEntryId(game) : null)
+		|| game?._gameInstanceId
+		|| game?._lockId
+		|| activeGameLock?.lockId
+		|| "unknown-game";
+}
+
+function getShortTechnicalError(error) {
+	if (!error) return "No technical error provided.";
+	if (typeof error === "string") return error;
+	return error.message || error.details || error.hint || error.code || String(error);
+}
+
+function buildDetailedGameFailureMessage({ title, step, gameId, safeLocal, nextAction, phase, error }) {
+	const timestamp = new Date().toISOString();
+	return [
+		title,
+		"",
+		safeLocal,
+		"",
+		`Step failed: ${step}`,
+		`Game ID: ${gameId || "unknown-game"}`,
+		`Time: ${timestamp}`,
+		`Where: ${phase || "ending game"}`,
+		`Error: ${getShortTechnicalError(error)}`,
+		"",
+		nextAction,
+		"",
+		"If this keeps happening, send this full message to AI/developer."
+	].filter(Boolean).join("\n");
+}
+
+function showDetailedGameFailure(config) {
+	const message = buildDetailedGameFailureMessage(config);
+	console.warn("[wbl] detailed game save/sync message:", message, config?.error || "");
+	alert(message);
+}
+
+function rebuildLocalSeasonTotalsFromCompletedGamesOrThrow() {
+	if (typeof rebuildSeasonStatBucketsFromGameLogs !== "function") {
+		throw new Error("rebuildSeasonStatBucketsFromGameLogs is missing");
+	}
+
+	season = ensureSeasonShape(season);
+
+	const rebuilt = rebuildSeasonStatBucketsFromGameLogs(season);
+	season.playerStats = rebuilt.playerStats || {};
+	season.subStats = rebuilt.subStats || {};
+	season.seasonSubs = Array.isArray(rebuilt.seasonSubs) ? rebuilt.seasonSubs : [];
+
+	if (typeof rebuildCurrentTeamRecordsFromSavedResults === "function") {
+		rebuildCurrentTeamRecordsFromSavedResults({ preserveWhenNoSource: false });
+	}
+}
+
+function saveCompletedSeasonSnapshotOrThrow(gameId, step = "completed game local save") {
+	season = ensureSeasonShape(season);
+	season.games = Array.isArray(season.games) ? season.games : [];
+
+	const saveOk = saveSeason({ skipServerSync: true, allowConflictBypass: true });
+	if (saveOk === false) throw new Error("saveSeason returned false");
+
+	const storedSeason = readJsonStorage(SEASON_STORAGE_KEY, null);
+	const storedGames = Array.isArray(storedSeason?.games) ? storedSeason.games : [];
+	const storedEntry = storedGames.find(entry => entry && entry.id === gameId);
+
+	if (!storedEntry) {
+		throw new Error(`${step} verification failed: completed game was not found in localStorage season.games`);
+	}
+
+	return storedEntry;
+}
+
+function saveScheduleSnapshotBestEffort() {
+	try {
+		if (typeof saveSchedule === "function") {
+			saveSchedule({ skipServerSync: true, allowConflictBypass: true });
+		}
+	} catch (error) {
+		console.warn("[wbl] schedule local save failed after completed game save:", error);
+	}
+}
+
+function clearLiveDraftAfterCompletedLocalSave(gameId) {
+	try {
+		if (typeof clearLiveGameAutosave === "function") clearLiveGameAutosave();
+		return true;
+	} catch (error) {
+		showDetailedGameFailure({
+			title: "Game saved locally, but the live game draft could not be cleared.",
+			step: "live game draft clear",
+			gameId,
+			safeLocal: "Your completed game is safe on this device. You may see a resume prompt until this clears.",
+			nextAction: "Go to the main menu and press Sync. If the resume prompt appears for this already-finished game, do not record new plays into it.",
+			phase: "ending game",
+			error
+		});
+		return false;
+	}
+}
+
 async function finalizeCompletedGame(options = {}) {
 	const { allowTie = false } = options;
 	if (!game) return;
@@ -135,177 +238,129 @@ function saveCompletedGameLog(extraFields = {}) {
 async function saveGameStats(options = {}) {
 	const { allowTie = false } = options;
 	const failureResult = { savedOk: false, lockReleased: false };
+
+	if (!game) return failureResult;
+
+	const completedEntry = buildCompletedGameLogEntry();
+	const completedEntryId = completedEntry?.id || getCurrentGameDebugId(completedEntry);
+	const existingEntry = findCompletedGameLogEntry(completedEntryId);
 	const isTied = Number(game?.team1Score || 0) === Number(game?.team2Score || 0);
+	const postseasonRef = game?._postseasonRef?.slotId ? { ...game._postseasonRef } : null;
+	const lockId = game?._lockId || activeGameLock?.lockId || null;
 
 	if (isTied && !allowTie) {
 		alert("This game is still tied. Continue overtime until one team wins.");
 		return failureResult;
 	}
 
-	const completedEntry = buildCompletedGameLogEntry();
-	const completedEntryId = completedEntry?.id || null;
-	const existingEntry = findCompletedGameLogEntry(completedEntryId);
-	const postseasonRef = game?._postseasonRef?.slotId ? { ...game._postseasonRef } : null;
-
 	if (postseasonRef && isTied) {
 		alert("Postseason games cannot end in a tie. Keep playing until one team wins.");
 		return failureResult;
 	}
 
-// Shared cleanup-and-exit. Local save happens synchronously; server sync
-	// and lock release are deferred to the background so the user gets to the
-	// Game Over screen without waiting on the network. The autosave is kept
-	// until the background sync confirms — that way a failed sync can be
-	// retried on reload without losing data.
-	const completeAndExit = async ({ alreadyFinalized = false } = {}) => {
-		if (!alreadyFinalized) {
-		try { saveSeason({ skipServerSync: true, allowConflictBypass: true }); } catch (e) {}
-		}
-
-		const lockId = game?._lockId || activeGameLock?.lockId || null;
-		scheduleFinalizeBackgroundSync(lockId);
-
+	const completeAndExit = async () => {
+		clearLiveDraftAfterCompletedLocalSave(completedEntryId);
+		try { setLiveGameStatus("pending", "Game Saved Locally • Sync Needed"); } catch (e) {}
+		try { markLiveGameServerSyncPending("completed game"); } catch (e) {}
+		scheduleFinalizeBackgroundSync(lockId, completedEntryId);
 		return { savedOk: true, lockReleased: true };
 	};
 
-	// ============== POSTSEASON GAMES ==============
-	if (postseasonRef) {
-		const postseason = season?.postseason?.created ? season.postseason : null;
-		const slot = postseason?.games?.[postseasonRef.slotId] || null;
-		if (!slot) {
-			alert("This postseason game could not be matched back to its playoff bracket slot. Nothing was saved.");
-			return failureResult;
+	try {
+		if (postseasonRef) {
+			const postseason = season?.postseason?.created ? season.postseason : null;
+			const slot = postseason?.games?.[postseasonRef.slotId] || null;
+
+			if (!slot) {
+				throw new Error("postseason slot was not found in local season.postseason.games");
+			}
+
+			const logId = existingEntry?.id || completedEntryId;
+
+			if (!existingEntry) {
+				saveCompletedGameLog({
+					outcomeApplied: false,
+					postseasonRef: { ...postseasonRef },
+					seasonPhase: "postseason"
+				});
+				saveCompletedSeasonSnapshotOrThrow(completedEntryId, "completed postseason game local save");
+			}
+
+			if (!existingEntry?.outcomeApplied) {
+				const postseasonApplied = applyPostseasonOutcomeOnce(postseasonRef.slotId, logId);
+				if (!postseasonApplied) {
+					throw new Error("applyPostseasonOutcomeOnce returned false");
+				}
+				markCompletedGameOutcomeApplied(logId);
+			}
+
+			saveCompletedSeasonSnapshotOrThrow(completedEntryId, "postseason outcome local save");
+			return await completeAndExit();
 		}
 
-		if (slot.status === "final" && !existingEntry) {
-			alert("That postseason game was already recorded. Nothing new was saved.");
-			return await completeAndExit({ alreadyFinalized: true });
-		}
+		const scheduledRef =
+			game?._scheduleRef &&
+			Number.isInteger(game._scheduleRef.dayIndex) &&
+			Number.isInteger(game._scheduleRef.seriesIndex) &&
+			Number.isInteger(game._scheduleRef.seriesGameIndex)
+				? {
+					dayIndex: game._scheduleRef.dayIndex,
+					seriesIndex: game._scheduleRef.seriesIndex,
+					seriesGameIndex: game._scheduleRef.seriesGameIndex
+				}
+				: null;
 
-		const logId = existingEntry?.id || completedEntryId;
-		const postseasonApplied = applyPostseasonOutcomeOnce(postseasonRef.slotId, logId);
-		if (!postseasonApplied) {
-			alert("This postseason game could not be applied back to the playoff bracket slot, so nothing new was finalized.");
-			return failureResult;
+		if (scheduledRef) {
+			const scheduledSeriesEntry = schedule?.days?.[scheduledRef.dayIndex]?.games?.[scheduledRef.seriesIndex];
+			const scheduledSeriesGame = scheduledSeriesEntry?.gamesInSeries?.[scheduledRef.seriesGameIndex];
+			const teamsMatch =
+				!!scheduledSeriesEntry &&
+				(
+					(scheduledSeriesEntry.away === game?.team1?.name && scheduledSeriesEntry.home === game?.team2?.name) ||
+					(scheduledSeriesEntry.away === game?.team2?.name && scheduledSeriesEntry.home === game?.team1?.name)
+				);
+
+			if (!scheduledSeriesEntry || !scheduledSeriesGame || !teamsMatch) {
+				throw new Error("scheduled game could not be matched to the local schedule slot");
+			}
 		}
 
 		if (!existingEntry) {
-			saveCompletedGameLog({
-				outcomeApplied: true,
-				postseasonRef: { ...postseasonRef },
-				seasonPhase: "postseason"
-			});
-		} else {
-			markCompletedGameOutcomeApplied(logId);
+			saveCompletedGameLog({ outcomeApplied: false });
+			saveCompletedSeasonSnapshotOrThrow(completedEntryId, "completed game local save");
 		}
 
-		return await completeAndExit();
-	}
-
-	// ============== SCHEDULED GAMES (verify on server first) ==============
-	const scheduledRef =
-		game?._scheduleRef &&
-		Number.isInteger(game._scheduleRef.dayIndex) &&
-		Number.isInteger(game._scheduleRef.seriesIndex) &&
-		Number.isInteger(game._scheduleRef.seriesGameIndex)
-			? {
-				dayIndex: game._scheduleRef.dayIndex,
-				seriesIndex: game._scheduleRef.seriesIndex,
-				seriesGameIndex: game._scheduleRef.seriesGameIndex
-			}
-			: null;
-
-	if (scheduledRef) {
-		try {
-			const latestRow = typeof fetchSeasonRowFromServer === "function"
-				? await withTimeout(fetchSeasonRowFromServer({ quiet: true }), 5000, null)
-				: null;
-			const latestSchedule = latestRow?.schedule_json
-				? ensureScheduleShape(deepCloneJson(latestRow.schedule_json))
-				: null;
-			const latestSeriesEntry = latestSchedule?.days?.[scheduledRef.dayIndex]?.games?.[scheduledRef.seriesIndex];
-			const latestSeriesGame = latestSeriesEntry?.gamesInSeries?.[scheduledRef.seriesGameIndex];
-
-			if ((latestSeriesGame?.result || latestSeriesGame?.skipped) && !existingEntry) {
-				alert("That scheduled game was already finalized on the server. Nothing new was saved.");
-				return await completeAndExit({ alreadyFinalized: true });
-			}
-		} catch (e) {
-			console.warn("Could not verify scheduled game before finalizing:", e);
-			try { markLiveGameServerSyncDelayed(); } catch (statusErr) {}
+		const entryAfterLocalSave = findCompletedGameLogEntry(completedEntryId);
+		if (!entryAfterLocalSave) {
+			throw new Error("completed game log upsert did not create a readable season.games entry");
 		}
 
-		const scheduledSeriesEntry = schedule?.days?.[scheduledRef.dayIndex]?.games?.[scheduledRef.seriesIndex];
-		const scheduledSeriesGame = scheduledSeriesEntry?.gamesInSeries?.[scheduledRef.seriesGameIndex];
-		const teamsMatch =
-			!!scheduledSeriesEntry &&
-			(
-				(scheduledSeriesEntry.away === game?.team1?.name && scheduledSeriesEntry.home === game?.team2?.name) ||
-				(scheduledSeriesEntry.away === game?.team2?.name && scheduledSeriesEntry.home === game?.team1?.name)
-			);
-
-		if (!scheduledSeriesEntry || !scheduledSeriesGame || !teamsMatch) {
-			alert("This scheduled game could not be matched back to its exact season slot. Nothing was saved, so the schedule could not be corrupted. Refresh the season data before trying again.");
-			return failureResult;
-		}
-
-		if (scheduledSeriesGame.result && !existingEntry) {
-			alert("That scheduled game was already recorded. Nothing new was saved.");
-			return await completeAndExit({ alreadyFinalized: true });
-		}
-	}
-
-	// ============== EXISTING ENTRY (resume after partial save) ==============
-	if (existingEntry) {
-		if (!existingEntry.outcomeApplied) {
+		if (!entryAfterLocalSave.outcomeApplied) {
 			const outcomeApplied = applyGameOutcomeOnce();
 			if (!outcomeApplied) {
-				alert("This completed game could not be linked back to the exact scheduled slot, so its result was not applied.");
-				return failureResult;
+				throw new Error("applyGameOutcomeOnce returned false");
 			}
 			markCompletedGameOutcomeApplied(completedEntryId);
 		}
+
+		rebuildLocalSeasonTotalsFromCompletedGamesOrThrow();
+		saveScheduleSnapshotBestEffort();
+		saveCompletedSeasonSnapshotOrThrow(completedEntryId, "rebuilt season totals local save");
+
 		return await completeAndExit();
-	}
-
-	// ============== NEW GAME (apply stats and outcome) ==============
-	for (let key in game.gameStats) {
-		const gameStats = ensureExtendedStatFields(game.gameStats[key]);
-		const seasonStats = ensureExtendedStatFields(
-			getOrCreateSeasonStatsByKey(key, gameStats.teamName, gameStats.playerName)
-		);
-
-		seasonStats.atBats = Number(seasonStats.atBats || 0) + Number(gameStats.atBats || 0);
-		seasonStats.hits = Number(seasonStats.hits || 0) + Number(gameStats.hits || 0);
-		seasonStats.singles = Number(seasonStats.singles || 0) + Number(gameStats.singles || 0);
-		seasonStats.doubles = Number(seasonStats.doubles || 0) + Number(gameStats.doubles || 0);
-		seasonStats.triples = Number(seasonStats.triples || 0) + Number(gameStats.triples || 0);
-		seasonStats.homeRuns = Number(seasonStats.homeRuns || 0) + Number(gameStats.homeRuns || 0);
-		seasonStats.walks = Number(seasonStats.walks || 0) + Number(gameStats.walks || 0);
-		seasonStats.hitByPitch = Number(seasonStats.hitByPitch || 0) + Number(gameStats.hitByPitch || 0);
-		seasonStats.strikeouts = Number(seasonStats.strikeouts || 0) + Number(gameStats.strikeouts || 0);
-		seasonStats.outs = Number(seasonStats.outs || 0) + Number(gameStats.outs || 0);
-		seasonStats.rbis = Number(seasonStats.rbis || 0) + Number(gameStats.rbis || 0);
-		seasonStats.runsScored = Number(seasonStats.runsScored || 0) + Number(gameStats.runsScored || 0);
-		seasonStats.pitchOuts = Number(seasonStats.pitchOuts || 0) + Number(gameStats.pitchOuts || 0);
-		seasonStats.pitchStrikeouts = Number(seasonStats.pitchStrikeouts || 0) + Number(gameStats.pitchStrikeouts || 0);
-		seasonStats.fieldingErrors = Number(seasonStats.fieldingErrors || 0) + Number(gameStats.fieldingErrors || 0);
-		syncPitchingInnings(seasonStats);
-		seasonStats.runsAllowed = Number(seasonStats.runsAllowed || 0) + Number(gameStats.runsAllowed || 0);
-		seasonStats.earnedRunsAllowed = Number(seasonStats.earnedRunsAllowed || 0) + Number(gameStats.earnedRunsAllowed || 0);
-	}
-
-	saveCompletedGameLog({ outcomeApplied: false });
-	saveSeason({ skipServerSync: true, allowConflictBypass: true });
-
-	const outcomeApplied = applyGameOutcomeOnce();
-	if (!outcomeApplied) {
-		alert("This completed game could not be linked back to the exact scheduled slot, so its result was not applied.");
+	} catch (error) {
+		console.error("saveGameStats local-first failure:", error);
+		showDetailedGameFailure({
+			title: "Completed game could not be safely finalized locally.",
+			step: "ending game local-first save",
+			gameId: completedEntryId,
+			safeLocal: "Do not close the app yet. Your live game draft is still being kept so the game is not lost.",
+			nextAction: "Try pressing End Game again. If it still fails, copy this message and send it to AI/developer.",
+			phase: "ending game",
+			error
+		});
 		return failureResult;
 	}
-
-	markCompletedGameOutcomeApplied(completedEntryId);
-	return await completeAndExit();
 }
 
 	function displayGameOver() {
@@ -360,50 +415,66 @@ async function saveGameStats(options = {}) {
 		container.appendChild(team2PitchingCard);
 	}
 
-
-function scheduleFinalizeBackgroundSync(lockId) {
+function scheduleFinalizeBackgroundSync(lockId, completedGameId = null) {
 	setTimeout(async () => {
 		try { markLiveGameServerSyncPending("finalize"); } catch (e) {}
 
 		let synced = false;
+		let syncError = null;
 
 		try {
-			// Final game save should NOT depend on the normal background autosync gate.
-			// This must try the real server save directly, because game-finalize lock
-			// cleanup is more important than regular background syncing.
 			synced = typeof syncSeasonToServer === "function"
 				? await syncSeasonToServer({ quiet: true })
 				: false;
-		} catch (e) {
-			console.warn("[wbl] background finalize sync error:", e);
+		} catch (error) {
+			console.warn("[wbl] background finalize sync error:", error);
+			syncError = error;
 			synced = false;
 		}
 
 		if (!synced) {
 			try { markLiveGameServerSyncDelayed(); } catch (e) {}
-			console.warn("[wbl] finalize sync did not confirm; autosave kept for retry. Press Sync on the main menu to retry.");
+			showDetailedGameFailure({
+				title: "Game saved locally, but server sync failed.",
+				step: "Supabase sync",
+				gameId: completedGameId || lockId || "unknown-game",
+				safeLocal: "Your completed game is safe on this device. The Sync button can retry later.",
+				nextAction: "Go to the main menu and press Sync again when your connection is better.",
+				phase: "automatic sync after ending game",
+				error: syncError || "syncSeasonToServer returned false"
+			});
 			return;
 		}
 
 		let released = true;
+		let releaseError = null;
 
 		if (lockId) {
 			try {
 				released = await releaseGameLockReliably(lockId, { quiet: true });
-			} catch (e) {
-				console.warn("[wbl] background lock release error:", e);
+			} catch (error) {
+				console.warn("[wbl] background lock release error:", error);
+				releaseError = error;
 				released = false;
 			}
 		}
 
 		if (!released) {
 			try { markLiveGameServerSyncDelayed(); } catch (e) {}
-			console.warn("[wbl] final stats synced, but game lock release did not confirm. Autosave kept for Sync retry.");
+			showDetailedGameFailure({
+				title: "Game synced, but the game lock could not be cleared.",
+				step: "lock release",
+				gameId: completedGameId || lockId || "unknown-game",
+				safeLocal: "Your completed game is safe locally and the stats were sent to the server.",
+				nextAction: "Go to the main menu and press Sync again to clear the lock before starting another game.",
+				phase: "automatic sync after ending game",
+				error: releaseError || "releaseGameLockReliably returned false"
+			});
 			return;
 		}
 
 		try { persistActiveGameLock(null); } catch (e) {}
-		try { clearLiveGameAutosave(); } catch (e) {}
 		try { markLiveGameServerSyncSuccess(); } catch (e) {}
 	}, 0);
 }
+
