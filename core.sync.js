@@ -176,6 +176,18 @@ function shouldIgnoreSameBrowserConflictDuringLiveGame(detail = {}) {
 }
 
 function scheduleConflictNotice(reason, detail = {}) {
+	const source = detail?.source || "";
+
+	// Same-browser storage events are not dangerous. They happen during normal
+	// iPhone/Safari background/restore and multi-tab localStorage wakeups.
+	// They must never block local saves or permanently disable Sync.
+	if (source === "storage") {
+		syncStateFromHead();
+		try { markLiveGameServerSyncPending("local changes"); } catch (e) {}
+		try { setSyncButtonEnabled(true); } catch (e) {}
+		return false;
+	}
+
 	if (shouldIgnoreSameBrowserConflictDuringLiveGame(detail)) {
 		syncStateFromHead();
 		try { markLiveGameServerSyncPending("Live Game Protected"); } catch (e) {}
@@ -192,41 +204,21 @@ function scheduleConflictNotice(reason, detail = {}) {
 		};
 	}
 
-if (serverSyncTimer) {
+	if (serverSyncTimer) {
 		clearTimeout(serverSyncTimer);
 		serverSyncTimer = null;
 	}
 
-	// Keep the Sync button enabled — it acts as the "tap to resolve" action.
-	// Do NOT show a blocking confirm() dialog. A same-phone background/restore
-	// on iOS Safari triggers this path and a modal dialog blocks the whole app.
-	// manualResaveAllStats() handles resolution when the user taps Sync.
-	try { showNotification("⚠️ Sync conflict — tap Sync to resolve", 3500); } catch (e) {}
-
+	try { setSyncButtonEnabled(true); } catch (e) {}
+	try { showNotification("⚠️ Real server conflict — tap Sync to review", 3500); } catch (e) {}
 	return false;
 }
 
 function assertCanWriteLocalSnapshot(kind) {
-	// Live-game local writes are always allowed, regardless of any prior conflict state.
-	// The live game's local autosave is authoritative and must never be blocked by
-	// a conflict that was flagged before or during the game.
-	if (typeof hasLocalLiveGameToProtect === "function" && hasLocalLiveGameToProtect()) {
-		return true;
-	}
-
-	syncStateFromHead();
-	if (syncConflictState) return false;
-
-	const head = readLocalSyncHead();
-	if (!head) return true;
-
-	const staleSeason = head.lastWriterTabId !== APP_TAB_ID && head.seasonRevision > getSeasonRevisionFrom(season);
-	const staleSchedule = head.lastWriterTabId !== APP_TAB_ID && head.scheduleRevision > getScheduleRevisionFrom(schedule);
-
-	if ((kind === "season" && staleSeason) || (kind === "schedule" && staleSchedule)) {
-		return scheduleConflictNotice("Another browser tab on this device already saved newer season data.", { kind, head });
-	}
-
+	// Local saves are always allowed. Server/device conflict checks belong in
+	// syncSeasonToServer(), not in localStorage writes.
+	if (syncConflictState?.detail?.source === "storage") clearSyncConflictState();
+	try { syncStateFromHead(); } catch (e) {}
 	return true;
 }
 
@@ -291,11 +283,15 @@ window.addEventListener("storage", (event) => {
 	}
 	if (head.serverUpdatedAt) syncState.serverUpdatedAt = head.serverUpdatedAt;
 
+	// Do not create a hard conflict from same-browser localStorage events.
+	// Manual Sync/server preflight still handles real device/server conflicts.
+	try { setSyncButtonEnabled(true); } catch (e) {}
+
 	if (
 		Number(head.seasonRevision || 0) > getSeasonRevisionFrom(season) ||
 		Number(head.scheduleRevision || 0) > getScheduleRevisionFrom(schedule)
 	) {
-		scheduleConflictNotice("Another tab on this browser saved newer data than the copy open in this tab.", { source: "storage", head });
+		try { markLiveGameServerSyncPending("local storage updated"); } catch (e) {}
 	}
 });
 
