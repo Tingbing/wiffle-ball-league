@@ -156,8 +156,8 @@ function updateScheduleForCompletedGame(teamA, teamB, resultObj) {
 	seriesGame.result = resultObj;
 	seriesEntry.result = computeSeriesResult(seriesEntry);
 	applySeriesWinLoss(seriesEntry);
-	saveSchedule();
-	return true;
+saveSchedule({ skipServerSync: true, allowConflictBypass: true });
+return true;
 }
 
 function applyGameOutcomeOnce() {
@@ -231,9 +231,9 @@ function applyGameOutcomeOnce() {
 		console.warn("Could not rebuild records after game outcome:", e);
 	}
 
-	game._resultSaved = true;
-	saveSeason();
-	return true;
+game._resultSaved = true;
+saveSeason({ skipServerSync: true, allowConflictBypass: true });
+return true;
 }
 
 const STATS_BACKUP_KIND = "wbl_stats_backup";
