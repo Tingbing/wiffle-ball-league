@@ -1234,18 +1234,21 @@ if (savedRow && Object.prototype.hasOwnProperty.call(savedRow, "active_game_lock
 
 		if (!quiet) showNotification("✅ Season stats saved to server", 1800);
 		return true;
-	} catch (e) {
-		console.log("season_data sync failed:", e);
-		try { markLiveGameServerSyncDelayed(); } catch (statusErr) {}
-		if (!quiet) {
-			alert(
-				"Could not save to server.\n\n" +
-				"Local season stats are still saved on this device.\n" +
-				"This tab did not overwrite newer server data."
-			);
-		}
-		return false;
+} catch (e) {
+	console.log("season_data sync failed:", e);
+	try { markLiveGameServerSyncDelayed(); } catch (statusErr) {}
+	if (!quiet) {
+		alert(
+			"Server sync failed, but local data is still saved on this device.\n\n" +
+			"Step failed: Supabase sync\n" +
+			`Time: ${new Date().toISOString()}\n` +
+			"Where: manual sync / automatic sync\n" +
+			`Error: ${e?.message || e?.details || e?.code || String(e)}\n\n` +
+			"What to do next: press Sync again later. If this keeps happening, send this message to AI/developer."
+		);
 	}
+	return false;
+}
 }
 
 async function clearOrphanGameLockFromMainMenu() {
@@ -1405,11 +1408,17 @@ try { saveSchedule({ skipServerSync: true, allowConflictBypass: liveGameConflict
 		}
 
 		return false;
-	} catch (error) {
-		console.error("manualResaveAllStats failed:", error);
-		alert("Sync hit an error. Local data is still saved on this device.");
-		return false;
-	} finally {
+} catch (error) {
+	console.error("manualResaveAllStats failed:", error);
+	alert(
+		"Manual Sync failed, but local data is still saved on this device.\n\n" +
+		"Step failed: manual Sync retry\n" +
+		`Time: ${new Date().toISOString()}\n` +
+		`Error: ${error?.message || error?.details || error?.code || String(error)}\n\n` +
+		"What to do next: check your connection and press Sync again. If this keeps happening, send this message to AI/developer."
+	);
+	return false;
+} finally {
 		manualSyncInProgress = false;
 		setSyncButtonBusy(false);
 		setSyncButtonEnabled(true);
