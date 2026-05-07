@@ -28,14 +28,28 @@ function showPublicMenu() {
 }
 
 function clearFinishedGameMemoryIfNeeded() {
-	if (!game?._finalizeInProgress) return false;
+	const hadFinishedGamePendingSync = !!(game?._finalizeInProgress || game?._gameCompletePendingSave);
+	if (!hadFinishedGamePendingSync) return false;
 
 	game = null;
 	gameHistory = [];
 	lastPlay = null;
 	pendingBattingResult = null;
 	playInputLock = false;
+
 	try { clearLiveGameAutosave(); } catch (e) {}
+
+	try {
+		if (
+			hadFinishedGamePendingSync &&
+			(
+				activeGameLock?.lockId ||
+				(typeof hasUnsyncedLocalChanges === "function" && hasUnsyncedLocalChanges())
+			)
+		) {
+			setLiveGameStatus("pending", "Game Saved Locally • Sync Needed");
+		}
+	} catch (e) {}
 
 	return true;
 }
