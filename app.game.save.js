@@ -146,9 +146,9 @@ async function finalizeCompletedGame(options = {}) {
 	}
 
 	displayGameOver();
-	// Note: autosave is intentionally NOT cleared here. The background sync
-	// scheduled by completeAndExit clears it once the sync confirms. Clearing
-	// it here would defeat reload-recovery if the sync fails.
+	// The completed game has already been saved locally before this screen is shown.
+// The live draft is cleared only after that local completed-game save is verified.
+// Server sync continues separately in the background.
 }
 
 
