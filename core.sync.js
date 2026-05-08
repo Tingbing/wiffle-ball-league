@@ -361,35 +361,20 @@ function ensureSyncSpinnerStyles() {
 	document.head.appendChild(style);
 }
 
-function setSyncButtonBusy(isBusy, label = "Syncing") {
-	const btn = document.getElementById("resaveStatsBtn");
-	if (!btn) return;
-
-	ensureSyncSpinnerStyles();
-
+function setSyncButtonBusy(isBusy, label = "Syncing data...") {
 	if (isBusy) {
-		if (!btn.dataset.originalHtml) {
-			btn.dataset.originalHtml = btn.innerHTML || "↻";
-		}
-
-		btn.classList.add("wbl-syncing");
-		btn.disabled = true;
-		btn.style.pointerEvents = "none";
-		btn.style.opacity = "0.75";
-		btn.setAttribute("aria-busy", "true");
-		btn.title = label;
-		btn.innerHTML = `<span class="wbl-sync-spinner" aria-hidden="true"></span>`;
+		setSyncButtonResult("syncing", label);
 		return;
 	}
+
+	const btn = document.getElementById("resaveStatsBtn");
+	if (!btn) return;
 
 	btn.classList.remove("wbl-syncing");
 	btn.disabled = false;
 	btn.style.pointerEvents = "auto";
 	btn.style.opacity = "1";
 	btn.removeAttribute("aria-busy");
-	btn.title = "Sync data";
-	btn.innerHTML = btn.dataset.originalHtml || "↻";
-	delete btn.dataset.originalHtml;
 }
 
 function setSyncButtonEnabled(enabled) {
@@ -1055,6 +1040,110 @@ return;
 /* ================================
    MANUAL + AUTOMATIC SERVER SAVE
 ================================== */
+let lastSyncFailureDetail = null;
+
+function getSyncDebugGameId() {
+	try {
+		return game?._gameInstanceId
+			|| game?._lockId
+			|| activeGameLock?.lockId
+			|| "unknown-game";
+	} catch (e) {
+		return "unknown-game";
+	}
+}
+
+function getSyncErrorText(error) {
+	if (!error) return "No technical error provided.";
+	if (typeof error === "string") return error;
+	return error.message || error.details || error.hint || error.code || String(error);
+}
+
+function buildSyncFailureMessage(detail) {
+	return [
+		"Sync failed, but local data is still saved on this device.",
+		"",
+		`Step failed: ${detail.step}`,
+		`Where: ${detail.where}`,
+		`Game ID: ${detail.gameId}`,
+		`Time: ${detail.time}`,
+		`Error: ${detail.errorText}`,
+		"",
+		detail.safeLocal || "Your local stats/game data should still be safe on this device.",
+		"",
+		detail.nextAction || "Press Sync again. If it keeps failing, send this message to AI/developer."
+	].join("\n");
+}
+
+function recordSyncFailure({ step, where, error, quiet = false, nextAction = "", safeLocal = "" }) {
+	const detail = {
+		step: step || "unknown sync step",
+		where: where || "sync",
+		gameId: getSyncDebugGameId(),
+		time: new Date().toISOString(),
+		errorText: getSyncErrorText(error),
+		safeLocal,
+		nextAction
+	};
+
+	lastSyncFailureDetail = detail;
+
+	console.warn("[wbl] Sync failed detail:", detail, error || "");
+
+	try { markLiveGameServerSyncDelayed(); } catch (e) {}
+	try { setSyncButtonResult("failed", detail.step); } catch (e) {}
+
+	if (!quiet) {
+		alert(buildSyncFailureMessage(detail));
+	}
+
+	return false;
+}
+
+function setSyncButtonResult(state, detail = "") {
+	const btn = document.getElementById("resaveStatsBtn");
+	if (!btn) return;
+
+	btn.classList.remove("wbl-syncing");
+	btn.disabled = false;
+	btn.style.pointerEvents = "auto";
+	btn.style.opacity = "1";
+	btn.removeAttribute("aria-busy");
+
+	if (state === "syncing") {
+		ensureSyncSpinnerStyles();
+		btn.classList.add("wbl-syncing");
+		btn.disabled = true;
+		btn.style.pointerEvents = "none";
+		btn.style.opacity = "0.8";
+		btn.setAttribute("aria-busy", "true");
+		btn.title = "Syncing data...";
+		btn.innerHTML = `<span class="wbl-sync-spinner" aria-hidden="true"></span> Syncing...`;
+		return;
+	}
+
+	if (state === "success") {
+		btn.title = "Data synced";
+		btn.innerHTML = "✓ Synced";
+		return;
+	}
+
+	if (state === "failed") {
+		btn.title = detail ? `Sync failed at: ${detail}. Tap to retry.` : "Sync failed. Tap to retry.";
+		btn.innerHTML = "⚠ Sync failed — tap again";
+		return;
+	}
+
+	if (state === "needed") {
+		btn.title = "Sync needed. Tap to retry.";
+		btn.innerHTML = "↻ Sync Needed";
+		return;
+	}
+
+	btn.title = "Sync data";
+	btn.innerHTML = "↻ Sync";
+}
+
 let inflightSyncPromise = null;
 
 async function syncSeasonToServer({ quiet = false } = {}) {
