@@ -342,16 +342,17 @@ function ensureSyncSpinnerStyles() {
 			to { transform: rotate(360deg); }
 		}
 
-		.wbl-sync-spinner {
-			display: inline-block;
-			width: 14px;
-			height: 14px;
-			border: 2px solid rgba(255,255,255,0.35);
-			border-top-color: white;
-			border-radius: 50%;
-			animation: wblSyncSpin 0.75s linear infinite;
-			vertical-align: middle;
-		}
+.wbl-sync-spinner {
+	display: inline-block;
+	width: 14px;
+	height: 14px;
+	border: 2px solid rgba(255,255,255,0.35);
+	border-top-color: white;
+	border-radius: 50%;
+	animation: wblSyncSpin 0.75s linear infinite;
+	vertical-align: middle;
+	margin-right: 6px;
+}
 
 		.wbl-syncing {
 			cursor: wait !important;
@@ -1174,28 +1175,44 @@ async function runSyncSeasonToServerOnce({ quiet = false } = {}) {
 		clearSyncConflictState();
 	}
 
-	if (syncConflictState) {
-		// Conflict state is still set with no live game — do not push stale data.
-		// manualResaveAllStats() will resolve this when the user taps Sync.
-		if (!quiet) {
-			showNotification("⚠️ Sync conflict — tap Sync to resolve", 3000);
-		}
-		return false;
-	}
+if (syncConflictState) {
+	return recordSyncFailure({
+		step: "sync conflict check",
+		where: "before Supabase upload",
+		error: syncConflictState.reason || "syncConflictState is still set",
+		quiet,
+		safeLocal: "Local data was not erased. The app stopped before uploading because it thought there was a conflict.",
+		nextAction: "Press Sync again. If this repeats, send this message to AI/developer."
+	});
+}
 
 	const liveGameConflictBypass = typeof hasLocalLiveGameToProtect === "function" && hasLocalLiveGameToProtect();
 try { saveSeason({ skipServerSync: true, touchMeta: false, bumpRevision: false, allowConflictBypass: liveGameConflictBypass }); } catch (e) {}
 try { saveSchedule({ skipServerSync: true, touchMeta: false, bumpRevision: false, allowConflictBypass: liveGameConflictBypass }); } catch (e) {}
 	const ok = await requireLogin();
-	if (!ok) return false;
+if (!ok) {
+	return recordSyncFailure({
+		step: "login/session check",
+		where: "before Supabase upload",
+		error: "requireLogin returned false",
+		quiet,
+		safeLocal: "Local data is still saved on this device.",
+		nextAction: "Make sure you are signed in, then press Sync again."
+	});
+}
 
 try {
 		const sessionResult = await withTimeout(supabaseClient.auth.getSession(), 5000, null);
-		if (!sessionResult) {
-			console.warn("[wbl] auth.getSession timed out");
-			try { markLiveGameServerSyncDelayed(); } catch (e) {}
-			return false;
-		}
+if (!sessionResult) {
+	return recordSyncFailure({
+		step: "Supabase auth session check",
+		where: "getting current session",
+		error: "auth.getSession timed out after 5 seconds",
+		quiet,
+		safeLocal: "Local data is still saved on this device.",
+		nextAction: "Press Sync again. If you just returned from Safari/background mode, wait a few seconds first."
+	});
+}
 		const { data } = sessionResult;
 		const userId = data?.session?.user?.id || null;
 
@@ -1221,11 +1238,19 @@ try {
 				latestInfo.scheduleRevision > currentScheduleRev;
 
 			if ((serverMoved && serverNewer) || localBehind) {
-				scheduleConflictNotice(
-					"The server already has newer season data than this tab, so this save was stopped.",
-					{ source: "server-preflight", row: latestRow }
-				);
-				return false;
+			scheduleConflictNotice(
+	"The server already has newer season data than this tab, so this save was stopped.",
+	{ source: "server-preflight", row: latestRow }
+);
+
+return recordSyncFailure({
+	step: "server revision preflight",
+	where: "before Supabase upload",
+	error: `server newer/preflight stopped write. serverSeasonRev=${latestInfo?.seasonRevision}, localSeasonRev=${currentSeasonRev}, serverScheduleRev=${latestInfo?.scheduleRevision}, localScheduleRev=${currentScheduleRev}`,
+	quiet,
+	safeLocal: "Local data is still saved. The app refused to upload because the server looked newer.",
+	nextAction: "Press Sync again. If stats are already correct locally but this repeats, send this message to AI/developer."
+});
 			}
 		}
 
@@ -1255,12 +1280,16 @@ try {
 				null
 			);
 
-			if (!updateResult) {
-				console.warn("[wbl] season_data update timed out");
-				try { markLiveGameServerSyncDelayed(); } catch (e) {}
-				return false;
-			}
-
+	if (!updateResult) {
+	return recordSyncFailure({
+		step: "Supabase season_data update",
+		where: "uploading season_data row",
+		error: "season_data update timed out after 10 seconds",
+		quiet,
+		safeLocal: "Local data is still saved on this device.",
+		nextAction: "Check connection and press Sync again."
+	});
+}
 			const { data: updatedRow, error } = updateResult;
 			if (error) throw error;
 
@@ -1268,11 +1297,19 @@ try {
 				const rowAfterMiss = await fetchSeasonRowFromServer({ quiet: true });
 				if (rowAfterMiss) applyServerSeasonRow(rowAfterMiss, { source: "sync-race" });
 
-				scheduleConflictNotice(
-					"A newer save reached the server before this tab finished syncing, so this write was cancelled.",
-					{ source: "server-race" }
-				);
-				return false;
+scheduleConflictNotice(
+	"A newer save reached the server before this tab finished syncing, so this write was cancelled.",
+	{ source: "server-race" }
+);
+
+return recordSyncFailure({
+	step: "Supabase update confirmation",
+	where: "after upload attempt",
+	error: "update returned no row, likely updated_at race/server write mismatch",
+	quiet,
+	safeLocal: "Local data is still saved. The app did not erase anything.",
+	nextAction: "Press Sync again. If this keeps happening, send this message to AI/developer."
+});
 			}
 
 			savedRow = updatedRow;
@@ -1287,11 +1324,16 @@ try {
 				null
 			);
 
-			if (!upsertResult) {
-				console.warn("[wbl] season_data upsert timed out");
-				try { markLiveGameServerSyncDelayed(); } catch (e) {}
-				return false;
-			}
+if (!upsertResult) {
+	return recordSyncFailure({
+		step: "Supabase season_data upsert",
+		where: "creating/uploading season_data row",
+		error: "season_data upsert timed out after 10 seconds",
+		quiet,
+		safeLocal: "Local data is still saved on this device.",
+		nextAction: "Check connection and press Sync again."
+	});
+}
 
 			const { data: insertedRow, error } = upsertResult;
 			if (error) throw error;
@@ -1325,18 +1367,15 @@ if (savedRow && Object.prototype.hasOwnProperty.call(savedRow, "active_game_lock
 		return true;
 } catch (e) {
 	console.log("season_data sync failed:", e);
-	try { markLiveGameServerSyncDelayed(); } catch (statusErr) {}
-	if (!quiet) {
-		alert(
-			"Server sync failed, but local data is still saved on this device.\n\n" +
-			"Step failed: Supabase sync\n" +
-			`Time: ${new Date().toISOString()}\n` +
-			"Where: manual sync / automatic sync\n" +
-			`Error: ${e?.message || e?.details || e?.code || String(e)}\n\n` +
-			"What to do next: press Sync again later. If this keeps happening, send this message to AI/developer."
-		);
-	}
-	return false;
+
+	return recordSyncFailure({
+		step: "Supabase sync exception",
+		where: "manual sync / automatic sync",
+		error: e,
+		quiet,
+		safeLocal: "Local data is still saved on this device.",
+		nextAction: "Press Sync again. If this keeps happening, send this message to AI/developer."
+	});
 }
 }
 
@@ -1412,24 +1451,31 @@ async function clearOrphanGameLockFromMainMenu() {
 }
 
 async function manualResaveAllStats() {
+	let finalButtonState = "failed";
+	let finalButtonDetail = "manual sync did not complete";
+
 	if (manualSyncInProgress) {
 		showNotification("Sync is already running…", 1200);
+		setSyncButtonResult("syncing", "already running");
 		return false;
 	}
 
-if (!(await requireLogin())) return false;
+	if (!(await requireLogin())) {
+		recordSyncFailure({
+			step: "login/session check",
+			where: "manual Sync button",
+			error: "requireLogin returned false",
+			quiet: false,
+			safeLocal: "Local data is still saved on this device.",
+			nextAction: "Sign in/unlock the league, then press Sync again."
+		});
+		return false;
+	}
 
-	// If a conflict was flagged (e.g. from a background/restore cycle on iPhone),
-	// resolve it now before attempting to sync. Same-browser storage conflicts are
-	// safe to clear directly. Real server conflicts are resolved by comparing server
-	// vs local revisions and keeping whichever is genuinely newer.
 	if (syncConflictState) {
 		if (syncConflictState?.detail?.source === "storage") {
-			// Same-browser, same-device — always safe to clear and proceed.
 			clearSyncConflictState();
 		} else {
-			// Real conflict: pull server, compare, apply the newer snapshot,
-			// then proceed to push if local is still ahead.
 			try { await resolveSyncConflictByReloadingLatest({ quiet: true }); } catch (e) {}
 		}
 	}
@@ -1442,21 +1488,37 @@ if (!(await requireLogin())) return false;
 		const orphanLockResult = await clearOrphanGameLockFromMainMenu();
 
 		if (orphanLockResult === true) {
+			finalButtonState = "success";
+			finalButtonDetail = "game lock cleared";
 			showNotification("✅ Game lock cleared", 1500);
 			return true;
 		}
 
 		if (orphanLockResult === false) {
-			alert(
-				"The game stats are saved, but the game lock could not be cleared yet.\n\n" +
-				"Check your connection and press Sync again. The app will not start another overlapping sync."
-			);
+			finalButtonState = "failed";
+			finalButtonDetail = "game lock cleanup";
+			recordSyncFailure({
+				step: "game lock cleanup",
+				where: "manual Sync button",
+				error: "clearOrphanGameLockFromMainMenu returned false",
+				quiet: false,
+				safeLocal: "The game stats are saved locally, but the app could not clear the old game lock.",
+				nextAction: "Press Sync again before starting another game."
+			});
 			return false;
 		}
 
-		try { await load(); } catch (e) {}
-		try { syncTeamRecordsWithLeague(); } catch (e) {}
-		try { update(); } catch (e) {}
+		try { await load(); } catch (e) {
+			console.warn("[wbl] manual sync load() warning:", e);
+		}
+
+		try { syncTeamRecordsWithLeague(); } catch (e) {
+			console.warn("[wbl] manual sync team record warning:", e);
+		}
+
+		try { update(); } catch (e) {
+			console.warn("[wbl] manual sync UI update warning:", e);
+		}
 
 		const row = await withTimeout(fetchSeasonRowFromServer({ quiet: true }), 6000, null);
 		const serverMs = row ? (Date.parse(row.updated_at || "") || 0) : 0;
@@ -1468,17 +1530,47 @@ if (!(await requireLogin())) return false;
 			const cleanupAfterPull = await clearOrphanGameLockFromMainMenu();
 
 			if (cleanupAfterPull === true) {
+				finalButtonState = "success";
+				finalButtonDetail = "pulled server and cleared lock";
 				showNotification("✅ Data synced and game lock cleared", 1600);
 			} else {
+				finalButtonState = "success";
+				finalButtonDetail = "pulled latest server data";
 				alert("✅ Data was synced.");
 			}
 
 			return true;
 		}
 
-const liveGameConflictBypass = typeof hasLocalLiveGameToProtect === "function" && hasLocalLiveGameToProtect();
-try { saveSeason({ skipServerSync: true, allowConflictBypass: liveGameConflictBypass }); } catch (e) {}
-try { saveSchedule({ skipServerSync: true, allowConflictBypass: liveGameConflictBypass }); } catch (e) {}
+		const liveGameConflictBypass = typeof hasLocalLiveGameToProtect === "function" && hasLocalLiveGameToProtect();
+
+		try {
+			saveSeason({ skipServerSync: true, allowConflictBypass: liveGameConflictBypass });
+		} catch (e) {
+			finalButtonDetail = "local season save before sync";
+			return recordSyncFailure({
+				step: "local season save before sync",
+				where: "manual Sync button",
+				error: e,
+				quiet: false,
+				safeLocal: "The previous local data should still be saved, but the app could not prepare the latest season snapshot.",
+				nextAction: "Do not clear data. Send this message to AI/developer."
+			});
+		}
+
+		try {
+			saveSchedule({ skipServerSync: true, allowConflictBypass: liveGameConflictBypass });
+		} catch (e) {
+			finalButtonDetail = "local schedule save before sync";
+			return recordSyncFailure({
+				step: "local schedule save before sync",
+				where: "manual Sync button",
+				error: e,
+				quiet: false,
+				safeLocal: "The season stats should still be saved locally, but the schedule snapshot could not be prepared.",
+				nextAction: "Press Sync again. If it repeats, send this message to AI/developer."
+			});
+		}
 
 		const ok = await withAppWorking("Syncing…", async () => {
 			return await syncSeasonToServer({ quiet: false });
@@ -1488,28 +1580,47 @@ try { saveSchedule({ skipServerSync: true, allowConflictBypass: liveGameConflict
 			const cleanupAfterSave = await clearOrphanGameLockFromMainMenu();
 
 			if (cleanupAfterSave === true) {
+				finalButtonState = "success";
+				finalButtonDetail = "server sync and lock clear";
 				showNotification("✅ Data synced and game lock cleared", 1600);
 			} else {
+				finalButtonState = "success";
+				finalButtonDetail = "server sync";
 				alert("✅ Data was synced.");
 			}
 
 			return true;
 		}
 
+		finalButtonState = "failed";
+		finalButtonDetail = lastSyncFailureDetail?.step || "syncSeasonToServer returned false";
 		return false;
-} catch (error) {
-	console.error("manualResaveAllStats failed:", error);
-	alert(
-		"Manual Sync failed, but local data is still saved on this device.\n\n" +
-		"Step failed: manual Sync retry\n" +
-		`Time: ${new Date().toISOString()}\n` +
-		`Error: ${error?.message || error?.details || error?.code || String(error)}\n\n` +
-		"What to do next: check your connection and press Sync again. If this keeps happening, send this message to AI/developer."
-	);
-	return false;
-} finally {
+	} catch (error) {
+		finalButtonState = "failed";
+		finalButtonDetail = "manual Sync exception";
+
+		console.error("manualResaveAllStats failed:", error);
+
+		recordSyncFailure({
+			step: "manual Sync exception",
+			where: "manual Sync button",
+			error,
+			quiet: false,
+			safeLocal: "Local data is still saved on this device.",
+			nextAction: "Check your connection and press Sync again. If this keeps happening, send this message to AI/developer."
+		});
+
+		return false;
+	} finally {
 		manualSyncInProgress = false;
 		setSyncButtonBusy(false);
-		setSyncButtonEnabled(true);
+
+		if (finalButtonState === "success") {
+			setSyncButtonResult("success", finalButtonDetail);
+			try { markLiveGameServerSyncSuccess(); } catch (e) {}
+		} else {
+			setSyncButtonResult("failed", finalButtonDetail);
+			try { markLiveGameServerSyncDelayed(); } catch (e) {}
+		}
 	}
 }
