@@ -109,55 +109,54 @@ async function beginLockedGame(t1, t2, scheduleRef = null, extraLockDetails = {}
 		...extraLockDetails
 	});
 
-	if (!isCurrentGameStartAction(startActionId)) {
-		if (attempt?.ok) await releaseGameLockWithTimeout(attempt.lockId, { quiet: true, timeoutMs: 2500 });
+	// acquireGameLock returns null on every failure path, and it has already
+	// surfaced an explanatory alert to the user. Don't show a second alert,
+	// and don't try to release a lock we never acquired.
+	if (!attempt) {
+		refreshGameLockUI();
 		return false;
 	}
-	
-	if (!attempt.ok) {
-		refreshGameLockUI();
-		const lockLabel = getActiveGameLockLabel(attempt.lock || activeGameLock);
-		alert(lockLabel
-			? `Another game is already being recorded.\n\n${lockLabel}\n\nWait until that game is finished or ended early.`
-			: "Another game is already being recorded. Wait until it is finished or ended early.");
+
+	if (!isCurrentGameStartAction(startActionId)) {
+		await releaseGameLockWithTimeout(attempt.lockId, { quiet: true, timeoutMs: 2500 });
 		return false;
 	}
 
 	if (scheduleRef && attempt.row) {
-	const serverSchedule = ensureScheduleShape(attempt.row.schedule_json);
-	const freshSeriesEntry = serverSchedule?.days?.[scheduleRef.dayIndex]?.games?.[scheduleRef.seriesIndex];
-	const freshSeriesGame = freshSeriesEntry?.gamesInSeries?.[scheduleRef.seriesGameIndex];
+		const serverSchedule = ensureScheduleShape(attempt.row.schedule_json);
+		const freshSeriesEntry = serverSchedule?.days?.[scheduleRef.dayIndex]?.games?.[scheduleRef.seriesIndex];
+		const freshSeriesGame = freshSeriesEntry?.gamesInSeries?.[scheduleRef.seriesGameIndex];
 
-	const freshTeamsMatch =
-		!!freshSeriesEntry &&
-		(
-			(freshSeriesEntry.away === t1?.name && freshSeriesEntry.home === t2?.name) ||
-			(freshSeriesEntry.away === t2?.name && freshSeriesEntry.home === t1?.name)
-		);
+		const freshTeamsMatch =
+			!!freshSeriesEntry &&
+			(
+				(freshSeriesEntry.away === t1?.name && freshSeriesEntry.home === t2?.name) ||
+				(freshSeriesEntry.away === t2?.name && freshSeriesEntry.home === t1?.name)
+			);
 
-	if (!freshSeriesEntry || !freshSeriesGame || !freshTeamsMatch) {
-		await releaseGameLockWithTimeout(attempt.lockId, { quiet: true, timeoutMs: 2500 });
-		applyServerSeasonRow(attempt.row, { source: "lock-acquire" });
-		alert("That scheduled slot changed on another device. The game was not started. Sync the schedule and pick the game again.");
-		return false;
+		if (!freshSeriesEntry || !freshSeriesGame || !freshTeamsMatch) {
+			await releaseGameLockWithTimeout(attempt.lockId, { quiet: true, timeoutMs: 2500 });
+			applyServerSeasonRow(attempt.row, { source: "lock-acquire" });
+			alert("That scheduled slot changed on another device. The game was not started. Sync the schedule and pick the game again.");
+			return false;
+		}
+
+		if (freshSeriesGame?.result) {
+			await releaseGameLockWithTimeout(attempt.lockId, { quiet: true, timeoutMs: 2500 });
+			applyServerSeasonRow(attempt.row, { source: "lock-acquire" });
+			alert("That game was already recorded on another device.");
+			return false;
+		}
+
+		if (freshSeriesGame?.skipped) {
+			await releaseGameLockWithTimeout(attempt.lockId, { quiet: true, timeoutMs: 2500 });
+			applyServerSeasonRow(attempt.row, { source: "lock-acquire" });
+			alert("That game was marked not played because the series ended early.");
+			return false;
+		}
 	}
 
-	if (freshSeriesGame?.result) {
-		await releaseGameLockWithTimeout(attempt.lockId, { quiet: true, timeoutMs: 2500 });
-		applyServerSeasonRow(attempt.row, { source: "lock-acquire" });
-		alert("That game was already recorded on another device.");
-		return false;
-	}
-
-	if (freshSeriesGame?.skipped) {
-		await releaseGameLockWithTimeout(attempt.lockId, { quiet: true, timeoutMs: 2500 });
-		applyServerSeasonRow(attempt.row, { source: "lock-acquire" });
-		alert("That game was marked not played because the series ended early.");
-		return false;
-	}
-}
-
-		if (!isCurrentGameStartAction(startActionId)) {
+	if (!isCurrentGameStartAction(startActionId)) {
 		await releaseGameLockWithTimeout(attempt.lockId, { quiet: true, timeoutMs: 2500 });
 		return false;
 	}
