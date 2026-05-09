@@ -416,64 +416,28 @@ async function saveGameStats(options = {}) {
 	}
 
 function scheduleFinalizeBackgroundSync(lockId, completedGameId = null) {
+	// The completed game is already saved locally. Mark dirty and let the
+	// outbox worker push it. The outbox retries on its own, and the lock
+	// is released once the push confirms.
 	setTimeout(async () => {
 		try { markLiveGameServerSyncPending("finalize"); } catch (e) {}
 
-		let synced = false;
-		let syncError = null;
+		// Trigger an immediate push attempt.
+		const pushed = await syncSeasonToServer({ quiet: true });
 
-		try {
-			synced = typeof syncSeasonToServer === "function"
-				? await syncSeasonToServer({ quiet: true })
-				: false;
-		} catch (error) {
-			console.warn("[wbl] background finalize sync error:", error);
-			syncError = error;
-			synced = false;
-		}
-
-		if (!synced) {
-			try { markLiveGameServerSyncDelayed(); } catch (e) {}
-			showDetailedGameFailure({
-				title: "Game saved locally, but server sync failed.",
-				step: "Supabase sync",
-				gameId: completedGameId || lockId || "unknown-game",
-				safeLocal: "Your completed game is safe on this device. The Sync button can retry later.",
-				nextAction: "Go to the main menu and press Sync again when your connection is better.",
-				phase: "automatic sync after ending game",
-				error: syncError || "syncSeasonToServer returned false"
-			});
+		if (!pushed) {
+			// The outbox kept the data dirty and will keep retrying in the
+			// background. We don't show a scary alert here — the sync indicator
+			// shows "Server Sync Delayed" and the user can press Sync to retry.
+			console.warn("[wbl] finalize: outbox could not confirm immediately; retries scheduled.");
 			return;
 		}
 
-		let released = true;
-		let releaseError = null;
-
+		// Confirmed pushed → safe to release lock.
 		if (lockId) {
-			try {
-				released = await releaseGameLockReliably(lockId, { quiet: true });
-			} catch (error) {
-				console.warn("[wbl] background lock release error:", error);
-				releaseError = error;
-				released = false;
-			}
+			try { await releaseGameLockReliably(lockId, { quiet: true }); }
+			catch (e) { console.warn("[wbl] background lock release error:", e); }
 		}
-
-		if (!released) {
-			try { markLiveGameServerSyncDelayed(); } catch (e) {}
-			showDetailedGameFailure({
-				title: "Game synced, but the game lock could not be cleared.",
-				step: "lock release",
-				gameId: completedGameId || lockId || "unknown-game",
-				safeLocal: "Your completed game is safe locally and the stats were sent to the server.",
-				nextAction: "Go to the main menu and press Sync again to clear the lock before starting another game.",
-				phase: "automatic sync after ending game",
-				error: releaseError || "releaseGameLockReliably returned false"
-			});
-			return;
-		}
-
-		try { persistActiveGameLock(null); } catch (e) {}
 		try { markLiveGameServerSyncSuccess(); } catch (e) {}
 	}, 0);
 }
