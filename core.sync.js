@@ -354,13 +354,14 @@ async function ensureSeasonRowExistsForLocking() {
 	};
 	const result = await withTimeout(
 		supabaseClient.from("season_data").upsert(payload, { onConflict: "league_code" })
-			.select("season_json,schedule_json,updated_at,active_game_lock,active_game_lock_id").maybeSingle(),
+			.select("season_json,schedule_json,updated_at,active_game_lock,active_game_lock_id"),
 		8000, null
 	);
 	if (!result) return null;
 	const { data, error } = result;
 	if (error) { console.warn("[wbl] ensureSeasonRowExistsForLocking error:", error); return null; }
-	return data || null;
+	const rows = Array.isArray(data) ? data : (data ? [data] : []);
+	return rows[0] || null;
 }
 
 async function acquireGameLock(lockDetails) {
@@ -397,12 +398,14 @@ async function acquireGameLock(lockDetails) {
 		startedByName: (typeof getStoredName === "function" ? getStoredName() : "") || CURRENT_EMAIL || "This device"
 	};
 
+	// Use .select() (returns array) instead of .maybeSingle() to avoid PostgREST
+	// returning HTTP 406 when zero rows match the conditional update filter.
 	const result = await withTimeout(
 		supabaseClient.from("season_data")
 			.update({ active_game_lock: lockPayload, active_game_lock_id: lockId, updated_at: new Date().toISOString() })
 			.eq("league_code", String(LEAGUE_CODE))
 			.is("active_game_lock_id", null)
-			.select("active_game_lock,active_game_lock_id").maybeSingle(),
+			.select("active_game_lock,active_game_lock_id"),
 		8000, null
 	);
 
@@ -412,35 +415,62 @@ async function acquireGameLock(lockDetails) {
 	}
 
 	const { data, error } = result;
-	if (error) { console.warn("[wbl] acquireGameLock error:", error); alert("Could not start the game (lock error)."); return null; }
-	if (!data) {
-		// Race: someone grabbed the lock between our read and our write.
-		const fresh = await fetchSeasonRowFromServer({ quiet: true });
-		if (fresh?.active_game_lock) persistActiveGameLock(fresh.active_game_lock);
-		alert("Another device just started a game. Try again in a moment.");
+	if (error) {
+		console.warn("[wbl] acquireGameLock error:", error);
+		alert("Could not start the game (lock error). Try Sync, then try again.");
 		return null;
 	}
 
-	persistActiveGameLock(data.active_game_lock || lockPayload);
+	const updatedRows = Array.isArray(data) ? data : (data ? [data] : []);
+	if (updatedRows.length === 0) {
+		// No row was updated. Either someone else holds the lock, OR our row
+		// has a stale lock that was never cleaned up. Re-fetch and decide.
+		const fresh = await fetchSeasonRowFromServer({ quiet: true });
+		const freshLock = fresh?.active_game_lock || null;
+		const freshLockId = fresh?.active_game_lock_id || freshLock?.lockId || null;
+
+		if (!freshLockId) {
+			// Server says no lock, but our update missed. Treat as transient and ask user to retry.
+			alert("Could not start the game (lock check missed). Press Sync, then try again.");
+			return null;
+		}
+
+		persistActiveGameLock(freshLock);
+		alert(
+			"Another device is already recording a live game:\n\n" +
+			getActiveGameLockLabel(freshLock) +
+			"\n\nWait for them to finish, or use Emergency End Game on that device."
+		);
+		return null;
+	}
+
+	persistActiveGameLock(updatedRows[0].active_game_lock || lockPayload);
 	return lockPayload;
 }
 
 async function releaseGameLock(lockId, { quiet = false } = {}) {
 	if (!lockId) return false;
+	// Use .select() not .maybeSingle() — when zero rows match (lock already
+	// cleared by another tab) PostgREST returns 406 with maybeSingle.
 	const result = await withTimeout(
 		supabaseClient.from("season_data")
 			.update({ active_game_lock: null, active_game_lock_id: null, updated_at: new Date().toISOString() })
 			.eq("league_code", String(LEAGUE_CODE))
 			.eq("active_game_lock_id", lockId)
-			.select("active_game_lock_id").maybeSingle(),
+			.select("active_game_lock_id"),
 		8000, null
 	);
 	if (!result) {
 		if (!quiet) console.warn("[wbl] releaseGameLock timed out");
 		return false;
 	}
-	const { error } = result;
-	if (error) { if (!quiet) console.warn("[wbl] releaseGameLock error:", error); return false; }
+	const { data, error } = result;
+	if (error) {
+		if (!quiet) console.warn("[wbl] releaseGameLock error:", error);
+		return false;
+	}
+	// Whether 0 or 1 rows updated, the lock is no longer this lockId on the server.
+	// 0 rows means another tab/device already cleared it — that's fine.
 	persistActiveGameLock(null);
 	return true;
 }
@@ -625,9 +655,9 @@ async function pushSnapshotOnce() {
 	};
 
 	try {
-		const result = await withTimeout(
+const result = await withTimeout(
 			supabaseClient.from("season_data").upsert(payload, { onConflict: "league_code" })
-				.select("season_json,schedule_json,updated_at,active_game_lock,active_game_lock_id").maybeSingle(),
+				.select("season_json,schedule_json,updated_at,active_game_lock,active_game_lock_id"),
 			12000, null
 		);
 		if (!result) {
@@ -635,7 +665,9 @@ async function pushSnapshotOnce() {
 			lastSyncFailureDetail = { step: "Supabase upsert", time: new Date().toISOString(), errorText: "upsert timed out (12s)" };
 			return false;
 		}
-		const { data: savedRow, error } = result;
+		const { data, error } = result;
+		const savedRows = Array.isArray(data) ? data : (data ? [data] : []);
+		const savedRow = savedRows[0] || null;
 		if (error) {
 			outboxDirty = true;
 			lastSyncFailureDetail = { step: "Supabase upsert", time: new Date().toISOString(), errorText: error.message || String(error) };
