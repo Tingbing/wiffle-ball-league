@@ -377,9 +377,24 @@ async function acquireGameLock(lockDetails) {
 	const existingLockId = row.active_game_lock_id || existingLock?.lockId || null;
 	if (existingLockId && existingLock) {
 		const myLockId = activeGameLock?.lockId || null;
-		if (existingLockId !== myLockId) {
+		const hasLiveAutosave = typeof hasValidLiveGameAutosave === "function" && hasValidLiveGameAutosave();
+		const isOwnStaleLock = existingLockId === myLockId && !game && !hasLiveAutosave;
+
+		if (!isOwnStaleLock) {
+			// Either the lock belongs to another device, or it belongs to us but
+			// we still have a live game/autosave attached to it (so it isn't stale).
 			persistActiveGameLock(existingLock);
 			alert("Another device is already recording a live game:\n\n" + getActiveGameLockLabel(existingLock) + "\n\nWait for them to finish, or use Emergency End Game on that device.");
+			return null;
+		}
+
+		// Self-orphan: this device wrote that lockId previously, the start never
+		// completed, and there is nothing live attached to it now. Release it so
+		// the conditional update below can succeed. (lockId collisions across
+		// devices are essentially impossible — random + timestamp.)
+		const released = await releaseGameLockReliably(existingLockId, { quiet: true });
+		if (!released) {
+			alert("Could not clear a stale lock from a previous attempt. Press Sync, then try again.");
 			return null;
 		}
 	}
@@ -423,8 +438,9 @@ async function acquireGameLock(lockDetails) {
 
 	const updatedRows = Array.isArray(data) ? data : (data ? [data] : []);
 	if (updatedRows.length === 0) {
-		// No row was updated. Either someone else holds the lock, OR our row
-		// has a stale lock that was never cleaned up. Re-fetch and decide.
+		// No row was updated. Either someone else just claimed the lock between
+		// the pre-check and now, OR PostgREST returned 0 rows for an unrelated
+		// reason. Re-fetch and decide.
 		const fresh = await fetchSeasonRowFromServer({ quiet: true });
 		const freshLock = fresh?.active_game_lock || null;
 		const freshLockId = fresh?.active_game_lock_id || freshLock?.lockId || null;
@@ -445,7 +461,9 @@ async function acquireGameLock(lockDetails) {
 	}
 
 	persistActiveGameLock(updatedRows[0].active_game_lock || lockPayload);
-	return lockPayload;
+	// Return the structured shape beginLockedGame expects: ok flag, lockId,
+	// the lock object, and the season_data row (for fresh-schedule validation).
+	return { ok: true, lockId, lock: lockPayload, row };
 }
 
 async function releaseGameLock(lockId, { quiet = false } = {}) {
