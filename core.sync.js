@@ -130,7 +130,29 @@ async function resolveSyncConflictByReloadingLatest({ quiet = false } = {}) {
 		shouldUseServer = rowMs > headMs || rowSeasonRev > headSeasonRev || rowScheduleRev > headScheduleRev;
 	}
 
-	if (shouldUseServer && row) {
+if (shouldUseServer && row) {
+		// Critical safety: if local has unsynced changes that are NEWER than the
+		// server snapshot, do not force-apply. Forcing would overwrite a finalized
+		// game that hasn't synced yet. Adopt the server baseline to fix preflight
+		// math, then let the normal sync push our local up.
+		const rowSeasonRev = getSeasonRevisionFrom(ensureSeasonShape(deepCloneJson(row.season_json)));
+		const rowScheduleRev = getScheduleRevisionFrom(ensureScheduleShape(deepCloneJson(row.schedule_json)));
+		const localSeasonRevNow = getSeasonRevisionFrom(season);
+		const localScheduleRevNow = getScheduleRevisionFrom(schedule);
+		const localHasNewerWork =
+			localSeasonRevNow > rowSeasonRev ||
+			localScheduleRevNow > rowScheduleRev;
+
+		if (localHasNewerWork) {
+			adoptServerSyncBaseline(row);
+			if (Object.prototype.hasOwnProperty.call(row, "active_game_lock")) {
+				persistActiveGameLock(row.active_game_lock || null);
+			}
+			clearSyncConflictState();
+			if (!quiet) showNotification("↑ Local has newer data — keeping it for next sync", 1800);
+			return true;
+		}
+
 		applyServerSeasonRow(row, { force: true, source: "conflict-recovery" });
 		clearSyncConflictState();
 		if (!quiet) showNotification("⬇️ Loaded latest data after conflict", 1800);
@@ -920,10 +942,24 @@ async function ensurePostUnlockSetup() {
 	postUnlockSetupPromise = (async () => {
 		setSyncButtonEnabled(false);
 
-				// Best effort: pull down newer server snapshot before enabling autosync.
-		// Do not hydrate over a valid local live game; live-game local autosave is authoritative.
+// Best effort: pull down newer server snapshot before enabling autosync.
+		// During a live game we MUST NOT overwrite the local snapshot, but we
+		// still need to refresh syncState.serverSeasonRevision so subsequent
+		// preflight checks don't fire false-positive "server newer" conflicts.
 		if (!(typeof hasLocalLiveGameToProtect === "function" && hasLocalLiveGameToProtect())) {
 			try { await hydrateFromServerIfNewer(); } catch (e) {}
+		} else {
+			try {
+				const row = await withTimeout(fetchSeasonRowFromServer({ quiet: true }), 6000, null);
+				if (row) {
+					// Adopt baseline so preflight has accurate server-revision tracking,
+					// but do NOT call applyServerSeasonRow — that would overwrite the
+					// live-game local snapshot.
+					adoptServerSyncBaseline(row);
+				}
+			} catch (e) {
+				console.warn("[wbl] live-game baseline refresh warning:", e);
+			}
 		}
 
 		// Start realtime listeners
@@ -1508,7 +1544,9 @@ async function manualResaveAllStats() {
 			return false;
 		}
 
-		try { await load(); } catch (e) {
+try {
+			await withTimeout(load(), 8000, null);
+		} catch (e) {
 			console.warn("[wbl] manual sync load() warning:", e);
 		}
 
