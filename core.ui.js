@@ -1,0 +1,626 @@
+// Wiffle Ball League - Menus, screens, team configuration, and UI glue
+// Split from app.core.js. Load this AFTER core.stats.js and BEFORE app.game.js and app.boot.js.
+
+/* ================================
+   NOTIFICATIONS
+================================== */
+	function showNotification(message, duration = 2000) {
+		// League edits announce success only after the server transaction commits.
+		if (leagueEditActive) return;
+		let notif = document.getElementById("notification");
+		if (document.getElementById('gameScreen').classList.contains('hidden')) {
+			notif = document.getElementById('globalNotice');
+			if (!notif) {
+				notif = document.createElement('div'); notif.id = 'globalNotice';
+				notif.className = 'notification'; notif.setAttribute('role', 'status');
+				document.body.prepend(notif);
+			}
+		}
+		if (notif) {
+			notif.innerText = message;
+			notif.classList.remove("hidden");
+			setTimeout(() => {
+				notif.classList.add("hidden");
+			}, duration);
+		}
+	}
+
+// GAME SETUP + SCHEDULE / MENU FLOW
+
+/* ================================
+   SCREEN NAVIGATION
+================================== */
+function showPublicMenu() { showMainMenu(); }
+function clearFinishedGameMemoryIfNeeded() {
+  if (recording.row?.status !== "complete") return false;
+  game=null; gameHistory=[]; lastPlay=null; pendingBattingResult=null;
+  recording.row=null; return true;
+}
+function showMainMenu() {
+  clearFinishedGameMemoryIfNeeded();
+  if(game && recording.row?.mine && recording.row?.status==='live') {
+    showGame(); renderRecordingStatus(); return;
+  }
+  if(!recording.pending) { game=null; recording.row=null; }
+  hideAllScreens(); document.getElementById("mainMenu").classList.remove("hidden");
+  updatePublicAccessUI(); renderLiveGameList();
+}
+
+function showTeamConfig() {
+	if (isPublicViewOnlyMode()) {
+		alert("Open the main menu to configure teams.");
+		showPublicMenu();
+		return;
+	}
+	hideAllScreens();
+	document.getElementById("teamConfigScreen").classList.remove("hidden");
+	update();
+}
+
+async function showGameSetup() {
+	clearFinishedGameMemoryIfNeeded();
+	if (game) {
+		showGame();
+		try { updateGameScreen(); } catch (e) {}
+		showNotification("A game is already being recorded on this device.", 1400);
+		return;
+	}
+
+	if (!game && typeof hasValidLiveGameAutosave === "function" && hasValidLiveGameAutosave()) {
+		const restored = await maybeOfferLiveGameResume({ force: true, auto: true, source: "game-setup" });
+		if (restored) return;
+	}
+
+	if (isPublicViewOnlyMode()) {
+		alert("Open the main menu to record games.");
+		showPublicMenu();
+		return;
+	}
+
+	hideAllScreens();
+
+	if (league.teams.length < 2) {
+		alert("You need at least 2 teams! Please configure teams first.");
+		showTeamConfig();
+		return;
+	}
+
+	let validTeams = league.teams.filter(t => t.players.length > 0);
+	if (validTeams.length < 2) {
+		alert("You need at least 2 teams with players! Please add players first.");
+		showTeamConfig();
+		return;
+	}
+
+	document.getElementById("gameSetupScreen").classList.remove("hidden");
+
+	refreshGameSetupScheduleCards();
+}
+
+async function showSeasonStats() {
+	hideAllScreens();
+	document.getElementById("seasonStatsScreen").classList.remove("hidden");
+	updatePublicAccessUI();
+	try { displaySeasonStats(); } catch (e) { console.warn("displaySeasonStats failed:", e); }
+
+	if (isPublicViewOnlyMode()) {
+		try {
+			refreshPublicViewData({ quiet: true })
+				.then(() => {
+					const screen = document.getElementById("seasonStatsScreen");
+					if (screen && !screen.classList.contains("hidden")) displaySeasonStats();
+				})
+				.catch((e) => console.warn("public stats refresh failed:", e));
+		} catch (e) {}
+	}
+}
+
+async function showPlayerStats() {
+	hideAllScreens();
+	document.getElementById("playerStatsScreen").classList.remove("hidden");
+	updatePublicAccessUI();
+	try { displayPlayerStats(); } catch (e) { console.warn("displayPlayerStats failed:", e); }
+
+	if (isPublicViewOnlyMode()) {
+		try {
+			refreshPublicViewData({ quiet: true })
+				.then(() => {
+					const screen = document.getElementById("playerStatsScreen");
+					if (screen && !screen.classList.contains("hidden")) displayPlayerStats();
+				})
+				.catch((e) => console.warn("public player stats refresh failed:", e));
+		} catch (e) {}
+	}
+}
+
+async function showTeamStats() {
+	hideAllScreens();
+	document.getElementById("teamStatsScreen").classList.remove("hidden");
+	updatePublicAccessUI();
+	try { displayTeamStats(); } catch (e) { console.warn("displayTeamStats failed:", e); }
+
+	if (isPublicViewOnlyMode()) {
+		try {
+			refreshPublicViewData({ quiet: true })
+				.then(() => {
+					const screen = document.getElementById("teamStatsScreen");
+					if (screen && !screen.classList.contains("hidden")) displayTeamStats();
+				})
+				.catch((e) => console.warn("public team stats refresh failed:", e));
+		} catch (e) {}
+	}
+}
+
+async function showRankings() {
+	hideAllScreens();
+	document.getElementById("rankingsScreen").classList.remove("hidden");
+	updatePublicAccessUI();
+	try { displayRankings(); } catch (e) { console.warn("displayRankings failed:", e); }
+
+	if (isPublicViewOnlyMode()) {
+		try {
+			refreshPublicViewData({ quiet: true })
+				.then(() => {
+					const screen = document.getElementById("rankingsScreen");
+					if (screen && !screen.classList.contains("hidden")) displayRankings();
+				})
+				.catch((e) => console.warn("public rankings refresh failed:", e));
+		} catch (e) {}
+	}
+}
+
+async function showPastGameLog() {
+	hideAllScreens();
+	document.getElementById("pastGameLogScreen").classList.remove("hidden");
+	updatePublicAccessUI();
+	try { displayPastGameLog(); } catch (e) { console.warn("displayPastGameLog failed:", e); }
+
+	if (isPublicViewOnlyMode()) {
+		try {
+			refreshPublicViewData({ quiet: true })
+				.then(() => {
+					const screen = document.getElementById("pastGameLogScreen");
+					if (screen && !screen.classList.contains("hidden")) displayPastGameLog();
+				})
+				.catch((e) => console.warn("public game log refresh failed:", e));
+		} catch (e) {}
+	}
+}
+
+async function showManualGameStatEditor() {
+	if (game) {
+		showGame();
+		try { updateGameScreen(); } catch (e) {}
+		alert("Finish or End Game Early before editing completed game stats.");
+		return;
+	}
+
+	const unlocked = typeof isLeagueUnlocked === "function" ? isLeagueUnlocked() : !isPublicViewOnlyMode();
+	if (isPublicViewOnlyMode() || !unlocked) {
+		alert("Open the main menu to edit completed game stats.");
+		showPublicMenu();
+		return;
+	}
+
+	hideAllScreens();
+	document.getElementById("manualGameStatEditorScreen").classList.remove("hidden");
+	updatePublicAccessUI();
+	try { displayManualGameStatEditor(); } catch (e) { console.warn("displayManualGameStatEditor failed:", e); }
+}
+
+async function showPostseason() {
+	hideAllScreens();
+	document.getElementById("postseasonScreen").classList.remove("hidden");
+	updatePublicAccessUI();
+	try { displayPostseason(); } catch (e) { console.warn("displayPostseason failed:", e); }
+
+	if (isPublicViewOnlyMode()) {
+		try {
+			refreshPublicViewData({ quiet: true })
+				.then(() => {
+					const screen = document.getElementById("postseasonScreen");
+					if (screen && !screen.classList.contains("hidden")) displayPostseason();
+				})
+				.catch((e) => console.warn("public postseason refresh failed:", e));
+		} catch (e) {}
+	}
+}
+
+function hideAllScreens() {
+	document.getElementById("publicMenu")?.classList.add("hidden");
+	document.getElementById("mainMenu").classList.add("hidden");
+	document.getElementById("teamConfigScreen").classList.add("hidden");
+	document.getElementById("gameSetupScreen").classList.add("hidden");
+	document.getElementById("gameScreen").classList.add("hidden");
+	document.getElementById("gameOverScreen").classList.add("hidden");
+	document.getElementById("seasonStatsScreen").classList.add("hidden");
+	document.getElementById("playerStatsScreen").classList.add("hidden");
+	document.getElementById("teamStatsScreen").classList.add("hidden");
+	document.getElementById("rankingsScreen").classList.add("hidden");
+	document.getElementById("pastGameLogScreen").classList.add("hidden");
+	document.getElementById("manualGameStatEditorScreen")?.classList.add("hidden");
+	document.getElementById("scheduleScreen").classList.add("hidden");
+	document.getElementById("postseasonScreen").classList.add("hidden");
+	document.getElementById("activeUsersScreen")?.classList.add("hidden");
+}
+
+	function showGame() {
+		hideAllScreens();
+		document.getElementById("gameScreen").classList.remove("hidden");
+	}
+
+	function showGameOver() {
+		hideAllScreens();
+		document.getElementById("gameOverScreen").classList.remove("hidden");
+	}
+
+/* ================================
+   TEAM CONFIGURATION
+================================== */
+function confirmMidSeasonStructureChange(actionLabel) {
+	if (typeof hasRecordedSeasonGames !== "function" || !hasRecordedSeasonGames()) {
+		return true;
+	}
+
+	return confirm(
+		"⚠️ Mid-season team/roster change\n\n" +
+		"This season already has recorded games.\n\n" +
+		"Changing teams or players now can:\n" +
+		"• put the saved schedule out of sync\n" +
+		"• disable scheduled game selection\n" +
+		"• make recorded season history harder to trust\n\n" +
+		"Recommended: cancel this change and use Reset Season Data first if you want to start a new season.\n\n" +
+		`Do you still want to ${actionLabel}?`
+	);
+}
+
+async function addTeam() {
+  const name=document.getElementById('teamName').value.trim();
+  if(!name) return false;
+  if(league.teams.length>=MAX_TEAMS) return alert(`Maximum ${MAX_TEAMS} teams.`);
+  if(league.teams.some(t=>t.name.toLowerCase()===name.toLowerCase())) return alert('That team already exists.');
+  if(!confirmMidSeasonStructureChange('add this team')) return false;
+  league.teams.push({name,players:[]}); document.getElementById('teamName').value=''; update();
+}
+async function addPlayer() {
+  const team=league.teams[Number(document.getElementById('teamSelect').value)];
+  const name=document.getElementById('playerName').value.replace(/\s+/g,' ').trim();
+  if(!team || !name) return false;
+  if(team.players.length>=MAX_PLAYERS_PER_TEAM) return alert(`Maximum ${MAX_PLAYERS_PER_TEAM} players per team.`);
+  if(getAllPlayerNames().some(p=>p.toLowerCase()===name.toLowerCase())) return alert('That player already exists.');
+  if(!confirmMidSeasonStructureChange('add this player')) return false;
+  team.players.push(name); document.getElementById('playerName').value=''; update();
+}
+async function removeTeam(index) {
+  const team=league.teams[index]; if(!team) return false;
+  if(hasRecordedSeasonGames()) return alert('Reset the season before deleting teams with recorded history.');
+  if(!confirm(`Remove ${team.name} for everyone?`)) return false;
+  league.teams.splice(index,1); delete season.teamRecords[team.name];
+  Object.keys(season.playerStats).filter(k=>k.startsWith(team.name+'|')).forEach(k=>delete season.playerStats[k]);
+  update();
+}
+async function removePlayer(teamIndex,playerIndex) {
+  const team=league.teams[teamIndex]; const name=team?.players[playerIndex]; if(!name) return false;
+  if(hasRecordedSeasonGames()) return alert('Reset the season before deleting players with recorded history.');
+  if(!confirm(`Remove ${name} for everyone?`)) return false;
+  team.players.splice(playerIndex,1); delete season.playerStats[getPlayerKey(team.name,name)]; update();
+}
+
+
+/* ================================
+   GENERAL UI REFRESH
+================================== */
+function update() {
+	let select = document.getElementById("teamSelect");
+	select.innerHTML = "";
+
+	if (league.teams.length === 0) {
+		select.innerHTML = "<option>Add a team first</option>";
+	}
+
+	league.teams.forEach((t, i) => {
+		let opt = document.createElement("option");
+		opt.value = i;
+		opt.text = t.name;
+		select.appendChild(opt);
+	});
+
+	let list = document.getElementById("teamList");
+	list.innerHTML = "";
+
+	if (league.teams.length === 0) {
+		list.innerHTML = "<p>No teams yet. Add a team above!</p>";
+	}
+
+	league.teams.forEach((team, teamIndex) => {
+		let div = document.createElement("div");
+		div.className = "card";
+
+		let playersHTML = "";
+		team.players.forEach((player, playerIndex) => {
+			playersHTML += `<div>${player} <button onclick="removePlayer(${teamIndex},${playerIndex})">Remove</button></div>`;
+		});
+		if (playersHTML === "") playersHTML = "No players yet";
+
+		div.innerHTML = `<b>${team.name}</b> <button onclick="removeTeam(${teamIndex})">Remove Team</button><br>Players:<br>${playersHTML}`;
+		list.appendChild(div);
+	});
+
+	const subsList = document.getElementById("seasonSubsList");
+	if (subsList) {
+		subsList.innerHTML = "";
+		const subs = Array.isArray(season?.seasonSubs) ? season.seasonSubs : [];
+
+		if (!subs.length) {
+			subsList.innerHTML = "<p>No season subs yet.</p>";
+		} else {
+			subs.forEach((subName, subIndex) => {
+				const row = document.createElement("div");
+				row.innerHTML = `${subName} <button onclick="removeSeasonSub(${subIndex})">Remove</button>`;
+				subsList.appendChild(row);
+			});
+		}
+	}
+
+	save();
+}
+
+/* ================================
+   SEASON SUBSTITUTIONS UI
+================================== */
+function addSeasonSub() {
+	season = ensureSeasonShape(season);
+	const input = document.getElementById("seasonSubName");
+	if (!input) return;
+
+	const subName = String(input.value || "").trim();
+	if (!subName) return alert("Enter a substitute name first.");
+
+	if ((season.seasonSubs || []).some(name => String(name).toLowerCase() === subName.toLowerCase())) {
+		return alert("That substitute name already exists.");
+	}
+
+	if (getAllPlayerNames().some(name => String(name).toLowerCase() === subName.toLowerCase())) {
+		return alert("That name is already being used by a roster player. Pick a different sub name.");
+	}
+
+	season.seasonSubs.push(subName);
+	initSubStats(subName);
+	input.value = "";
+	saveSeason();
+	update();
+}
+
+function removeSeasonSub(subIndex) {
+	season = ensureSeasonShape(season);
+	const subs = season.seasonSubs || [];
+	const subName = subs[subIndex];
+	if (!subName) return;
+
+	if (!confirm(`Remove ${subName} from the Season Subs list? Existing sub stats and old assignments will stay saved.`)) return;
+
+	subs.splice(subIndex, 1);
+	saveSeason();
+	update();
+	renderSubAssignmentSummary();
+}
+
+function toggleSubAssignCard(forceOpen = null) {
+	const card = document.getElementById("subAssignCard");
+	if (!card) return;
+
+	const shouldOpen = forceOpen === null ? card.classList.contains("hidden") : !!forceOpen;
+	if (shouldOpen) {
+		const ctx = getSelectedScheduleContext();
+		if (!ctx) return alert("Select a day and series first.");
+		card.classList.remove("hidden");
+		populateSubTeamSelect();
+		return;
+	}
+
+	card.classList.add("hidden");
+}
+
+function populateSubTeamSelect() {
+	const ctx = getSelectedScheduleContext();
+	const teamSelect = document.getElementById("subTeamSelect");
+	if (!teamSelect) return;
+
+	teamSelect.innerHTML = "";
+	if (!ctx) return;
+
+	[ctx.seriesEntry.away, ctx.seriesEntry.home].forEach(teamName => {
+		const opt = document.createElement("option");
+		opt.value = teamName;
+		opt.text = teamName;
+		teamSelect.appendChild(opt);
+	});
+
+	populateSubReplacePlayerSelect();
+}
+
+function populateSubReplacePlayerSelect() {
+	const teamSelect = document.getElementById("subTeamSelect");
+	const replaceSelect = document.getElementById("subReplacePlayerSelect");
+	if (!teamSelect || !replaceSelect) return;
+
+	replaceSelect.innerHTML = "";
+	const teamObj = league.teams.find(t => t.name === teamSelect.value);
+
+	(teamObj?.players || []).forEach(playerName => {
+		const opt = document.createElement("option");
+		opt.value = playerName;
+		opt.text = playerName;
+		replaceSelect.appendChild(opt);
+	});
+
+	populateSeasonSubSelect();
+}
+
+function populateSeasonSubSelect() {
+	const select = document.getElementById("seasonSubSelect");
+	const msg = document.getElementById("subAssignHint");
+	if (!select) return;
+
+	select.innerHTML = "";
+	const subs = Array.isArray(season?.seasonSubs) ? season.seasonSubs : [];
+
+	if (!subs.length) {
+		const opt = document.createElement("option");
+		opt.value = "";
+		opt.text = "No Season Subs added yet";
+		select.appendChild(opt);
+		select.disabled = true;
+		if (msg) msg.innerText = "Add season subs in Configure Teams before assigning one here.";
+		return;
+	}
+
+	select.disabled = false;
+	subs.forEach(subName => {
+		const opt = document.createElement("option");
+		opt.value = subName;
+		opt.text = subName;
+		select.appendChild(opt);
+	});
+
+	if (msg) msg.innerText = "";
+}
+
+function renderSubAssignmentSummary() {
+	const box = document.getElementById("subAssignmentSummary");
+	if (!box) return;
+
+	box.innerHTML = "";
+	const ctx = getSelectedScheduleContext();
+	if (!ctx) return;
+
+	const seriesAssignments = getSeriesAssignmentStore(ctx.dayIndex, ctx.seriesIndex);
+	const gameAssignments = Number.isInteger(ctx.seriesGameIndex)
+		? getGameAssignmentStore(ctx.dayIndex, ctx.seriesIndex, ctx.seriesGameIndex)
+		: [];
+
+	if (!seriesAssignments.length && !gameAssignments.length) {
+		box.innerHTML = '<p style="color:#aaa; margin:8px 0 0 0;">No substitutes assigned for this selection yet.</p>';
+		return;
+	}
+
+	const card = document.createElement("div");
+	card.className = "card";
+
+	let html = '<h3 style="margin-top:0;">Current Sub Assignments</h3>';
+
+	if (seriesAssignments.length) {
+		html += '<div style="margin-bottom:8px;"><b>Entire Series</b>';
+		seriesAssignments.forEach((assignment, idx) => {
+			html += `<div style="margin-top:6px;">${assignment.teamName}: ${assignment.subName} for ${assignment.replacedPlayer} <button onclick="removeSubAssignment('series', ${ctx.dayIndex}, ${ctx.seriesIndex}, ${idx})">Remove</button></div>`;
+		});
+		html += '</div>';
+	}
+
+	if (gameAssignments.length && Number.isInteger(ctx.seriesGameIndex)) {
+		html += `<div><b>Game ${ctx.seriesGameIndex + 1} Only</b>`;
+		gameAssignments.forEach((assignment, idx) => {
+			html += `<div style="margin-top:6px;">${assignment.teamName}: ${assignment.subName} for ${assignment.replacedPlayer} <button onclick="removeSubAssignment('game', ${ctx.dayIndex}, ${ctx.seriesIndex}, ${ctx.seriesGameIndex}, ${idx})">Remove</button></div>`;
+		});
+		html += '</div>';
+	}
+
+	card.innerHTML = html;
+	box.appendChild(card);
+}
+
+function removeSubAssignment(scope, dayIndex, seriesIndex, a, b) {
+	let store = [];
+	let removeIndex = -1;
+
+	if (scope === "series") {
+		store = getSeriesAssignmentStore(dayIndex, seriesIndex);
+		removeIndex = a;
+	} else {
+		store = getGameAssignmentStore(dayIndex, seriesIndex, a);
+		removeIndex = b;
+	}
+
+	if (!Array.isArray(store) || removeIndex < 0 || removeIndex >= store.length) return;
+
+	store.splice(removeIndex, 1);
+	saveSchedule();
+	renderSubAssignmentSummary();
+	populateSubTeamSelect();
+}
+
+function confirmSubAssignment() {
+	const ctx = getSelectedScheduleContext();
+	if (!ctx) return alert("Select a day and series first.");
+
+	const scope = document.getElementById("subScopeSelect")?.value || "series";
+	const teamName = document.getElementById("subTeamSelect")?.value || "";
+	const replacedPlayer = document.getElementById("subReplacePlayerSelect")?.value || "";
+	const subName = document.getElementById("seasonSubSelect")?.value || "";
+
+	if (!teamName || !replacedPlayer || !subName) {
+		return alert("Choose a team, the player being replaced, and the substitute.");
+	}
+
+	if (scope === "game" && !Number.isInteger(ctx.seriesGameIndex)) {
+		return alert("Select a game number before adding a game-only substitute.");
+	}
+
+	const teamObj = league.teams.find(t => t.name === teamName);
+	if (!teamObj || !(teamObj.players || []).includes(replacedPlayer)) {
+		return alert("That roster player could not be found on the selected team.");
+	}
+
+	const allSeriesAssignments = [
+		...getSeriesAssignmentStore(ctx.dayIndex, ctx.seriesIndex),
+		...ctx.seriesEntry.gamesInSeries.flatMap(g => Array.isArray(g.subAssignments) ? g.subAssignments : [])
+	];
+
+	if (allSeriesAssignments.some(a => a.subName === subName && !(a.teamName === teamName && a.replacedPlayer === replacedPlayer))) {
+		return alert("That substitute is already assigned somewhere in this series. Remove the old assignment first if you want to switch them.");
+	}
+
+	const targetStore = scope === "series"
+		? getSeriesAssignmentStore(ctx.dayIndex, ctx.seriesIndex)
+		: getGameAssignmentStore(ctx.dayIndex, ctx.seriesIndex, ctx.seriesGameIndex);
+
+	const existingIndex = targetStore.findIndex(a => a.teamName === teamName && a.replacedPlayer === replacedPlayer);
+	const payload = {
+		teamName,
+		replacedPlayer,
+		subName,
+		createdAt: Date.now()
+	};
+
+	if (existingIndex >= 0) targetStore[existingIndex] = payload;
+	else targetStore.push(payload);
+
+	initSubStats(subName);
+	saveSeason();
+	saveSchedule();
+	renderSubAssignmentSummary();
+	showNotification(`${subName} will sub for ${replacedPlayer}.`, 1500);
+}
+
+	// GAME SETUP FUNCTIONS
+
+/* ================================
+   SCHEDULE SCREEN ENTRY
+================================== */
+async function showSchedule() {
+  hideAllScreens();
+  document.getElementById("scheduleScreen").classList.remove("hidden");
+  updatePublicAccessUI();
+  try { renderScheduleUI(); } catch (e) { console.warn("renderScheduleUI failed:", e); }
+
+  if (isPublicViewOnlyMode()) {
+    try {
+      refreshPublicViewData({ quiet: true })
+        .then(() => {
+          const screen = document.getElementById("scheduleScreen");
+          if (screen && !screen.classList.contains("hidden")) renderScheduleUI();
+        })
+        .catch((e) => console.warn("public schedule refresh failed:", e));
+    } catch (e) {}
+  }
+}
