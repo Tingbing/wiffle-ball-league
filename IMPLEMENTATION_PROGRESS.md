@@ -1,128 +1,85 @@
-# Multi-league implementation progress
+# Multi-league implementation checklist
 
-Updated: 2026-10-09. Status: implementation released; owner one-time code setup remains.
+Updated: 2026-10-09. **Released. The owner must choose the existing league's shared code using the private one-time setup file.** Final live visual inspection remains blocked by the cloud browser's credential protection; do not claim competition readiness yet.
 
-## Target and source
+## Current checklist
 
-Repository: https://github.com/Tingbing/wiffle-ball-league
-Development branch: codex/multi-league-2026-10-09
-Inspected main: eca58ba3d8ea44982142ea4c0eb02971ddc5a06e. Uploaded ZIP matches original source. No AGENTS.md or build/lint/typecheck configuration exists.
-The intended production Supabase target remains the project referenced in app.boot.js. No production database writes or merges have occurred. Private data and dumps are excluded from this repository.
+- [x] Inspect uploaded ZIP, current GitHub source, backend schema and permissions
+- [x] Implement independent leagues, code-based sessions and configurable rules
+- [x] Pass 12 baseline/custom-rule Node tests
+- [x] Pass 30 real isolated backend HTTP checks
+- [x] Restore private production backup in isolation and prove migration preservation
+- [x] Publish private HTTPS staging preview
+- [x] Pass 23 Chromium desktop/mobile/two-device/tab browser checks
+- [x] Recheck production data/schema and main for drift
+- [x] Deliver private one-time existing-league setup mechanism
+- [x] Apply production migrations and verify preserved records/security
+- [x] Merge PR #3 and deploy using existing GitHub Pages workflow
+- [x] Verify deployed source hashes and non-destructive production API checks
+- [ ] Owner enters the private setup token, chooses a shared code and reviews the live app
 
-## Implementation checkpoint
+## Targets and release
 
-- Public directory with search and cursor pagination; duplicate names are allowed and distinguished by ID.
-- Transactional league creation with idempotency receipt. Private bcrypt hashes and server-validated seven-day device sessions. No conventional signup.
-- Gated private RPCs with league-scoped grants, shared full permissions, device revocation, code-change revocation, and server throttling.
-- Migration closes legacy RPC/table/view/publication access. Private tables use RLS and no API-role table grants.
-- League-scoped client persistence, recorder identities and recovery; generation checks reject late private responses after switching.
-- Configurable 2–8 teams, 1–52 weeks, 1–9 innings and 1–6 outs. Weekly round-robin cycles support odd-team byes. Postseason remains explicitly limited to four teams.
-- Game/season rule snapshots, immutable game rules, and blocked roster/rule changes during scored seasons or live games.
-- Existing recorder revision/epoch/lease and receipt protocol retained, with one live game per league enforced atomically.
-- One-time existing-league setup requires a separately provisioned private random token. No production code or setup token has been provisioned yet.
+- Repository: https://github.com/Tingbing/wiffle-ball-league
+- Working branch: codex/multi-league-2026-10-09
+- Live app: https://tingbing.github.io/wiffle-ball-league/
+- PR: https://github.com/Tingbing/wiffle-ball-league/pull/3
+- App release commit: fb7107559b5f4a5408dec90b451bf2ffaf49f02b
+- Successful Pages deployment: https://github.com/Tingbing/wiffle-ball-league/actions/runs/37972202632
+- Last tested source checkpoint: b03c5694f35792b41146769f59caded836994e71
+- Private preview: https://wiffle-multileague-staging-check.warm-ghost-4468.chatgpt.site
+- Production Supabase: hunqtklytyorvmztgpqt
+- Isolated free staging Supabase: axyywkipikyahayzipbu
 
-## Actual validation
+The uploaded ZIP matched original main eca58ba3d8ea44982142ea4c0eb02971ddc5a06e. No AGENTS.md or app dependency/build/lint/typecheck configuration existed. App code changes were isolated on the development branch until acceptance passed. Documentation-only final checkpoints do not change the tested application code.
 
-- Baseline: 12 Node tests pass, including 50 four-team and 50 five-team schedules, default overtime and recoverable completion.
-- Isolated free staging project created by the user and verified healthy; baseline fixture and multi_league_access migration applied there only.
-- tests/backend.mjs: 24 checks passed via real PostgREST HTTP requests. See tests/BACKEND_RESULTS.md. Includes cross-league reads/writes, minimal directory, code checks, duplicate/retried creation, throttling, one recorder, simultaneous independent leagues, idempotent saves, stale revisions, handoff/stale release, immutable rules, completion, device revocation and code changes.
-- Browser gate is BLOCKED: Playwright downloads failed; official Chrome downloaded but cannot launch because runtime socket operations are prohibited. Cloud Browser rejected the local file preview under its URL security policy, with explicit instruction not to work around that blocked action. No browser acceptance checks ran. A supported HTTPS staging preview/browser environment is needed; do not bypass the policy.
-- Custom-rule, pagination/expiry/lease-expiry, setup-token and representative backup/migration checks now pass. Full browser scoring/substitution/undo/stat workflow, phone/accessibility and client concurrency checks remain untested.
+## What changed
 
-## Rollout and recovery
+The app opens to a public directory with search, cursor pagination, loading/error/empty states and Create/Join/Open controls. Listings expose only ID, name and creation time. Duplicate names remain independent. Creation is transactional and supports idempotent retries.
 
-Keep this branch unmerged until all required gates pass. Migration: supabase/migrations/20261009170646_multi_league_access.sql. database/*.sql are its source fragments. tests/fixtures/baseline.sql is a synthetic test-only baseline, NEVER a production migration.
-Before production writes: capture schema/deployment state and private affected-data backup, prove isolated restore and preservation, validate migration on that copy, recheck main/schema drift, and provision a verified existing-league code/setup mechanism. Close legacy backend access before frontend deployment; old clients must fail closed.
-No paid resources or upgrades authorized. No data was erased despite permission to erase if necessary.
+Each league has one shared code stored as a private bcrypt hash. Server-validated random-token sessions last seven days. Everyone with a valid code has equal full league permissions. Explicit leave revokes that device's grant; code rotation revokes every grant and releases live recorder ownership. Codes, setup secrets and hashes are excluded from listings and this repository.
 
-## Next step
+Private reads and mutations use gated RPCs. Legacy anonymous RPC, table, view and publication access is closed. Private tables have RLS, no direct API-role table grants, and no public policies. The app uses gated polling; it does not use Realtime or Storage. Security advisers intentionally flag exposed SECURITY DEFINER RPCs and deny-by-default private RLS tables; do not weaken security to silence those informational/design warnings.
 
-Recheck branch and staging migrations (do not reapply blindly), continue custom-rule and browser tests, harden findings, then complete backup/restore and rollout gates. Never claim competition readiness before acceptance passes.
+Caches, routes, recorder identities, recovery copies and in-memory state are league scoped. Generation checks discard late responses after switching. Scoring saves require server acknowledgment, revision/epoch/lease ownership and idempotent receipts. One live game is enforced per league; different leagues can record independently. Unconfirmed saves pause scoring and handoff.
 
-## Additional verification and private backup
+Supported customization: 2–8 teams, 1–52 weeks, 1–9 innings and 1–6 outs. Original defaults remain four teams, six weeks, three innings and two outs. Odd-team schedules include byes; partial round-robin cycles can have unequal opponents/byes. Postseason remains explicitly limited to exactly four teams. Game/season rule snapshots preserve completed statistics. Rule/roster changes are blocked during live games and scored seasons. The original scoring rules and statistical normalization remain intact, with pitching-out denominators snapshotted for custom rules.
 
-Six additional real HTTP checks passed: cursor pagination without duplicates; expired grant rejection; expired recorder takeover; invalid/reused setup-token rejection; authenticated restored league snapshot equality; legacy restored-copy RPC denial. These were executed with synthetic grants and a private representative copy, without production writes. Total: 30 HTTP checks plus 12 Node tests.
-Private data/schema backup captured and saved outside GitHub. Its affected private league, backend game rows, and receipts restored in a separate staging namespace. Exact equality of every original column passed after the migration. Existing league settings remain the original defaults. Source team/player/stat/schedule/game snapshots were preserved, not reconstructed.
-During restore-fixture construction, legacy function grants were found open and immediately revoked; fixture now includes revocations BEFORE data loading. Production was unaffected. A focused staging logs query returned zero matching restore API log entries in the checked window; this is not proof that logging captures every request.
-A second migration adds directory name trigram search and relationship indexes. Both migrations were applied to staging and the representative copy. Search pagination and literal wildcard escaping passed. No production migration has been applied.
-Final staging catalog check: zero API table grants, zero private tables without RLS, zero app Realtime publication tables, zero storage buckets. App uses gated polling, not Realtime or Storage. Security advisors flag the intentionally exposed SECURITY DEFINER RPCs and private deny-by-default RLS tables. These are deliberate consequences of code-based server-validated sessions; do not open direct table access to silence advisories. References:
-- https://supabase.com/docs/guides/database/database-linter?lint=0028_anon_security_definer_function_executable
-- https://supabase.com/docs/guides/database/database-linter?lint=0008_rls_enabled_no_policy
-Search and FK indexing migration: supabase/migrations/20261009173146_directory_indexes.sql.
+## Verified tests and evidence
 
-## Remaining release gate and recovery
+- 12 Node tests: original four/five-team schedules, default overtime/recoverable completion, 2–8 team schedules and 1/1, 5/3, 9/6 custom inning/out boundaries and pitching denominators.
+- 30 real staging HTTP checks: codes, minimal directory, creation/retry/throttling, duplicate names, same-code league isolation, forged sessions, private/legacy access denial, ID substitution, recorder concurrency/handoff/expiry, stale writes, receipts, immutable rules, completion, revocation and setup-token consumption. See tests/BACKEND_RESULTS.md.
+- Representative private restore: every original league/game/receipt field matches after migration; source teams, players, schedule, statistics, live-game snapshots and relationships were preserved.
+- 23 Chromium acceptance checks: https://github.com/Tingbing/wiffle-ball-league/actions/runs/37971240292 . Includes full creation/roster/schedule/scoring/finish/stat workflow, phone, substitution/pitcher change, undo/error, box scores/rankings, wrong/correct codes, two-device handoff, same-device tabs, simultaneous Start, lost acknowledgments/offline recovery, back/forward/delayed-response isolation, search/error/Retry states, keyboard controls, and one-out overtime. No production requests or uncaught browser exceptions. See tests/BROWSER_RESULTS.md.
+- Production verification: eight non-destructive HTTP checks passed for the minimal directory and denial of legacy/forged private reads, forged edits and private table/view paths. Six deployed app files match the tested source by SHA-256: app.html, app.boot.js, app.leagues.js, core.sync.js, app.recording.js and app.game.play.js.
+- All applicable JavaScript syntax and git whitespace checks passed.
 
-Browser acceptance and a verified production setup-code mechanism must complete before rollout. No production code/setup token was invented. One-time setup token provision/consumption was verified on the representative staging copy only. Do not expose that token in URLs, logs or GitHub.
-Keep main unchanged. Recovery at this checkpoint: abandon/revert only the development branch if needed; production requires no recovery because it was not modified. Private JSON data restore uses jsonb_populate_recordset into the baseline-shaped tables, in FK order league → games → receipts; tests/fixtures/baseline.sql is test-only and must remain inaccessible to API roles before data loading. For a future release failure, keep the access boundary closed, preserve post-release records, and repair forward from a tested branch. Never replace current data blindly with a pre-release snapshot or re-enable legacy anonymous RPCs.
+The cloud browser rejected the initial local-file preview and the supported local supervisor could not mount proc. These were infrastructure/policy limits, not code failures; they were not bypassed. Browser acceptance subsequently ran successfully in a standard GitHub-hosted runner for this public repository. Native private HTTPS preview login/routing was not exercised by those tests. A final live cloud-browser observation remained restricted by credential protection after documented recovery; no successful live visual or owner-authenticated workflow is claimed.
 
-Representative restore fixture sealed after verification: all of its RPC execution grants were revoked and its test sessions removed. Catalog check confirmed zero API-executable restore functions. This copy is now admin-only; do not reopen it just to resume tests.
+## Production migrations and preservation
 
-## HTTPS preview retry
+Checked-in source:
+- supabase/migrations/20261009170646_multi_league_access.sql
+- supabase/migrations/20261009173146_directory_indexes.sql
 
-Private staging preview published successfully: https://wiffle-multileague-staging-check.warm-ghost-4468.chatgpt.site/app.html . Source app checkpoint: a87a4a6348e741c2ee3f02a2d6be7a39156e1057. It targets staging only; production configuration remains unchanged in this repository.
-The supported local preview supervisor also failed with a prohibited proc mount. This requires a different supported test runtime, not additional user approval. Prepared a Chromium acceptance workflow on the development branch using a standard GitHub-hosted Ubuntu runner for this public repository. It has read-only repository permissions, no deployment steps, no production access or secrets, no uploaded artifacts or caches, and a 15-minute timeout. Browser acceptance is pending an actual workflow result; test preparation is not a passing result.
+Production tool-assigned versions:
+- 20261009181500 multi_league_access
+- 20261009181523 directory_indexes
 
-- [x] Code, baseline and custom-rule checks
-- [x] Real isolated backend authorization/concurrency checks
-- [x] Private backup restore and migration preservation proof
-- [x] Private HTTPS staging preview
-- [ ] Desktop, mobile and two-device browser acceptance
-- [ ] Existing-league secure setup and refreshed production drift/backup checks
-- [ ] Production migration, main merge/deployment and live verification
+The access transaction locked affected tables, asserted no data drift since the refreshed backup, applied the tested additive access changes and provisioned the private one-time setup hash. Indexing followed. Backend gates were verified before frontend merge. Old clients fail closed; legacy grants were never reopened.
 
-First actual browser run passed: https://github.com/Tingbing/wiffle-ball-league/actions/runs/37970006788 at a4c08d7b5943fed25b5985f814e0fd99494dec59. Eleven checks covered creation, scheduling, scoring/undo/error, handoff, phone completion, persisted stats and code/session revocation. See tests/BROWSER_RESULTS.md. No production requests or uncaught browser exceptions. Extended substitutions, pitcher change, interrupted-acknowledgment recovery, offline reconnect, box scores/rankings, search/keyboard, delayed response/back-forward isolation, simultaneous Start and one-out overtime checks are prepared but not yet verified.
+Existing league ID 6767 remains stable. Exact original values were verified unchanged after production migration: one private league, four backend game rows and 106 receipts, plus unchanged legacy teams/players/season snapshots. Before release, four legacy teams, eight legacy players and one legacy season row matched the tested backup. All captured schema functions, constraints, views, columns, indexes, grants, policies, triggers, publication and Storage state matched the representative restore preflight. Post-migration checks confirmed zero API table grants, zero private tables without RLS, no app Realtime publication tables, and legacy read execution denied. No paid resources/upgrades or data resets were used.
 
-Extended browser run passed 20 checks at 6ed77aadbe1b2cbc3a1caf4b9205ae7a497451cf: https://github.com/Tingbing/wiffle-ball-league/actions/runs/37970694022 . Results include substitutions, pitcher change, interrupted acknowledgments, offline reconnection, saved box scores/rankings, keyboard directory access, delayed response/back-forward isolation, simultaneous Start and one-out overtime. Remaining tab and directory/form cases are prepared for the final run. Main and the production league revision were rechecked and remain unchanged. The private one-time existing-league setup handoff is prepared and saved outside GitHub; its hash will be provisioned atomically with the gated migration only after acceptance passes. It is not active yet.
+Private restorable data and full schema backups were saved outside GitHub. During construction of the isolated representative restore fixture, legacy execution grants were found open and immediately revoked; the fixture now revokes access before loading data. Production was unaffected. A focused staging logs query found zero matching requests in the checked window, which is not proof of complete logging. The representative fixture was then sealed: all its API execution grants revoked and test sessions removed. Do not reopen it to resume work.
 
-## Release preflight — 2026-10-09
+## Owner's next step
 
-Final browser acceptance SUCCESS: 23 checks at b03c5694f35792b41146769f59caded836994e71, https://github.com/Tingbing/wiffle-ball-league/actions/runs/37971240292 . Includes same-device multiple tabs, no-results/error/Retry states and keyboard form/server code validation in addition to the 20 extended checks. Twelve Node tests and 30 real staging HTTP checks also pass. No production requests or uncaught browser exceptions occurred in browser tests. Native private preview login/routing was not tested from the Actions browser; its deployment succeeded separately.
+Use the privately supplied wiffle-existing-league-setup.txt file. It is active and the frontend is live. Open the existing league, expand one-time setup, enter that private token, choose an 8–64 byte shared code with a letter and number/symbol, and submit. The token is consumed once. Share only the chosen code with league members. Never put the setup token in URLs, chat, GitHub or a stats backup. No existing-league shared code was invented.
 
-Refreshed production read exactly matches the tested backup: one private league, four backend game rows, 106 receipts, four legacy teams, eight legacy players and one legacy season row. Every original value matches, and all captured schema functions, constraints, views, columns, indexes, grants, policies, triggers, publication and Storage state match. Main remains eca58ba3d8ea44982142ea4c0eb02971ddc5a06e. No active production game exists. Existing GitHub Pages uses the built-in pages build and deployment workflow.
+Owner code entry and live visual review are the only outstanding handoff items. Device access is remembered for seven days. Everyone using the shared code has full management permissions, including confirmed season reset. Code changes revoke all device sessions. The existing data remains protected and intact while setup is pending.
 
-Private owner setup file is saved outside GitHub and linked to the owner before activation. Its random one-time token will be provisioned atomically with the code gate; owner chooses the shared code in the setup form. Token verification and consumption were tested in the isolated representative restore. Neither token nor hash is committed here.
+## Recovery and resuming
 
-Release order: apply additive access migration plus private one-time setup hash in one transaction, apply tested indexes, verify API gate and preservation, merge the tested frontend through a PR, wait for existing Pages deployment, and perform non-destructive live checks. Old frontend/backend callers fail closed after migration. If frontend release fails, keep the new access boundary closed and repair forward; never restore insecure legacy RPC grants.
+Keep the new backend access boundary closed. Revert or repair frontend changes through GitHub, preserve post-release records, and fix forward against isolated staging. Do not deploy an old frontend expecting anonymous access, reopen old RPC grants, or blindly replace current data with a pre-release backup. Restores must account for records written after release. Private backup restore uses jsonb_populate_recordset in FK order league → games → receipts. tests/fixtures/baseline.sql is synthetic test-only infrastructure, never a production migration.
 
-- [x] Private HTTPS staging preview published
-- [x] Code, backend, migration preservation and 23 browser acceptance checks
-- [x] Private existing-league setup mechanism prepared and delivered
-- [x] Refreshed production data/schema and main drift checks
-- [ ] Production migrations and preserved-record verification
-- [ ] PR merge, Pages deploy and non-destructive live verification
-
-This is the preflight checkpoint. Production migration and main merge have NOT happened yet.
-
-## Production backend activated — 2026-10-09
-
-Applied multi_league_access transaction with preflight data-drift assertions and the privately provisioned owner setup hash. Applied directory_indexes. Verified exact hashes of every original private league/game/receipt field: all preserved. Owner one-time setup is ready, no shared code is invented. Catalog verifies zero API table grants, all private tables have RLS, legacy wbl_read execution denied, and no app tables in Realtime publications. Current frontend main remains the old commit pending PR merge/Pages deployment; old callers fail closed.
-
-- [x] Production backend migrations and private-data preservation verification
-- [ ] Merge PR #3 at the tested source state, wait for GitHub Pages deployment and verify live gate
-
-Migration recovery: keep this security boundary closed; repair frontend forward if its deployment fails. Never reopen legacy anonymous RPCs. The owner setup file is private and active; use it only after the frontend deployment is confirmed.
-
-## Released — 2026-10-09
-
-PR #3 merged: https://github.com/Tingbing/wiffle-ball-league/pull/3
-App merge commit: fb7107559b5f4a5408dec90b451bf2ffaf49f02b
-Successful existing GitHub Pages deployment: https://github.com/Tingbing/wiffle-ball-league/actions/runs/37972202632
-Live app: https://tingbing.github.io/wiffle-ball-league/
-Private staging preview: https://wiffle-multileague-staging-check.warm-ghost-4468.chatgpt.site
-
-Production Supabase migration versions: 20261009181500 multi_league_access and 20261009181523 directory_indexes (tool assigned versions; checked-in source migrations keep their original staging timestamps). Private setup hash was provisioned in the access transaction; no secret/token/hash exists in GitHub.
-
-Verified after release: original private league/game/receipt fields preserved exactly; minimal public directory; rejected legacy reads, forged private read/write, and legacy table/view paths (eight real non-destructive HTTP checks). Six deployed source files match the tested code by SHA-256, including HTML, backend config, code gate, sync, recorder and gameplay. Production remains the original project and keeps its data. No paid resources/upgrades or data resets.
-
-- [x] Implementation and private HTTPS preview
-- [x] 12 code tests, 30 isolated HTTP checks and representative restore/migration proof
-- [x] 23 Chromium desktop/mobile/device/tab browser checks
-- [x] Production migrations, preserved records and live API security checks
-- [x] PR merge and successful GitHub Pages deployment/source verification
-- [ ] Owner enters the privately supplied one-time setup token and chooses the existing league's shared code
-
-The one-time owner file is private and active. Open the existing league, expand one-time setup, paste that token, choose an 8–64 byte code with a letter and number/symbol, and submit. The setup token is consumed once. Never paste it into GitHub, URLs, or chat. Device access lasts seven days; explicit leave revokes that device; code rotation revokes all devices.
-
-Remaining limitation: final cloud-browser observation of the live page was restricted by credential protection even after the documented new-document recovery. Do not bypass that guard. Native HTTPS preview login/routing and live owner-authenticated visual inspection were not claimed. Isolated browser acceptance and live deployment/API/source checks passed. Do not assert competition readiness until the owner setup and live visual review are complete.
-
-Recovery: keep the new backend access boundary closed. Revert or repair the frontend through GitHub, preserve post-release records, and fix forward against the tested staging environment. Do not roll back to an old frontend expecting anonymous access or replace current records with the backup. Private restorable pre-release data/schema backups remain outside GitHub. This final checkpoint/documentation does not change application code and needs no repeat of passed browser tests.
+For future work, inspect current main, deployed Pages commit and Supabase migration history before making changes. Do not reapply migrations blindly or rerun creation-heavy tests without a reason. No scheduled continuation or paid upgrade was created. The final documentation checkpoint requires no repeat of successful application tests.
