@@ -69,3 +69,5 @@ The supported local preview supervisor also failed with a prohibited proc mount.
 - [ ] Desktop, mobile and two-device browser acceptance
 - [ ] Existing-league secure setup and refreshed production drift/backup checks
 - [ ] Production migration, main merge/deployment and live verification
+
+First actual browser run passed: https://github.com/Tingbing/wiffle-ball-league/actions/runs/37970006788 at a4c08d7b5943fed25b5985f814e0fd99494dec59. Eleven checks covered creation, scheduling, scoring/undo/error, handoff, phone completion, persisted stats and code/session revocation. See tests/BROWSER_RESULTS.md. No production requests or uncaught browser exceptions. Extended substitutions, pitcher change, interrupted-acknowledgment recovery, offline reconnect, box scores/rankings, search/keyboard, delayed response/back-forward isolation, simultaneous Start and one-out overtime checks are prepared but not yet verified.
