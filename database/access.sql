@@ -1,0 +1,146 @@
+-- Private, code-based sessions. No browser may select these tables directly.
+alter table wbl_private.league drop constraint if exists league_id_check;
+alter table wbl_private.league add column name text not null default 'Wiffle Ball League';
+alter table wbl_private.league add column settings jsonb not null default '{"weeks":6,"innings":3,"outs":2}';
+alter table wbl_private.league add column created_at timestamptz not null default clock_timestamp();
+create index league_directory_order on wbl_private.league(created_at,id);
+create table wbl_private.credentials(league_id text primary key references wbl_private.league(id), code_hash text, setup_hash bytea);
+insert into wbl_private.credentials(league_id) select id from wbl_private.league;
+create table wbl_private.sessions(league_id text references wbl_private.league(id), token_hash bytea, expires_at timestamptz not null, primary key(league_id,token_hash));
+create table wbl_private.limits(key text primary key, window_start timestamptz not null, attempts int not null);
+create table wbl_private.creations(op_id uuid primary key, request_hash bytea not null, league_id text not null references wbl_private.league(id));
+alter table wbl_private.receipts add column league_id text references wbl_private.league(id);
+update wbl_private.receipts r set league_id=coalesce((select league_id from wbl_private.games g where g.id=r.game_id),(select id from wbl_private.league order by id limit 1));
+alter table wbl_private.receipts alter column league_id set not null;
+create unique index one_live_game_per_league on wbl_private.games(league_id) where status='live';
+alter table wbl_private.credentials enable row level security;
+alter table wbl_private.sessions enable row level security;
+alter table wbl_private.limits enable row level security;
+alter table wbl_private.creations enable row level security;
+
+create function wbl_private.check_code(code text) returns void language plpgsql set search_path='' as $$
+begin
+ if code is null or octet_length(code) not between 8 and 64 or code=repeat(left(code,1),length(code)) or code !~ '[[:alpha:]]' or code !~ '[[:digit:][:punct:]]' then
+  raise exception 'Use an access code with 8–64 bytes, including a letter and a number or symbol.';
+ end if;
+end $$;
+create function wbl_private.check_settings(s jsonb) returns void language plpgsql set search_path='' as $$
+begin
+ if s is null or jsonb_typeof(s)<>'object' or jsonb_typeof(s->'weeks') is distinct from 'number' or jsonb_typeof(s->'innings') is distinct from 'number' or jsonb_typeof(s->'outs') is distinct from 'number'
+ or (s->>'weeks')::numeric not between 1 and 52 or (s->>'weeks')::numeric<>trunc((s->>'weeks')::numeric)
+ or (s->>'innings')::numeric not between 1 and 9 or (s->>'innings')::numeric<>trunc((s->>'innings')::numeric)
+ or (s->>'outs')::numeric not between 1 and 6 or (s->>'outs')::numeric<>trunc((s->>'outs')::numeric)
+ or s-'weeks'-'innings'-'outs'<>'{}'::jsonb then raise exception 'Settings require 1–52 weeks, 1–9 innings and 1–6 outs.'; end if;
+end $$;
+create function wbl_private.check_teams(t jsonb) returns void language plpgsql set search_path='' as $$
+declare team jsonb; n int; names text[]:='{}';
+begin
+ if jsonb_typeof(t->'teams') is distinct from 'array' then raise exception 'Invalid teams'; end if;
+ n:=jsonb_array_length(t->'teams');
+ if n not between 2 and 8 then raise exception 'Leagues require 2–8 teams.'; end if;
+ for team in select value from jsonb_array_elements(t->'teams') loop
+  if coalesce(length(trim(team->>'name')),0) not between 1 and 60 or lower(trim(team->>'name'))=any(names)
+   or jsonb_typeof(team->'players') is distinct from 'array' or jsonb_array_length(team->'players')>2 then raise exception 'Each team needs a unique name and at most two roster players.'; end if;
+  names:=array_append(names,lower(trim(team->>'name')));
+ end loop;
+ perform wbl_private.validate_text_tree(t);
+end $$;
+create function wbl_private.check_session(lid text, tok text) returns void language plpgsql set search_path='' as $$
+begin
+ if tok is null or tok !~ '^[a-f0-9]{64}$' then raise exception 'ACCESS_REQUIRED: Enter this league’s code.'; end if;
+ perform 1 from wbl_private.sessions where league_id=lid and token_hash=sha256(convert_to(tok,'UTF8')) and expires_at>clock_timestamp() for share;
+ if not found then raise exception 'ACCESS_REQUIRED: Access expired or was revoked. Enter this league’s code again.'; end if;
+end $$;
+create function wbl_private.throttle(k text, cap int, period interval) returns boolean language plpgsql set search_path='' as $$
+declare c int;
+begin
+ insert into wbl_private.limits values(k,clock_timestamp(),1) on conflict(key) do update set
+  attempts=case when limits.window_start+period<=clock_timestamp() then 1 else least(limits.attempts+1,cap+1) end,
+  window_start=case when limits.window_start+period<=clock_timestamp() then clock_timestamp() else limits.window_start end returning attempts into c;
+ return c<=cap;
+end $$;
+create function wbl_private.caller_key() returns text language sql set search_path='' as $$
+ select encode(sha256(convert_to(coalesce(nullif(current_setting('request.headers',true),'')::jsonb->>'x-forwarded-for','unknown'),'UTF8')),'hex')
+$$;
+create function public.wbl_directory(p_search text default '', p_after jsonb default null) returns jsonb language sql stable security definer set search_path='' as $$
+ with page as(select id,name,created_at from wbl_private.league where strpos(lower(name),lower(left(coalesce(p_search,''),80)))>0
+ and (p_after is null or (created_at,id)>((p_after->>'created_at')::timestamptz,p_after->>'id')) order by created_at,id limit 21)
+ select jsonb_build_object('leagues',coalesce((select jsonb_agg(jsonb_build_object('id',id,'name',name,'created_at',created_at) order by created_at,id) from (select * from page limit 20) p),'[]'::jsonb),
+ 'more',(select count(*)>20 from page))
+$$;
+create function public.wbl_join(p_league_id text,p_code text,p_session_token text) returns jsonb language plpgsql security definer set search_path='' as $$
+declare c wbl_private.credentials; expires timestamptz:=clock_timestamp()+interval '7 days';
+begin
+ if not wbl_private.throttle('join-ip:'||wbl_private.caller_key(),60,interval '15 minutes') or not wbl_private.throttle('join-league:'||coalesce(p_league_id,''),30,interval '15 minutes') then return jsonb_build_object('error','Too many code attempts. Try again in 15 minutes.'); end if;
+ if p_session_token is null or p_session_token !~ '^[a-f0-9]{64}$' or p_code is null or octet_length(p_code)>64 then return jsonb_build_object('error','Invalid access request.'); end if;
+ perform 1 from wbl_private.league where id=p_league_id for update;
+ select * into c from wbl_private.credentials where league_id=p_league_id;
+ if c.code_hash is null or extensions.crypt(p_code,c.code_hash) is distinct from c.code_hash then return jsonb_build_object('error','Incorrect code or league unavailable.'); end if;
+ insert into wbl_private.sessions values(p_league_id,sha256(convert_to(p_session_token,'UTF8')),expires) on conflict(league_id,token_hash) do update set expires_at=excluded.expires_at;
+ return jsonb_build_object('ok',true,'expires_at',expires);
+end $$;
+create function public.wbl_create(p_request jsonb) returns jsonb language plpgsql security definer set search_path='' as $$
+declare lid text; h bytea; cr wbl_private.creations; expires timestamptz:=clock_timestamp()+interval '7 days'; nm text:=trim(p_request->>'name'); tok text:=p_request->>'session_token'; oid uuid:=(p_request->>'op_id')::uuid;
+begin
+ perform wbl_private.check_code(p_request->>'code'); perform wbl_private.check_settings(p_request->'settings'); perform wbl_private.check_teams(p_request->'teams');
+ if oid is null or tok is null or tok !~ '^[a-f0-9]{64}$' or coalesce(length(nm),0) not between 1 and 80 or octet_length(p_request::text)>16384 then raise exception 'Invalid creation request'; end if;
+ perform wbl_private.validate_text_tree(jsonb_build_object('name',nm));
+ h:=sha256(convert_to(p_request::text,'UTF8'));
+ perform pg_advisory_xact_lock(hashtextextended(oid::text,0));
+ select * into cr from wbl_private.creations where op_id=oid;
+ if found then
+  if cr.request_hash is distinct from h then raise exception 'OP_ID_REUSED'; end if;
+  -- A retry never recreates revoked access. The original grant must still exist.
+  perform wbl_private.check_session(cr.league_id,tok);
+  return jsonb_build_object('ok',true,'league_id',cr.league_id,'expires_at',(select expires_at from wbl_private.sessions where league_id=cr.league_id and token_hash=sha256(convert_to(tok,'UTF8'))));
+ end if;
+ if not wbl_private.throttle('create-ip:'||wbl_private.caller_key(),3,interval '1 hour') or not wbl_private.throttle('create-global',60,interval '1 hour') then return jsonb_build_object('error','League creation limit reached. Try again in one hour.'); end if;
+ lid:=gen_random_uuid()::text;
+ insert into wbl_private.league(id,name,settings,season_json,schedule_json,teams_json) values(lid,nm,p_request->'settings',jsonb_build_object('playerStats','{}'::jsonb,'teamRecords','{}'::jsonb,'seasonSubs','[]'::jsonb,'subStats','{}'::jsonb,'games','[]'::jsonb,'rules',p_request->'settings'),'{"days":[],"teamNames":[]}',p_request->'teams');
+ insert into wbl_private.credentials(league_id,code_hash) values(lid,extensions.crypt(p_request->>'code',extensions.gen_salt('bf',12)));
+ insert into wbl_private.sessions values(lid,sha256(convert_to(tok,'UTF8')),expires);
+ insert into wbl_private.creations values(oid,h,lid);
+ return jsonb_build_object('ok',true,'league_id',lid,'expires_at',expires);
+end $$;
+create function public.wbl_leave_access(p_league_id text,p_access_token text) returns jsonb language plpgsql security definer set search_path='' as $$
+begin
+ perform 1 from wbl_private.league where id=p_league_id for update;
+ delete from wbl_private.sessions where league_id=p_league_id and token_hash=sha256(convert_to(p_access_token,'UTF8'));
+ return '{"ok":true}'::jsonb;
+end $$;
+create function public.wbl_change_code(p_league_id text,p_access_token text,p_code text) returns jsonb language plpgsql security definer set search_path='' as $$
+begin
+ perform 1 from wbl_private.league where id=p_league_id for update;
+ perform wbl_private.check_session(p_league_id,p_access_token); perform wbl_private.check_code(p_code);
+ update wbl_private.credentials set code_hash=extensions.crypt(p_code,extensions.gen_salt('bf',12)) where league_id=p_league_id;
+ delete from wbl_private.sessions where league_id=p_league_id;
+ update wbl_private.games set owner_hash=null,lease_until=null,epoch=epoch+1 where league_id=p_league_id and status='live';
+ return '{"ok":true}'::jsonb;
+end $$;
+-- One-time setup is only possible with a separate, privately provisioned random token.
+create function public.wbl_setup(p_league_id text,p_setup_token text,p_code text,p_session_token text) returns jsonb language plpgsql security definer set search_path='' as $$
+declare c wbl_private.credentials; expires timestamptz:=clock_timestamp()+interval '7 days';
+begin
+ if not wbl_private.throttle('setup-ip:'||wbl_private.caller_key(),10,interval '15 minutes') then return jsonb_build_object('error','Too many setup attempts. Try again in 15 minutes.'); end if;
+ perform wbl_private.check_code(p_code);
+ if p_session_token is null or p_session_token !~ '^[a-f0-9]{64}$' then raise exception 'Invalid session token'; end if;
+ perform 1 from wbl_private.league where id=p_league_id for update;
+ select * into c from wbl_private.credentials where league_id=p_league_id for update;
+ if c.code_hash is not null or c.setup_hash is null or c.setup_hash is distinct from sha256(convert_to(p_setup_token,'UTF8')) then return jsonb_build_object('error','Setup token is invalid or already used.'); end if;
+ update wbl_private.credentials set code_hash=extensions.crypt(p_code,extensions.gen_salt('bf',12)),setup_hash=null where league_id=p_league_id;
+ insert into wbl_private.sessions values(p_league_id,sha256(convert_to(p_session_token,'UTF8')),expires);
+ return jsonb_build_object('ok',true,'expires_at',expires);
+end $$;
+-- Remove all old unauthenticated read paths before enabling the new client.
+revoke all on function public.wbl_read(uuid,text) from public,anon,authenticated;
+create function public.wbl_read(p_league_id text,p_access_token text,p_game_id uuid default null,p_token text default null) returns jsonb language plpgsql security definer set search_path='' as $$
+declare l wbl_private.league; result jsonb;
+begin
+ select * into l from wbl_private.league where id=p_league_id for share;
+ perform wbl_private.check_session(p_league_id,p_access_token);
+ if l.id is null then raise exception 'League unavailable'; end if;
+ select jsonb_build_object('api_version',4,'league',to_jsonb(l),'server_time',clock_timestamp(),
+ 'games',coalesce((select jsonb_agg(jsonb_build_object('id',g.id,'entry_id',g.entry_id,'status',g.status,'revision',g.revision,'epoch',g.epoch,'lease_until',g.lease_until,'team1',g.state#>>'{game,team1,name}','team2',g.state#>>'{game,team2,name}') order by g.created_at) from wbl_private.games g where g.league_id=l.id and g.status='live'),'[]'::jsonb),
+ 'game',(select wbl_private.game_view(g,p_token) from wbl_private.games g where g.id=p_game_id and g.league_id=l.id)) into result;
+ return result;
+end $$;

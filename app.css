@@ -1269,3 +1269,12 @@
 #connectionMessage { line-height:1.5; }
 #recoveryList button { margin:5px; }
 #gameScreen button:disabled, #gameScreen select:disabled { opacity:.45; cursor:not-allowed; }
+/* League entry screens use the existing app palette and controls. */
+.directory-shell {max-width:760px;margin:24px auto;padding:16px;}
+.directory-shell label {display:block;margin:14px 0 6px;}
+.directory-shell input {box-sizing:border-box;width:100%;min-height:44px;padding:10px;}
+.directory-shell button {min-height:44px;margin:8px 8px 8px 0;}
+.directory-row {display:flex;align-items:center;gap:12px;flex-wrap:wrap;}
+.directory-row h3 {flex:1 1 220px;overflow-wrap:anywhere;}
+.form-grid {display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px;}
+input:focus-visible,button:focus-visible,summary:focus-visible {outline:3px solid #64d8ff;outline-offset:3px;}

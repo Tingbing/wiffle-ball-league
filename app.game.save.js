@@ -69,6 +69,7 @@ function buildCompletedGameLogEntry() {
 
 	return {
 		id,
+		rules: deepCloneJson(game.rules || {weeks:6,innings:3,outs:2}),
 		playedAt,
 		team1Name: game.team1.name,
 		team2Name: game.team2.name,

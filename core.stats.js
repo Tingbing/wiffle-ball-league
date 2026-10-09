@@ -434,7 +434,8 @@ function createComparableStatsLine(rawStats, fallback = {}) {
 		normalized[field] = normalizeNumericStatValue(rawStats?.[field]);
 	});
 
-	normalized.inningsPitched = normalized.pitchOuts / 2;
+	normalized.outsPerInning = Number(rawStats?.outsPerInning || 2);
+	normalized.inningsPitched = normalized.pitchOuts / normalized.outsPerInning;
 	return normalized;
 }
 
@@ -686,7 +687,7 @@ function validateScheduleStructure(scheduleObj, rosterLookup, errors, warnings) 
 
 	const config = getScheduleConfigForTeams(normalizedTeamNames);
 	if (!config) {
-		errors.push("Backup schedule uses an unsupported team count. Saved schedules must be for exactly 4 or 5 teams.");
+		errors.push("Backup schedule uses an unsupported team count. Saved schedules must be for 2–8 teams.");
 		return;
 	}
 
@@ -927,6 +928,7 @@ function sanitizeImportedStatsBucket(bucket, { subBucket = false } = {}) {
 		STATS_BACKUP_NUMERIC_FIELDS.forEach(field => {
 			base[field] = normalized[field];
 		});
+        base.outsPerInning=normalized.outsPerInning;
 		syncPitchingInnings(base);
 		nextBucket[safeKey] = base;
 	});
@@ -946,6 +948,7 @@ function sanitizeSeasonGameLogsForRestore(seasonObj) {
 			? entry.playerStats.map(stats => ({ ...createComparableStatsLine(stats) }))
 			: [],
 		lineups: isPlainObject(entry?.lineups) ? deepCloneJson(entry.lineups) : {},
+		rules: deepCloneJson(entry?.rules || {weeks:6,innings:3,outs:2}),
 		lineScore: isPlainObject(entry?.lineScore) ? deepCloneJson(entry.lineScore) : null,
 		winningPitcher: isPlainObject(entry?.winningPitcher) ? deepCloneJson(entry.winningPitcher) : null,
 		losingPitcher: isPlainObject(entry?.losingPitcher) ? deepCloneJson(entry.losingPitcher) : null,
@@ -1346,7 +1349,10 @@ async function restoreStatsBackupFromPayload(raw) {
 	}
 
 	const { backup, nextSeason, nextSchedule, warnings, rebuildMode } = prepared;
-	const currentLeagueCode = String(typeof LEAGUE_CODE !== "undefined" ? LEAGUE_CODE : "").trim();
+	if(JSON.stringify(backup.season?.rules || {weeks:6,innings:3,outs:2})!==JSON.stringify(leagueSettings)) {
+        alert('Restore cancelled: this backup uses different season rules. Reset the season and set matching rules before restoring.');return false;
+    }
+    const currentLeagueCode = String(typeof LEAGUE_CODE !== "undefined" ? LEAGUE_CODE : "").trim();
 	const backupLeagueCode = String(backup?.leagueCode || "").trim();
 
 	if (backupLeagueCode && currentLeagueCode && backupLeagueCode !== currentLeagueCode) {
@@ -1464,6 +1470,7 @@ function createEmptyStats(teamName, playerName, extra = {}) {
 		pitchStrikeouts: 0,
 		fieldingErrors: 0,
 		inningsPitched: 0,
+		outsPerInning: Number(season?.rules?.outs || leagueSettings.outs || 2),
 		runsAllowed: 0,
 		earnedRunsAllowed: 0,
 		...extra

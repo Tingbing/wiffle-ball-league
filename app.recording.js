@@ -1,7 +1,7 @@
 // One complete, acknowledged mutation at a time. SQL validates every write.
 const recording={token:null,identityReady:false,unlock:null,row:null,verified:false,
   leaseDeadline:0,busy:false,actionRunning:false,pending:null,lastError:'',restoring:false};
-const RECOVERY_PREFIX='wbl-recording-v3-';
+let RECOVERY_PREFIX='unselected:';
 function newRecorderToken() {return Array.from(crypto.getRandomValues(new Uint8Array(32)),v=>v.toString(16).padStart(2,'0')).join('');}
 async function holdRecorderIdentity(token) {
   if(!navigator.locks) throw new Error('This browser needs Web Locks support to record. Use an updated browser over HTTPS. Viewing is available.');
@@ -15,9 +15,9 @@ async function holdRecorderIdentity(token) {
   });
 }
 async function initializeRecordingIdentity() {
-  let token=sessionStorage.getItem('wbl-recorder-token-v3') || newRecorderToken();
+  let token=sessionStorage.getItem(leagueKey('recorder')) || newRecorderToken();
   if(!await holdRecorderIdentity(token)) {token=newRecorderToken(); await holdRecorderIdentity(token);}
-  sessionStorage.setItem('wbl-recorder-token-v3',token);
+  sessionStorage.setItem(leagueKey('recorder'),token);
 }
 function recoveryKey() {return RECOVERY_PREFIX+recording.token;}
 function persistRecordingRecovery() {
@@ -81,7 +81,7 @@ async function stageAndSend(request) {
 }
 function gameRequest(op,extra={}) {
   const row=recording.row;
-  return {op,op_id:crypto.randomUUID(),game_id:row.id,token:recording.token,
+  return {league_id:LEAGUE_CODE,op,op_id:crypto.randomUUID(),game_id:row.id,token:recording.token,
     epoch:row.epoch,revision:row.revision,...extra};
 }
 async function startRecordingGame(t1,t2,ref,details,context) {
@@ -98,7 +98,7 @@ async function startRecordingGame(t1,t2,ref,details,context) {
     recording.row={id:gid,mine:false,status:'live',epoch:1,revision:0};
     startGameWithTeams(t1,t2,ref,{...details,lockId:gid},context);
     if(!ref && !context?.postseasonRef) game._gameInstanceId='manual-'+gid;
-    const request={op:'start',op_id:crypto.randomUUID(),game_id:gid,token:recording.token,
+    const request={league_id:LEAGUE_CODE,op:'start',op_id:crypto.randomUUID(),game_id:gid,token:recording.token,
       league_revision:leagueRevision,state:buildLiveGameSavePayload()};
     const response=await stageAndSend(request);
     applyLeagueData(response.data); restoreLiveSnapshot(response.data.game.state);
@@ -299,7 +299,7 @@ async function resolveUnsentRecording() {
     // Reading and archiving never writes a stale draft into a new recorder's game.
     const {data,sentAt}=await readRecording(recording.pending?.game_id || recording.row?.id || null);
     const archive={savedAt:new Date().toISOString(),pending:recording.pending,snapshot:buildLiveGameSavePayload()};
-    localStorage.setItem('wbl-unresolved-'+crypto.randomUUID(),JSON.stringify(publicRecoveryCopy(archive)));
+    localStorage.setItem(leagueKey('unresolved')+'-'+crypto.randomUUID(),JSON.stringify(publicRecoveryCopy(archive)));
     exportRecordingRecovery();
     recording.pending=null;recording.lastError='';localStorage.removeItem(recoveryKey());
     applyLeagueData(data);adoptRecordingRow(data.game,sentAt);
@@ -317,7 +317,7 @@ async function recoverOtherTab(key) {
   if(!await holdRecorderIdentity(token)) {
     await holdRecorderIdentity(oldToken);return alert('That recording is open in another tab. Continue there or use Leave Recording there first.');
   }
-  sessionStorage.setItem('wbl-recorder-token-v3',token);await restoreRecordingRecovery();
+  sessionStorage.setItem(leagueKey('recorder'),token);await restoreRecordingRecovery();
 }
 function renderRecoveryList() {
   const box=document.getElementById('recoveryList');if(!box) return;
@@ -336,7 +336,7 @@ function renderRecoveryList() {
     b.textContent='Recover saved recording: '+(r.snapshot?.game?.team1?.name || 'League edit')+' • '+new Date(r.savedAt).toLocaleString();
     b.onclick=()=>recoverOtherTab(key);box.append(b);
   }
-  const legacy=readJsonStorage('wbl-pre-handoff-backup');
+  const legacy=LEAGUE_CODE==='6767'?readJsonStorage('wbl-pre-handoff-backup'):null;
   if(legacy?.wiggleLiveGameStateV1?.game) {
     const p=document.createElement('p');p.textContent='A game from the previous app is preserved on this device. It cannot be automatically merged with the new server recording. Download and reconcile it before recording that game again.';box.append(p);
     const b=document.createElement('button');b.textContent='Download Previous App Recovery';b.onclick=()=>downloadJson(legacy,'wiffle-before-handoff.json');box.append(b);

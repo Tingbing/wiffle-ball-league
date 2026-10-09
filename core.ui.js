@@ -37,6 +37,7 @@ function clearFinishedGameMemoryIfNeeded() {
   recording.row=null; return true;
 }
 function showMainMenu() {
+  if(!activeAccess) {showDirectory();return;}
   clearFinishedGameMemoryIfNeeded();
   if(game && recording.row?.mine && recording.row?.status==='live') {
     showGame(); renderRecordingStatus(); return;
@@ -227,6 +228,7 @@ async function showPostseason() {
 }
 
 function hideAllScreens() {
+	for(const id of ["directoryScreen","joinScreen","createLeagueScreen","leagueSettingsScreen"]) document.getElementById(id)?.classList.add("hidden");
 	document.getElementById("publicMenu")?.classList.add("hidden");
 	document.getElementById("mainMenu").classList.add("hidden");
 	document.getElementById("teamConfigScreen").classList.add("hidden");
@@ -293,6 +295,7 @@ async function addPlayer() {
 }
 async function removeTeam(index) {
   const team=league.teams[index]; if(!team) return false;
+  if(league.teams.length<=2) return alert("Keep at least two teams in the league.");
   if(hasRecordedSeasonGames()) return alert('Reset the season before deleting teams with recorded history.');
   if(!confirm(`Remove ${team.name} for everyone?`)) return false;
   league.teams.splice(index,1); delete season.teamRecords[team.name];

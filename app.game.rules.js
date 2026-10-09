@@ -24,7 +24,7 @@ function isOvertimeActive() {
 	const inning = Number(game.inning || 0);
 	const overtime = game.overtime || {};
 
-	if (inning <= 3) {
+	if (inning <= regulationInnings()) {
 		if (game.overtime?.active) {
 			game.overtime.active = false;
 			game.overtime.round = 0;
@@ -36,7 +36,7 @@ function isOvertimeActive() {
 }
 
 function getOvertimeRoundForCurrentInning() {
-	return Math.max(1, Number(game?.inning || 4) - 3);
+	return Math.max(1, Number(game?.inning || (regulationInnings()+1)) - regulationInnings());
 }
 
 function getLastBatterInfoForCurrentTeam() {
@@ -59,7 +59,7 @@ function startOvertimeHalfInning(reasonText = "") {
 	const team1Score = Number(game.team1Score || 0);
 	const team2Score = Number(game.team2Score || 0);
 
-	if (inning <= 3) {
+	if (inning <= regulationInnings()) {
 		if (game.overtime) {
 			game.overtime.active = false;
 			game.overtime.round = 0;
@@ -86,7 +86,7 @@ function startOvertimeHalfInning(reasonText = "") {
 	const runnerName = runnerInfo?.playerName || null;
 
 	game.bases = { first: null, second: null, third: null };
-	game.outs = 1;
+	game.outs = Math.min(1,outsPerHalf()-1);
 	game.halfInningRuns = 0;
 
 	if (runnerName) {
@@ -119,7 +119,7 @@ function startOvertimeHalfInning(reasonText = "") {
 	overtime.halfSetupKeys[halfKey] = true;
 
 	showNotification(
-		reasonText || `OT ${overtime.round}: ${game.batting.name} starts with 1 out and a runner on 2nd.`,
+		reasonText || `OT ${overtime.round}: ${game.batting.name} starts with ${game.outs} out(s) and a runner on 2nd.`,
 		2200
 	);
 
@@ -136,8 +136,8 @@ function getLiveInningLabel() {
 	return `${halfText} of Inning ${game.inning} | ${game.batting.name} Batting`;
 }
 
-function getLineScoreInningLabel(index) {
-	return index < 3 ? String(index + 1) : `OT${index - 2}`;
+function getLineScoreInningLabel(index, innings=regulationInnings()) {
+	return index < innings ? String(index + 1) : `OT${index - innings + 1}`;
 }
 
 function ensureOvertimeHalfSetupAfterResume() {
@@ -165,7 +165,7 @@ function endHalfInning(pitcherKey, reasonText) {
 	const team2Score = Number(game.team2Score || 0);
 	const scoreIsTied = team1Score === team2Score;
 	const endingBottomHalf = endingHalf === "bottom";
-	const regulationOrLaterComplete = endingBottomHalf && endingInning >= 3;
+	const regulationOrLaterComplete = endingBottomHalf && endingInning >= regulationInnings();
 
 	// Critical resume-safety rule:
 	// A non-tied game is complete at the end of the bottom half of inning 3+.
@@ -178,7 +178,7 @@ function endHalfInning(pitcherKey, reasonText) {
 			game.overtime.round = 0;
 		}
 
-		game.outs = 2;
+		game.outs = outsPerHalf();
 		game._gameCompletePendingSave = true;
 		pendingBattingResult = null;
 
@@ -238,7 +238,7 @@ if (isOvertimeActive()) {
 	setCurrentBatterIndex(getCurrentBatterIndex());
 	game.inning++;
 
-	if (game.inning > 3) {
+	if (game.inning > regulationInnings()) {
 		const overtime = ensureOvertimeState();
 		overtime.active = true;
 		overtime.round = getOvertimeRoundForCurrentInning();
@@ -247,7 +247,7 @@ updatePitcherSelect();
 requirePitcherSelectionForCurrentHalfInning("overtime");
 
 startOvertimeHalfInning(
-			reasonText || `Tie game after regulation — OT ${overtime.round} begins with 1 out and a runner on 2nd.`
+			reasonText || `Tie game after regulation — OT ${overtime.round} begins with ${game.outs} out(s) and a runner on 2nd.`
 		);
 
 		return "overtime";

@@ -1800,7 +1800,7 @@ function createPastGameLineScoreCard(entry) {
 	const lineScore = entry?.lineScore && typeof entry.lineScore === "object" ? entry.lineScore : null;
 	const team1Runs = Array.isArray(lineScore?.[entry.team1Name]) ? lineScore[entry.team1Name] : [];
 	const team2Runs = Array.isArray(lineScore?.[entry.team2Name]) ? lineScore[entry.team2Name] : [];
-	const inningCount = lineScore ? Math.max(team1Runs.length, team2Runs.length, 3) : 0;
+	const inningCount = lineScore ? Math.max(team1Runs.length, team2Runs.length, Number(entry.rules?.innings || 3)) : 0;
 
 	if (!inningCount) {
 		const note = document.createElement("p");
@@ -1816,7 +1816,7 @@ function createPastGameLineScoreCard(entry) {
 	table.className = "stats-table responsive past-game-line-score-table";
 	const thead = document.createElement("thead");
 	const headRow = document.createElement("tr");
-const lineScoreHeaders = ["Team", ...Array.from({ length: inningCount }, (_, index) => getLineScoreInningLabel(index)), "R", "E"];
+const lineScoreHeaders = ["Team", ...Array.from({ length: inningCount }, (_, index) => getLineScoreInningLabel(index, Number(entry.rules?.innings || 3))), "R", "E"];
 
 lineScoreHeaders.forEach(label => {
 		const th = document.createElement("th");

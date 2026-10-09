@@ -76,7 +76,7 @@ function applyConfirmRunnerOut() {
 	cancelRunnerOut();
 	showNotification(removed.player + " thrown out!", 1200);
 
-	if (game.outs >= 2) {
+	if (game.outs >= outsPerHalf()) {
 		const transitionResult = endHalfInning(pitcherKey, "Runner thrown out — side over!");
 		if (transitionResult !== "finalizing") updateGameScreen();
 		return;
@@ -251,7 +251,7 @@ function updateGameScreen() {
 
 document.getElementById("inningText").innerText = getLiveInningLabel();
 
-	document.getElementById("outsText").innerText = "Outs: " + game.outs + "/2";
+	document.getElementById("outsText").innerText = "Outs: " + game.outs + "/" + outsPerHalf();
 
 	const batterIndex = getCurrentBatterIndex();
 	let player = game.batting.players[batterIndex] || "No Player";
