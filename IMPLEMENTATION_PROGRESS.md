@@ -1,6 +1,6 @@
 # Multi-league implementation progress
 
-Updated: 2026-10-09. Status: private HTTPS staging preview published; browser acceptance workflow prepared; NOT released.
+Updated: 2026-10-09. Status: implementation released; owner one-time code setup remains.
 
 ## Target and source
 
@@ -101,3 +101,28 @@ Applied multi_league_access transaction with preflight data-drift assertions and
 - [ ] Merge PR #3 at the tested source state, wait for GitHub Pages deployment and verify live gate
 
 Migration recovery: keep this security boundary closed; repair frontend forward if its deployment fails. Never reopen legacy anonymous RPCs. The owner setup file is private and active; use it only after the frontend deployment is confirmed.
+
+## Released — 2026-10-09
+
+PR #3 merged: https://github.com/Tingbing/wiffle-ball-league/pull/3
+App merge commit: fb7107559b5f4a5408dec90b451bf2ffaf49f02b
+Successful existing GitHub Pages deployment: https://github.com/Tingbing/wiffle-ball-league/actions/runs/37972202632
+Live app: https://tingbing.github.io/wiffle-ball-league/
+Private staging preview: https://wiffle-multileague-staging-check.warm-ghost-4468.chatgpt.site
+
+Production Supabase migration versions: 20261009181500 multi_league_access and 20261009181523 directory_indexes (tool assigned versions; checked-in source migrations keep their original staging timestamps). Private setup hash was provisioned in the access transaction; no secret/token/hash exists in GitHub.
+
+Verified after release: original private league/game/receipt fields preserved exactly; minimal public directory; rejected legacy reads, forged private read/write, and legacy table/view paths (eight real non-destructive HTTP checks). Six deployed source files match the tested code by SHA-256, including HTML, backend config, code gate, sync, recorder and gameplay. Production remains the original project and keeps its data. No paid resources/upgrades or data resets.
+
+- [x] Implementation and private HTTPS preview
+- [x] 12 code tests, 30 isolated HTTP checks and representative restore/migration proof
+- [x] 23 Chromium desktop/mobile/device/tab browser checks
+- [x] Production migrations, preserved records and live API security checks
+- [x] PR merge and successful GitHub Pages deployment/source verification
+- [ ] Owner enters the privately supplied one-time setup token and chooses the existing league's shared code
+
+The one-time owner file is private and active. Open the existing league, expand one-time setup, paste that token, choose an 8–64 byte code with a letter and number/symbol, and submit. The setup token is consumed once. Never paste it into GitHub, URLs, or chat. Device access lasts seven days; explicit leave revokes that device; code rotation revokes all devices.
+
+Remaining limitation: final cloud-browser observation of the live page was restricted by credential protection even after the documented new-document recovery. Do not bypass that guard. Native HTTPS preview login/routing and live owner-authenticated visual inspection were not claimed. Isolated browser acceptance and live deployment/API/source checks passed. Do not assert competition readiness until the owner setup and live visual review are complete.
+
+Recovery: keep the new backend access boundary closed. Revert or repair the frontend through GitHub, preserve post-release records, and fix forward against the tested staging environment. Do not roll back to an old frontend expecting anonymous access or replace current records with the backup. Private restorable pre-release data/schema backups remain outside GitHub. This final checkpoint/documentation does not change application code and needs no repeat of passed browser tests.

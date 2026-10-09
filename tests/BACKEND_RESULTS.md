@@ -37,4 +37,4 @@ Additional checks (real HTTP):
 - PASS: legacy representative-copy read route closed
 
 SQL verification: exact original-column equality for restored league, games and receipts after migration; zero API table grants; RLS enabled on every private table; no application Realtime publication tables or Storage buckets. Indexed search pagination and literal percent/underscore handling pass.
-Browser acceptance has now passed 20 checks on GitHub Actions. See BROWSER_RESULTS.md. No production deployment occurred.
+Browser acceptance has now passed 23 checks on GitHub Actions. See BROWSER_RESULTS.md. Production deployment succeeded after the acceptance gates. See IMPLEMENTATION_PROGRESS.md for preservation, live API checks and recovery.
