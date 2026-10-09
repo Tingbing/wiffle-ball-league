@@ -26,3 +26,15 @@ Run against the free staging project, using real PostgREST HTTP requests with it
 - PASS: explicit revocation affects only that device grant
 - PASS: code change revokes all sessions and creation retry cannot restore them
 - PASS: old code denied and new code works
+
+Additional checks (real HTTP):
+
+- PASS: cursor pagination without duplicates
+- PASS: expired session rejected
+- PASS: expired recorder lease can be claimed
+- PASS: secure setup token rejects invalid/repeated use
+- PASS: authenticated representative-copy API retains all original fields and snapshots
+- PASS: legacy representative-copy read route closed
+
+SQL verification: exact original-column equality for restored league, games and receipts after migration; zero API table grants; RLS enabled on every private table; no application Realtime publication tables or Storage buckets. Indexed search pagination and literal percent/underscore handling pass.
+Browser validation is blocked and has not run. No production deployment occurred.

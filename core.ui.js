@@ -295,6 +295,7 @@ async function addPlayer() {
 }
 async function removeTeam(index) {
   const team=league.teams[index]; if(!team) return false;
+  if(league.teams.length<=2) return alert("Keep at least two teams in the league.");
   if(hasRecordedSeasonGames()) return alert('Reset the season before deleting teams with recorded history.');
   if(!confirm(`Remove ${team.name} for everyone?`)) return false;
   league.teams.splice(index,1); delete season.teamRecords[team.name];

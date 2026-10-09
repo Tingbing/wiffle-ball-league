@@ -1383,7 +1383,7 @@ function renderScheduleUI() {
 		const dayCard = document.createElement("div");
 		dayCard.className = "card";
 
-		const byeTeam = activeConfigId === SCHEDULE_FORMAT_SINGLE_ROUND_ROBIN_5
+		const byeTeam = snapshotTeamNames.length % 2 === 1
 			? getByeTeamForDay(dayObj, snapshotTeamNames)
 			: "";
 

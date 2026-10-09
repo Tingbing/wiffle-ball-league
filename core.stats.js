@@ -928,6 +928,7 @@ function sanitizeImportedStatsBucket(bucket, { subBucket = false } = {}) {
 		STATS_BACKUP_NUMERIC_FIELDS.forEach(field => {
 			base[field] = normalized[field];
 		});
+        base.outsPerInning=normalized.outsPerInning;
 		syncPitchingInnings(base);
 		nextBucket[safeKey] = base;
 	});

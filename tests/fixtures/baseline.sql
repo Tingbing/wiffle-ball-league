@@ -226,3 +226,6 @@ AS $function$
 $function$
 ;
 
+
+-- Never expose a restored test fixture through the legacy RPCs.
+revoke all on function public.wbl_read(uuid,text),public.wbl_mutate(jsonb) from public,anon,authenticated;

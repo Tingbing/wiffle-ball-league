@@ -1,6 +1,6 @@
 # Multi-league implementation progress
 
-Updated: 2026-10-09. Status: implementation and isolated validation in progress; NOT released.
+Updated: 2026-10-09. Status: checkpointed at a concrete browser-validation blocker; NOT released.
 
 ## Target and source
 
@@ -23,11 +23,11 @@ The intended production Supabase target remains the project referenced in app.bo
 
 ## Actual validation
 
-- Baseline: four Node tests pass, including 50 four-team and 50 five-team schedules, default overtime and recoverable completion.
+- Baseline: 12 Node tests pass, including 50 four-team and 50 five-team schedules, default overtime and recoverable completion.
 - Isolated free staging project created by the user and verified healthy; baseline fixture and multi_league_access migration applied there only.
 - tests/backend.mjs: 24 checks passed via real PostgREST HTTP requests. See tests/BACKEND_RESULTS.md. Includes cross-league reads/writes, minimal directory, code checks, duplicate/retried creation, throttling, one recorder, simultaneous independent leagues, idempotent saves, stale revisions, handoff/stale release, immutable rules, completion, device revocation and code changes.
-- Browser executable installation failed: official downloads returned invalid/truncated archive content. Browser validation has not run. Continue investigating a supported browser runtime.
-- Custom-rule unit tests, pagination/expiry/lease-expiry checks, representative backup restoration/migration, complete UI workflow and phone/accessibility/concurrency checks remain pending.
+- Browser gate is BLOCKED: Playwright downloads failed; official Chrome downloaded but cannot launch because runtime socket operations are prohibited. Cloud Browser rejected the local file preview under its URL security policy, with explicit instruction not to work around that blocked action. No browser acceptance checks ran. A supported HTTPS staging preview/browser environment is needed; do not bypass the policy.
+- Custom-rule, pagination/expiry/lease-expiry, setup-token and representative backup/migration checks now pass. Full browser scoring/substitution/undo/stat workflow, phone/accessibility and client concurrency checks remain untested.
 
 ## Rollout and recovery
 
@@ -38,3 +38,19 @@ No paid resources or upgrades authorized. No data was erased despite permission 
 ## Next step
 
 Recheck branch and staging migrations (do not reapply blindly), continue custom-rule and browser tests, harden findings, then complete backup/restore and rollout gates. Never claim competition readiness before acceptance passes.
+
+## Additional verification and private backup
+
+Six additional real HTTP checks passed: cursor pagination without duplicates; expired grant rejection; expired recorder takeover; invalid/reused setup-token rejection; authenticated restored league snapshot equality; legacy restored-copy RPC denial. These were executed with synthetic grants and a private representative copy, without production writes. Total: 30 HTTP checks plus 12 Node tests.
+Private data/schema backup captured and saved outside GitHub. Its affected private league, backend game rows, and receipts restored in a separate staging namespace. Exact equality of every original column passed after the migration. Existing league settings remain the original defaults. Source team/player/stat/schedule/game snapshots were preserved, not reconstructed.
+During restore-fixture construction, legacy function grants were found open and immediately revoked; fixture now includes revocations BEFORE data loading. Production was unaffected. A focused staging logs query returned zero matching restore API log entries in the checked window; this is not proof that logging captures every request.
+A second migration adds directory name trigram search and relationship indexes. Both migrations were applied to staging and the representative copy. Search pagination and literal wildcard escaping passed. No production migration has been applied.
+Final staging catalog check: zero API table grants, zero private tables without RLS, zero app Realtime publication tables, zero storage buckets. App uses gated polling, not Realtime or Storage. Security advisors flag the intentionally exposed SECURITY DEFINER RPCs and private deny-by-default RLS tables. These are deliberate consequences of code-based server-validated sessions; do not open direct table access to silence advisories. References:
+- https://supabase.com/docs/guides/database/database-linter?lint=0028_anon_security_definer_function_executable
+- https://supabase.com/docs/guides/database/database-linter?lint=0008_rls_enabled_no_policy
+Search and FK indexing migration: supabase/migrations/20261009173146_directory_indexes.sql.
+
+## Remaining release gate and recovery
+
+Browser acceptance and a verified production setup-code mechanism must complete before rollout. No production code/setup token was invented. One-time setup token provision/consumption was verified on the representative staging copy only. Do not expose that token in URLs, logs or GitHub.
+Keep main unchanged. Recovery at this checkpoint: abandon/revert only the development branch if needed; production requires no recovery because it was not modified. Private JSON data restore uses jsonb_populate_recordset into the baseline-shaped tables, in FK order league → games → receipts; tests/fixtures/baseline.sql is test-only and must remain inaccessible to API roles before data loading. For a future release failure, keep the access boundary closed, preserve post-release records, and repair forward from a tested branch. Never replace current data blindly with a pre-release snapshot or re-enable legacy anonymous RPCs.

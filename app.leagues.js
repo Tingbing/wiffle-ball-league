@@ -35,7 +35,7 @@ function switchToDirectory() {if(!safeToSwitch())return;clearPrivateState();hist
 async function loadDirectory(append=false) {
   if(append&&directoryBusy)return;
   const request=++directoryRequest;directoryBusy=true;
-  if(!append){directoryCursor=null;el('directoryList').replaceChildren();}
+  if(!append){directoryCursor=null;directoryMore=false;el('directoryMore').classList.add('hidden');el('directoryList').replaceChildren();}
   message('directoryMessage','Loading leagues…');el('directoryMore').disabled=true;
   try {
     const data=await wblRpc('wbl_directory',{p_search:el('directorySearch').value.trim(),p_after:append?directoryCursor:null});
@@ -55,7 +55,8 @@ async function requestOpenLeague(row) {
   if(!safeToSwitch())return;
   const grant=savedAccess()[row.id];
   if(grant && Date.parse(grant.expires_at)>Date.now()) {
-    try {await enterLeague(row.id,grant);return;}catch(error){rememberAccess(row.id,null);}
+    accessBusy=true;
+    try {await enterLeague(row.id,grant);return;}catch(error){rememberAccess(row.id,null);}finally{accessBusy=false;}
   }
   joinTarget=row;hideAllScreens();el('joinScreen').classList.remove('hidden');message('joinTitle','Join '+row.name);message('joinMessage','');el('joinCode').value='';el('setupToken').value='';el('setupFields').open=false;el('joinCode').focus();
 }
