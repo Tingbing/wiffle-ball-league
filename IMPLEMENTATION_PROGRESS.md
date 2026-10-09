@@ -92,3 +92,12 @@ Release order: apply additive access migration plus private one-time setup hash 
 - [ ] PR merge, Pages deploy and non-destructive live verification
 
 This is the preflight checkpoint. Production migration and main merge have NOT happened yet.
+
+## Production backend activated — 2026-10-09
+
+Applied multi_league_access transaction with preflight data-drift assertions and the privately provisioned owner setup hash. Applied directory_indexes. Verified exact hashes of every original private league/game/receipt field: all preserved. Owner one-time setup is ready, no shared code is invented. Catalog verifies zero API table grants, all private tables have RLS, legacy wbl_read execution denied, and no app tables in Realtime publications. Current frontend main remains the old commit pending PR merge/Pages deployment; old callers fail closed.
+
+- [x] Production backend migrations and private-data preservation verification
+- [ ] Merge PR #3 at the tested source state, wait for GitHub Pages deployment and verify live gate
+
+Migration recovery: keep this security boundary closed; repair frontend forward if its deployment fails. Never reopen legacy anonymous RPCs. The owner setup file is private and active; use it only after the frontend deployment is confirmed.
