@@ -104,6 +104,31 @@ async function play(page, result) {
   assert.equal(await a.locator('#activeLeagueTitle').textContent(),name);
   assert.match(await a.locator('#activeLeagueRules').textContent(),/7 weeks.*3 teams.*5 innings.*3 outs/);
   check('UI creates custom three-team league and retains validated access');
+  assert.equal(await a.evaluate(id=>savedAccess()[id].expires_at,id),null);
+  // A grant saved by the previous release may carry an old expiry date.
+  await a.evaluate(id=>{const grants=savedAccess();grants[id].expires_at='2000-01-01T00:00:00Z';localStorage.setItem(ACCESS_KEY,JSON.stringify(grants));},id);
+  await a.goto('http://127.0.0.1:4173/app.html'); await main(a);
+  assert.equal(await a.evaluate(()=>LEAGUE_CODE),id);
+  assert.equal(await a.evaluate(id=>savedAccess()[id].expires_at,id),null);
+  check('Last league automatically reopens without a code, including old locally expired grants');
+  await a.route(staging+'/rest/v1/rpc/wbl_read',route=>route.abort(),{times:1});
+  await a.goto('http://127.0.0.1:4173/app.html');
+  await a.locator('#directoryAccessMessage button').waitFor({state:'visible'}); await idle(a);
+  assert.match(await a.locator('#directoryAccessMessage').textContent(),/access is still saved/);
+  assert.ok(await a.evaluate(id=>!!savedAccess()[id],id));
+  assert.equal(await a.locator('#joinScreen').isVisible(),false);
+  await a.locator('#directoryAccessMessage button').click(); await main(a);
+  check('Failed reopening keeps saved access and Retry opens without asking for a code');
+  const reopened=await desktop.newPage();
+  await reopened.goto('http://127.0.0.1:4173/app.html'); await main(reopened);
+  assert.equal(await reopened.evaluate(()=>LEAGUE_CODE),id); await reopened.close();
+  check('A new tab in the same device profile reopens the saved league');
+  await click(a,'#mainMenu button[onclick="switchToDirectory()"]');
+  await a.goto('http://127.0.0.1:4173/app.html');
+  await a.locator('#directoryScreen').waitFor({state:'visible'}); await idle(a);
+  assert.ok(await a.evaluate(id=>!!savedAccess()[id],id));
+  await a.goto('http://127.0.0.1:4173/app.html#league='+id); await main(a);
+  check('Switch league keeps access and respects a deliberate return to the directory');
   await click(a, '#mainMenu button[onclick="showTeamConfig()"]');
   for(let team=0;team<3;team++) for(let player=1;player<=2;player++) {
     await a.locator('#teamSelect').selectOption(String(team));
@@ -249,6 +274,10 @@ async function play(page, result) {
   await b.locator('#directoryScreen').waitFor({state:'visible'});
   await b.reload();
   assert.equal(await b.locator('#mainMenu').isVisible(),false);
+  assert.equal(await b.evaluate(id=>savedAccess()[id],id),undefined);
+  assert.equal(await b.evaluate(()=>localStorage.getItem(LAST_LEAGUE_KEY)),null);
+  await b.goto('http://127.0.0.1:4173/app.html#league='+id);
+  await b.locator('#joinScreen').waitFor({state:'visible'});
   check('Code rotation revokes both sessions and device leave survives reload');
   // A second materially different league exercises isolated caches, routes and overtime.
   await a.locator('#directoryScreen button[onclick="showCreateLeague()"] ').click();

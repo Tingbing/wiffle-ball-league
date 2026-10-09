@@ -1,5 +1,6 @@
 // Directory is public. Private screens are rendered only after a server-validated grant.
 const ACCESS_KEY='wbl-v4-access';
+const LAST_LEAGUE_KEY='wbl-v4-last-league';
 let directoryCursor=null,directoryMore=false,directoryBusy=false,directoryRequest=0;
 let joinTarget=null,accessBusy=false,creationDraft=null;
 const privateScreenTemplates=new Map();
@@ -7,7 +8,12 @@ function el(id) {return document.getElementById(id);}
 function message(id,text) {el(id).textContent=text;}
 function makeButton(text,fn) {const b=document.createElement('button');b.type='button';b.textContent=text;b.onclick=fn;return b;}
 function savedAccess() {return readJsonStorage(ACCESS_KEY,{});}
-function rememberAccess(id,value) {const grants=savedAccess();if(value)grants[id]=value;else delete grants[id];localStorage.setItem(ACCESS_KEY,JSON.stringify(grants));}
+function rememberAccess(id,value) {
+  const grants=savedAccess();if(value)grants[id]=value;else delete grants[id];
+  localStorage.setItem(ACCESS_KEY,JSON.stringify(grants));
+  if(value)localStorage.setItem(LAST_LEAGUE_KEY,id);
+  else if(localStorage.getItem(LAST_LEAGUE_KEY)===id)localStorage.removeItem(LAST_LEAGUE_KEY);
+}
 function renderLeagueHeader() {message('activeLeagueTitle',leagueName);message('activeLeagueRules',`${leagueSettings.weeks} weeks • ${league.teams?.length || ''} teams • ${leagueSettings.innings} innings • ${leagueSettings.outs} outs per half-inning`);}
 function clearPrivateState() {
   accessGeneration++;stopRealtime();
@@ -23,7 +29,7 @@ function invalidateCurrentAccess() {
   const id=LEAGUE_CODE;
   if(recording.pending) persistRecordingRecovery();
   rememberAccess(id,null);clearPrivateState();
-  showDirectory();message('directoryMessage','Access expired or was revoked. Enter the league’s current code to reopen it. Unconfirmed saves remain scoped to that league on this device.');
+  showDirectory();message('directoryAccessMessage','Access was revoked. Enter the league’s current code to reopen it. Unconfirmed saves remain scoped to that league on this device.');
 }
 function safeToSwitch() {
   if(accessBusy || recording.busy || recording.pending || leagueEditActive) {alert('Wait for the current request and resolve pending saves before switching leagues.');return false;}
@@ -31,7 +37,7 @@ function safeToSwitch() {
   return true;
 }
 function showDirectory() {hideAllScreens();el('directoryScreen').classList.remove('hidden');loadDirectory(false);}
-function switchToDirectory() {if(!safeToSwitch())return;clearPrivateState();history.pushState(null,'',location.pathname+location.search);showDirectory();}
+function switchToDirectory() {if(!safeToSwitch())return;localStorage.removeItem(LAST_LEAGUE_KEY);message('directoryAccessMessage','');clearPrivateState();history.pushState(null,'',location.pathname+location.search);showDirectory();}
 async function loadDirectory(append=false) {
   if(append&&directoryBusy)return;
   const request=++directoryRequest;directoryBusy=true;
@@ -53,10 +59,19 @@ async function loadDirectory(append=false) {
 }
 async function requestOpenLeague(row) {
   if(!safeToSwitch())return;
+  message('directoryAccessMessage','');
   const grant=savedAccess()[row.id];
-  if(grant && Date.parse(grant.expires_at)>Date.now()) {
+  if(grant) {
     accessBusy=true;
-    try {await enterLeague(row.id,grant);return;}catch(error){rememberAccess(row.id,null);}finally{accessBusy=false;}
+    try {await enterLeague(row.id,grant);return;}
+    catch(error){
+      if(/ACCESS_REQUIRED/.test(error.message))rememberAccess(row.id,null);
+      else {
+        message('directoryAccessMessage','Could not reopen your saved league. '+error.message+' Your access is still saved. ');
+        el('directoryAccessMessage').append(makeButton('Retry opening league',()=>requestOpenLeague(row)));
+        return;
+      }
+    }finally{accessBusy=false;}
   }
   joinTarget=row;hideAllScreens();el('joinScreen').classList.remove('hidden');message('joinTitle','Join '+row.name);message('joinMessage','');el('joinCode').value='';el('setupToken').value='';el('setupFields').open=false;el('joinCode').focus();
 }
@@ -74,7 +89,7 @@ async function enterLeague(id,grant) {
   clearPrivateState();LEAGUE_CODE=id;activeAccess=grant;
   SEASON_STORAGE_KEY=leagueKey('season');SCHEDULE_STORAGE_KEY=leagueKey('schedule');SYNC_HEAD_KEY=leagueKey('head');ACTIVE_GAME_LOCK_KEY=leagueKey('lock');RECOVERY_PREFIX=leagueKey('recording')+':';
   try {
-    await refreshLeagueFromServer();rememberAccess(id,grant);
+    await refreshLeagueFromServer();activeAccess={token:grant.token,expires_at:null};rememberAccess(id,activeAccess);
     if(id==='6767') archiveLegacyLocalData();
     try {await initializeRecordingIdentity();}catch(error){setConnectionMessage(error.message);}
     await restoreRecordingRecovery();startAppPolling();
@@ -109,7 +124,7 @@ async function submitCreate(event) {
     const request={...creationDraft,name,code,teams,settings};message('createMessage','Creating league…');
     const response=await wblRpc('wbl_create',{p_request:request});
     const token=creationDraft.session_token;creationDraft=null;el('createCode').value='';
-    alert(`Created ${name}.\n\nShared code: ${code}\n${settings.weeks} weeks • ${settings.innings} innings • ${settings.outs} outs\n\nSave this code privately. Everyone using it has full league access. This device remembers access for seven days.`);
+    alert(`Created ${name}.\n\nShared code: ${code}\n${settings.weeks} weeks • ${settings.innings} innings • ${settings.outs} outs\n\nSave this code privately. Everyone using it has full league access. This device remembers access until you leave the league or its code changes.`);
     await enterLeague(response.league_id,{token,expires_at:response.expires_at});
   }catch(error){message('createMessage',error.message+' If a request was interrupted, retry with the same details in this tab.');if(error.definite)creationDraft=null;}
   finally{accessBusy=false;el('createSubmit').disabled=false;}
@@ -140,10 +155,11 @@ window.addEventListener('popstate',async()=>{
   if(!safeToSwitch()){history.pushState(null,'',LEAGUE_CODE?'#league='+encodeURIComponent(LEAGUE_CODE):location.pathname);return;}
   await openRoute();
 });
-async function openRoute() {
+async function openRoute({restoreLast=false}={}) {
   const match=location.hash.match(/^#league=([^&]+)$/);
-  if(!match){clearPrivateState();showDirectory();return;}
-  let id;try{id=decodeURIComponent(match[1]);}catch{showDirectory();return;}
+  const last=restoreLast&&!location.hash?localStorage.getItem(LAST_LEAGUE_KEY):null;
+  if(!match&&!(last&&savedAccess()[last])){clearPrivateState();showDirectory();return;}
+  let id;try{id=match?decodeURIComponent(match[1]):last;}catch{clearPrivateState();showDirectory();return;}
   if(!/^(6767|[a-f0-9-]{36})$/.test(id)){clearPrivateState();showDirectory();message('directoryMessage','Invalid league link. Find a league below.');return;}
   await requestOpenLeague({id,name:'League '+id.slice(0,8)});
 }
