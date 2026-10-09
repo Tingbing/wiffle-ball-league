@@ -9,6 +9,15 @@ let serverClockOffset = 0;
 let syncState = {serverSeasonRevision:0,serverScheduleRevision:0,serverUpdatedAt:null};
 
 async function wblRpc(name,args) {
+  const generation=accessGeneration;
+  const privateRpc=['wbl_read','wbl_mutate','wbl_change_code','wbl_leave_access'].includes(name);
+  if(privateRpc) {
+    if(!activeAccess) throw new Error('ACCESS_REQUIRED: Enter this league’s code.');
+    if(name==='wbl_mutate') {
+      if(args.p_request.league_id && args.p_request.league_id!==LEAGUE_CODE) throw new Error('Wrong league recovery request.');
+      args={p_request:{...args.p_request,league_id:LEAGUE_CODE,access_token:activeAccess.token}};
+    } else args={...args,p_league_id:LEAGUE_CODE,p_access_token:activeAccess.token};
+  }
   if (!navigator.onLine) throw new Error('Offline. Scoring is paused.');
   const controller=new AbortController();
   const timer=setTimeout(()=>controller.abort(),8000);
@@ -21,9 +30,11 @@ async function wblRpc(name,args) {
     const result=await response.json();
     if(!response.ok) { const e=new Error(result.message || 'Server request failed'); e.definite=response.status>=400 && response.status<500; throw e; }
     if(!result) throw new Error('Backend migration is missing. Run database/01_recording_handoff.sql.');
+    if(privateRpc && generation!==accessGeneration) throw new Error("League changed; old response ignored.");
+    if(result.error) {const e=new Error(result.error);e.definite=true;throw e;}
     appConnected=true;
     return result;
-  } catch(error) { appConnected=false; throw error; }
+  } catch(error) { if(generation===accessGeneration) {appConnected=false; if(privateRpc && /ACCESS_REQUIRED/.test(error.message)) invalidateCurrentAccess();} throw error; }
   finally { clearTimeout(timer); }
 }
 function setConnectionMessage(message) {
@@ -33,24 +44,26 @@ function persistConfirmedLeague() {
   try {
     localStorage.setItem(SEASON_STORAGE_KEY,JSON.stringify(season));
     localStorage.setItem(SCHEDULE_STORAGE_KEY,JSON.stringify(schedule));
-    localStorage.setItem('wiggleLeague',JSON.stringify(league));
-    localStorage.setItem('wbl-v3-league-cache',JSON.stringify({revision:leagueRevision,season,schedule,league}));
+    localStorage.setItem(leagueKey('teams'),JSON.stringify(league));
+    localStorage.setItem(leagueKey('confirmed'),JSON.stringify({revision:leagueRevision,season,schedule,league}));
   } catch(error) { setConnectionMessage('Server saved. Device storage is full; do not rely on offline recovery on this device.'); }
 }
 function applyLeagueData(data) {
   if(!data?.league) return;
-  if(data.api_version!==3) throw new Error('Backend version mismatch. Apply the included SQL migration.');
+  if(data.league.id!==LEAGUE_CODE || !activeAccess) throw new Error("Wrong league response rejected.");
+  if(data.api_version!==4) throw new Error('Backend version mismatch. Apply the included SQL migration.');
   serverClockOffset=Date.parse(data.server_time)-Date.now();
   liveGames=data.games || [];
   activeGameLock=liveGames.length?{lockId:liveGames[0].id,team1:liveGames[0].team1,team2:liveGames[0].team2}:null;
   leagueRevision=Number(data.league.revision);
+  leagueSettings=cloneJson(data.league.settings); leagueName=data.league.name;
   season=ensureSeasonShape(cloneJson(data.league.season_json));
   schedule=ensureScheduleShape(cloneJson(data.league.schedule_json));
   league=cloneJson(data.league.teams_json);
   syncState.serverSeasonRevision=getSeasonRevisionFrom(season);
   syncState.serverScheduleRevision=getScheduleRevisionFrom(schedule);
   syncState.serverUpdatedAt=data.league.updated_at;
-  persistConfirmedLeague(); renderLiveGameList();
+  persistConfirmedLeague(); renderLeagueHeader(); renderLiveGameList();
 }
 async function refreshLeagueFromServer() {
   const data=await wblRpc('wbl_read',{});
@@ -71,7 +84,7 @@ function refreshVisibleReadOnlyScreens() {
   }
 }
 async function pollApp() {
-  if(pollRunning || leagueEditActive || recording.busy || recording.pending || document.hidden) return;
+  if(!activeAccess || pollRunning || leagueEditActive || recording.busy || recording.pending || document.hidden) return;
   pollRunning=true;
   try {
     if(recording.row && game) await refreshRecording();
@@ -133,26 +146,26 @@ async function runLeagueEdit(fn,args) {
       alert('The league changed on another device. The latest data is loaded; please make your edit again.'); return false;
     }
     if(fresh.games.length) return alert('Finish all in-progress games before changing rosters, schedules, or past statistics. You can still view and record games.');
-    before={season:cloneJson(season),schedule:cloneJson(schedule),teams:cloneJson(league)};
+    before={settings:cloneJson(leagueSettings),name:leagueName,season:cloneJson(season),schedule:cloneJson(schedule),teams:cloneJson(league)};
     leagueEditActive=true;
     const result=await fn(...args);
-    const next={season:cloneJson(season),schedule:cloneJson(schedule),teams:cloneJson(league)};
+    const next={settings:cloneJson(leagueSettings),name:leagueName,season:cloneJson(season),schedule:cloneJson(schedule),teams:cloneJson(league)};
     if(JSON.stringify(before)===JSON.stringify(next)) return result;
-    recording.pending={op:'league',op_id:crypto.randomUUID(),league_revision:leagueRevision,...next};
+    recording.pending={league_id:LEAGUE_CODE,op:'league',op_id:crypto.randomUUID(),league_revision:leagueRevision,...next};
     if(!persistRecordingRecovery()) throw new Error('Device recovery storage failed. The league edit was not sent.');
     const response=await sendPendingMutation();
     applyLeagueData(response.data); setConnectionMessage('League changes saved to the server.');
     leagueEditActive=false; showNotification('Changes saved to the server.',2500);
     return result;
   } catch(error) {
-    if(before) {season=before.season;schedule=before.schedule;league=before.teams;}
+    if(before && activeAccess) {leagueSettings=before.settings;leagueName=before.name;season=before.season;schedule=before.schedule;league=before.teams;}
     setConnectionMessage('League edit is not confirmed. Use Refresh / Retry before making more changes. '+error.message);
     alert(error.message+' Your attempted edit is kept for recovery if a request was sent.'); return false;
   } finally {leagueEditActive=false;recording.busy=false;renderLiveGameList();renderRecordingStatus();}
 }
 function archiveLegacyLocalData() {
   if(localStorage.getItem('wbl-pre-handoff-backup')) return;
-  const keys=['wiggleLeague',SEASON_STORAGE_KEY,SCHEDULE_STORAGE_KEY,SYNC_HEAD_KEY,'wiggleLiveGameStateV1','wiggleActiveGameLock'];
+  const keys=['wiggleLeague','wiggleSeason','wiggleSchedule','wiggleSyncHeadV1','wiggleLiveGameStateV1','wiggleActiveGameLock'];
   const original={savedAt:new Date().toISOString()};
   for(const key of keys) original[key]=readJsonStorage(key,null);
   localStorage.setItem('wbl-pre-handoff-backup',JSON.stringify(original));

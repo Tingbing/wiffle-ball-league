@@ -7,11 +7,41 @@
 	<meta http-equiv="Pragma" content="no-cache" />
 	<meta http-equiv="Expires" content="0" />
 	<title>Wiggle Ball League</title>
-<link rel="stylesheet" href="app.css?v=handoff3">
+<link rel="stylesheet" href="app.css?v=multi4">
 
 </head>
 
 <body>
+<main id="directoryScreen" class="directory-shell">
+  <h1>Wiffle Ball Leagues</h1><p>Find your league, enter its shared code, and play.</p>
+  <button onclick="showCreateLeague()">+ Create League</button>
+  <form onsubmit="event.preventDefault();loadDirectory(false)"><label for="directorySearch">Search league names</label><input id="directorySearch" type="search" maxlength="80" placeholder="League name"><button>Search</button></form>
+  <p id="directoryMessage" role="status" aria-live="polite">Loading leagues…</p>
+  <button onclick="loadDirectory(false)">Retry / Refresh</button><div id="directoryList"></div><button id="directoryMore" class="hidden" onclick="loadDirectory(true)">Load more leagues</button>
+  <p>Everyone with a league’s code has full access. Successful access is remembered on this device for seven days. Use “Leave &amp; revoke” to remove it.</p>
+</main>
+<section id="joinScreen" class="directory-shell hidden">
+  <button onclick="if(!accessBusy)showDirectory()">← League directory</button><h1 id="joinTitle">Join league</h1>
+  <form onsubmit="submitJoin(event)"><label for="joinCode">Shared access code</label><input id="joinCode" type="password" required maxlength="64" autocomplete="off">
+  <details id="setupFields"><summary>One-time setup for an existing league</summary><p>Use the private setup token supplied to the league owner. Choose a new shared code with 8–64 bytes, a letter and a number or symbol.</p><label for="setupToken">Private setup token</label><input id="setupToken" type="password" autocomplete="off"></details>
+  <button id="joinSubmit">Open league</button><p id="joinMessage" role="alert"></p></form>
+</section>
+<section id="createLeagueScreen" class="directory-shell hidden">
+  <button onclick="if(!accessBusy)showDirectory()">← League directory</button><h1>Create a league</h1>
+  <form onsubmit="submitCreate(event)">
+  <label for="createName">League name</label><input id="createName" required maxlength="80">
+  <label for="createCode">Shared access code</label><input id="createCode" type="password" required minlength="8" maxlength="64" autocomplete="new-password"><p>Use 8–64 bytes with a letter and a number or symbol. Share it privately; it grants full access.</p>
+  <label for="createTeamCount">Number of teams (2–8)</label><input id="createTeamCount" type="number" min="2" max="8" value="4" required onchange="updateCreateTeams()">
+  <div id="createTeams" class="form-grid"></div>
+  <div class="form-grid"><label>Season length in weeks<input id="createWeeks" type="number" required min="1" max="52" value="6"></label><label>Innings per game<input id="createInnings" type="number" required min="1" max="9" value="3"></label><label>Outs per half-inning<input id="createOuts" type="number" required min="1" max="6" value="2"></label></div>
+  <p>Each week contains one best-of-three series per team. Odd team counts receive one bye per week. Complete round-robin cycles are balanced; a partial cycle may have unequal opponents or byes. Add players and generate the schedule after creation. Overtime retains the runner-on-second rule; one-out leagues start overtime with zero outs.</p><p id="createPostseason"></p>
+  <button id="createSubmit">Create league</button><p id="createMessage" role="alert"></p></form>
+</section>
+<section id="leagueSettingsScreen" class="directory-shell hidden">
+  <button onclick="showMainMenu()">← Main menu</button><h1>League settings</h1><p id="settingsMessage" role="status"></p>
+  <form onsubmit="submitSettings(event)"><label>League name<input id="settingsName" required maxlength="80"></label><div class="form-grid"><label>Season length in weeks<input id="settingsWeeks" type="number" min="1" max="52" required></label><label>Innings per game<input id="settingsInnings" type="number" min="1" max="9" required></label><label>Outs per half-inning<input id="settingsOuts" type="number" min="1" max="6" required></label></div><button>Save settings</button></form>
+  <h2>Change shared code</h2><form onsubmit="changeSharedCode(event)"><label>New shared code<input id="newCode" type="password" minlength="8" maxlength="64" required autocomplete="new-password"></label><button>Change code &amp; revoke all sessions</button><p id="codeMessage" role="alert"></p></form>
+</section>
 
 
 <!-- ✅ FATAL ERROR: shown if Supabase doesn’t load -->
@@ -27,7 +57,8 @@
 
 
 <!-- MAIN MENU -->
-<div id="mainMenu">
+<div id="mainMenu" class="hidden">
+<div class="card"><h2 id="activeLeagueTitle"></h2><p id="activeLeagueRules"></p><button onclick="switchToDirectory()">Switch leagues</button><button onclick="showLeagueSettings()">League settings</button><button onclick="leaveLeagueAccess()">Leave &amp; revoke this device’s access</button></div>
 <div id="connectionMessage" class="card" role="status">Connecting…</div>
 <div id="liveGameList" class="card"></div>
 <div id="recoveryList" class="card hidden"></div>
@@ -444,21 +475,22 @@
 </div>
 <!-- SCHEDULE SCREEN -->
 
-<script src="core.state.js?v=handoff3"></script>
-<script src="core.sync.js?v=handoff3"></script>
-<script src="core.schedule.js?v=handoff3"></script>
-<script src="core.stats.js?v=handoff3"></script>
-<script src="core.ui.js?v=handoff3"></script>
-<script src="app.game.state.js?v=handoff3"></script>
-<script src="app.game.autosave.js?v=handoff3"></script>
-<script src="app.game.runners.js?v=handoff3"></script>
-<script src="app.game.rules.js?v=handoff3"></script>
-<script src="app.game.ui.js?v=handoff3"></script>
-<script src="app.game.play.js?v=handoff3"></script>
-<script src="app.game.save.js?v=handoff3"></script>
-<script src="app.game.views.js?v=handoff3"></script>
-<script src="app.recording.js?v=handoff3"></script>
-<script src="app.boot.js?v=handoff3"></script>
+<script src="core.state.js?v=multi4"></script>
+<script src="core.sync.js?v=multi4"></script>
+<script src="core.schedule.js?v=multi4"></script>
+<script src="core.stats.js?v=multi4"></script>
+<script src="core.ui.js?v=multi4"></script>
+<script src="app.game.state.js?v=multi4"></script>
+<script src="app.game.autosave.js?v=multi4"></script>
+<script src="app.game.runners.js?v=multi4"></script>
+<script src="app.game.rules.js?v=multi4"></script>
+<script src="app.game.ui.js?v=multi4"></script>
+<script src="app.game.play.js?v=multi4"></script>
+<script src="app.game.save.js?v=multi4"></script>
+<script src="app.game.views.js?v=multi4"></script>
+<script src="app.recording.js?v=multi4"></script>
+<script src="app.leagues.js?v=multi4"></script>
+<script src="app.boot.js?v=multi4"></script>
 
 
 

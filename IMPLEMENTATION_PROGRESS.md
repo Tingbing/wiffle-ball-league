@@ -1,66 +1,40 @@
 # Multi-league implementation progress
 
-Updated: 2026-10-09. Status: paused at the isolated-backend infrastructure gate.
+Updated: 2026-10-09. Status: implementation and isolated validation in progress; NOT released.
 
-## Source and branch
+## Target and source
 
-- Repository: https://github.com/Tingbing/wiffle-ball-league
-- Development branch: `codex/multi-league-2026-10-09`
-- Inspected production source: `eca58ba3d8ea44982142ea4c0eb02971ddc5a06e` (`main`).
-- The attached ZIP matches the tracked files in this source commit.
-- No AGENTS.md, dependency manifest/lockfile, migration files, or checked-in deployment workflow were found.
-- The intended backend is the existing Supabase project referenced in `app.boot.js` and the user's attached instructions. Credentials, data, schema dumps, and detailed backend security findings are intentionally excluded from this public file.
-- The connected targets were inspected read-only. The original instructions remain authoritative for target scope and authorization.
+Repository: https://github.com/Tingbing/wiffle-ball-league
+Development branch: codex/multi-league-2026-10-09
+Inspected main: eca58ba3d8ea44982142ea4c0eb02971ddc5a06e. Uploaded ZIP matches original source. No AGENTS.md or build/lint/typecheck configuration exists.
+The intended production Supabase target remains the project referenced in app.boot.js. No production database writes or merges have occurred. Private data and dumps are excluded from this repository.
 
-## Proposed work (not implemented)
+## Implementation checkpoint
 
-- Add a searchable, paginated league directory and transactionally create independent leagues.
-- Verify a shared access code server-side and enforce league-scoped sessions and authorization for all private reads/writes.
-- Preserve the existing league's stable identifiers, data, scoring features, and recorder handoff.
-- Scope client caches/recovery and asynchronous operations by league.
-- Make team configuration, weeks, innings, and outs configurable with validated bounds and game/season rule snapshots.
-- Validate the complete feature and migration against an isolated real backend before production rollout.
+- Public directory with search and cursor pagination; duplicate names are allowed and distinguished by ID.
+- Transactional league creation with idempotency receipt. Private bcrypt hashes and server-validated seven-day device sessions. No conventional signup.
+- Gated private RPCs with league-scoped grants, shared full permissions, device revocation, code-change revocation, and server throttling.
+- Migration closes legacy RPC/table/view/publication access. Private tables use RLS and no API-role table grants.
+- League-scoped client persistence, recorder identities and recovery; generation checks reject late private responses after switching.
+- Configurable 2–8 teams, 1–52 weeks, 1–9 innings and 1–6 outs. Weekly round-robin cycles support odd-team byes. Postseason remains explicitly limited to four teams.
+- Game/season rule snapshots, immutable game rules, and blocked roster/rule changes during scored seasons or live games.
+- Existing recorder revision/epoch/lease and receipt protocol retained, with one live game per league enforced atomically.
+- One-time existing-league setup requires a separately provisioned private random token. No production code or setup token has been provisioned yet.
 
-## Actual checks
+## Actual validation
 
-Passed:
+- Baseline: four Node tests pass, including 50 four-team and 50 five-team schedules, default overtime and recoverable completion.
+- Isolated free staging project created by the user and verified healthy; baseline fixture and multi_league_access migration applied there only.
+- tests/backend.mjs: 24 checks passed via real PostgREST HTTP requests. See tests/BACKEND_RESULTS.md. Includes cross-league reads/writes, minimal directory, code checks, duplicate/retried creation, throttling, one recorder, simultaneous independent leagues, idempotent saves, stale revisions, handoff/stale release, immutable rules, completion, device revocation and code changes.
+- Browser executable installation failed: official downloads returned invalid/truncated archive content. Browser validation has not run. Continue investigating a supported browser runtime.
+- Custom-rule unit tests, pagination/expiry/lease-expiry checks, representative backup restoration/migration, complete UI workflow and phone/accessibility/concurrency checks remain pending.
 
-- All 15 application JS files passed `node --check` using Node v24.19.0.
-- `node --test tests/baseline.test.cjs`: four tests passed; zero failures.
-- The baseline suite generates 50 four-team and 50 five-team schedules. It checks matchup frequencies, schedule length, no double booking, series shape, and byes.
-- Default overtime setup is idempotent and begins with one out and a runner on second after a tied third inning.
-- Default non-tied final-half completion preserves the pending-save state.
+## Rollout and recovery
 
-The tests stub UI side effects. They do not establish backend authorization, full browser behavior, or competition readiness.
+Keep this branch unmerged until all required gates pass. Migration: supabase/migrations/20261009170646_multi_league_access.sql. database/*.sql are its source fragments. tests/fixtures/baseline.sql is a synthetic test-only baseline, NEVER a production migration.
+Before production writes: capture schema/deployment state and private affected-data backup, prove isolated restore and preservation, validate migration on that copy, recheck main/schema drift, and provision a verified existing-league code/setup mechanism. Close legacy backend access before frontend deployment; old clients must fail closed.
+No paid resources or upgrades authorized. No data was erased despite permission to erase if necessary.
 
-## Blocked and untested
+## Next step
 
-- No isolated Supabase test branch was available.
-- This workspace lacks Docker, a PostgreSQL server/client, and the Supabase CLI. Attempts to obtain local PostgreSQL failed because of runtime user-switch restrictions and HTTP 502 package-download failures.
-- The installed Playwright package has no Chromium executable; no browser tests ran.
-- New feature acceptance tests, backend authorization tests, backup/restore verification, migration tests, full game workflow, and concurrency/layout checks remain untested.
-- No conventional build/lint/typecheck commands are configured.
-
-## Changes and rollout status
-
-- Only these baseline tests and this progress file were added to the development branch.
-- No application behavior changes, production database writes, migrations, settings changes, merges, or deployments have been performed.
-- No initial shared access code was chosen for the existing league. Obtain it privately or implement and verify a secure setup flow before enforcing the gate.
-- No complete private backup has been restore-tested yet; this remains a mandatory production gate.
-- No production rollback is needed at this checkpoint. Keep the development branch unmerged.
-
-## Next step and resumption
-
-### Free test-project setup update
-
-The user authorized any necessary free work and explicitly forbade Supabase spending. The user also allowed erasing existing backend data if necessary because they have an app backup; no data was erased, and preservation remains preferable.
-
-The connector's project cost-check operation returned UNAVAILABLE. The dashboard was reached through the authorized browser fallback and showed the existing organization on the Free Plan with one project. A new project form was prepared for `wiffle-ball-multileague-test`, with automatic table exposure disabled and automatic RLS enabled. No new project has been submitted or provisioned by the agent.
-
-Current blocker: the user must complete the new database-password and creation steps in the handed-off browser form. Browser credential policy requires user handoff before entering a new authentication credential. Do not read, log, or request that password in chat. Once the user finishes, verify the project exists, belongs to the expected Free Plan organization, and is accessible to the connector before making staging changes. Never upgrade or incur charges.
-
-GitHub main and this development branch were rechecked and unchanged before this setup checkpoint.
-
-Obtain an authorized, separate Supabase test project/branch or a runtime capable of running local Supabase. The attached instructions explicitly prohibit production experiments as a substitute. Do not create a billable resource or upgrade a plan without the required cost confirmation. Authorization for any additional project must be resolved before provisioning it.
-
-Then re-read this file and the original instructions, re-check both GitHub heads and current backend state, and reproduce the relevant deployed schema in isolation with synthetic data. Continue implementation and acceptance tests. Before production changes, capture a private restorable backup, verify restore and record preservation, prepare versioned migrations and recovery instructions, and validate deployment ordering. Do not reapply migrations blindly or merge unfinished work.
+Recheck branch and staging migrations (do not reapply blindly), continue custom-rule and browser tests, harden findings, then complete backup/restore and rollout gates. Never claim competition readiness before acceptance passes.

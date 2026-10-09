@@ -28,7 +28,7 @@ function ensureExtendedStatFields(stats) {
 
 function getPitchingInningsValue(stats) {
 	const outs = Number(stats?.pitchOuts || 0);
-	return outs / 2;
+	return outs / Number(stats?.outsPerInning || 2);
 }
 
 function syncPitchingInnings(stats) {

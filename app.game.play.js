@@ -25,6 +25,7 @@ function startGameWithTeams(t1, t2, scheduleRef = null, lockInfo = null, gameCon
 	let fielding = batting === activeTeam1 ? activeTeam2 : activeTeam1;
 
 game = {
+	rules: deepCloneJson(season.rules || leagueSettings),
 	team1: activeTeam1,
 	team2: activeTeam2,
 	team1Score: 0,
@@ -309,7 +310,7 @@ function manualScoreFromThird() {
 	scoreExistingRunner(runner, totals, { creditRbi: false });
 	applyHalfInningRuns(totals.runs, totals.scoringEvents || []);
 
-	if (!isOvertimeActive() && game.inning <= 2 && game.halfInningRuns >= 6) {
+	if (!isOvertimeActive() && game.inning < regulationInnings() && game.halfInningRuns >= 6) {
 	endHalfInning(pitcherKey, "Run rule reached (6). Switching sides.");
 	updateGameScreen();
 	return;
@@ -521,7 +522,7 @@ let scoringEvents = [];
 		if (runnerCount < 2) {
 			showNotification("Need 2+ runners for a double play", 1500);
 				} else {
-			const outsToRecord = Math.max(0, Math.min(2, 2 - Number(game.outs || 0)));
+			const outsToRecord = Math.max(0, Math.min(2, outsPerHalf() - Number(game.outs || 0)));
 
 			if (outsToRecord <= 0) {
 				showNotification("Side is already over.", 1200);
@@ -654,7 +655,7 @@ let scoringEvents = [];
 	const nextBatterIndex = setCurrentBatterIndex(getCurrentBatterIndex() + 1);
 	checkAndConvertToGhostie(game.batting.players[nextBatterIndex]);
 
-if (!isOvertimeActive() && game.inning <= 2 && game.halfInningRuns >= 6) {
+if (!isOvertimeActive() && game.inning < regulationInnings() && game.halfInningRuns >= 6) {
 	endHalfInning(pitcherKey, "Run rule reached (6). Switching sides.");
 	pendingBattingResult = null;
 	keepLiveGameSectionsEnabled();
@@ -662,7 +663,7 @@ if (!isOvertimeActive() && game.inning <= 2 && game.halfInningRuns >= 6) {
 	return;
 }
 
-	if (game.outs >= 2) {
+	if (game.outs >= outsPerHalf()) {
 		const transitionResult = endHalfInning(pitcherKey, null);
 		pendingBattingResult = null;
 		keepLiveGameSectionsEnabled();

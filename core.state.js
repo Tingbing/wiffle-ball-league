@@ -5,7 +5,16 @@
    SHARED APP STATE
 ================================== */
 	let league = { teams: [] };
-const MAX_TEAMS = 5;
+const MAX_TEAMS = 8;
+let LEAGUE_CODE = null;
+let activeAccess = null;
+let leagueName = "";
+let leagueSettings = {weeks:6,innings:3,outs:2};
+let accessGeneration = 0;
+function currentRules() { return game?.rules || season?.rules || leagueSettings; }
+function regulationInnings() { return Number(currentRules().innings || 3); }
+function outsPerHalf() { return Number(currentRules().outs || 2); }
+function leagueKey(kind) { return `wbl-v4:${LEAGUE_CODE}:${kind}`; }
 const MAX_PLAYERS_PER_TEAM = 2;
     let season = { playerStats: {}, teamRecords: {}, seasonSubs: [], subStats: {}, games: [] };
 	let game = null;
@@ -14,10 +23,10 @@ const MAX_PLAYERS_PER_TEAM = 2;
 	let pendingBattingResult = null;
     let playInputLock = false;
 let activeGameLock = null;
-const ACTIVE_GAME_LOCK_KEY = "wiggleActiveGameLock";
-const SEASON_STORAGE_KEY = "wiggleSeason";
-const SCHEDULE_STORAGE_KEY = "wiggleSchedule";
-const SYNC_HEAD_KEY = "wiggleSyncHeadV1";
+let ACTIVE_GAME_LOCK_KEY = "unselected";
+let SEASON_STORAGE_KEY = "unselected";
+let SCHEDULE_STORAGE_KEY = "unselected";
+let SYNC_HEAD_KEY = "unselected";
 const APP_TAB_ID = `tab_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 
 let schedule = { days: [], teamNames: [] };
@@ -74,7 +83,7 @@ function isPublicViewOnlyMode() {
 }
 
 function hasFullAppAccess() {
-	return !publicViewOnlyMode;
+	return !!activeAccess && !publicViewOnlyMode;
 }
 
 function updatePublicAccessUI() {
@@ -92,7 +101,7 @@ function updatePublicAccessUI() {
    TEAM / LEAGUE STORAGE
 ================================== */
 function save() {	
-		localStorage.setItem("wiggleLeague", JSON.stringify(league));
+		localStorage.setItem(leagueKey("teams"), JSON.stringify(league));
 	}
 
 async function load() {
@@ -130,6 +139,7 @@ function ensureSeasonShape(obj) {
 	if (!obj.subStats || typeof obj.subStats !== "object") obj.subStats = {};
 	if (!Array.isArray(obj.games)) obj.games = [];
 	obj.postseason = ensurePostseasonShape(obj.postseason);
+	if (activeAccess && !obj.rules) obj.rules = deepCloneJson(leagueSettings);
 	return obj;
 }
 

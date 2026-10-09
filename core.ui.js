@@ -37,6 +37,7 @@ function clearFinishedGameMemoryIfNeeded() {
   recording.row=null; return true;
 }
 function showMainMenu() {
+  if(!activeAccess) {showDirectory();return;}
   clearFinishedGameMemoryIfNeeded();
   if(game && recording.row?.mine && recording.row?.status==='live') {
     showGame(); renderRecordingStatus(); return;
@@ -227,6 +228,7 @@ async function showPostseason() {
 }
 
 function hideAllScreens() {
+	for(const id of ["directoryScreen","joinScreen","createLeagueScreen","leagueSettingsScreen"]) document.getElementById(id)?.classList.add("hidden");
 	document.getElementById("publicMenu")?.classList.add("hidden");
 	document.getElementById("mainMenu").classList.add("hidden");
 	document.getElementById("teamConfigScreen").classList.add("hidden");
