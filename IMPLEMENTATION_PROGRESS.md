@@ -51,6 +51,16 @@ The tests stub UI side effects. They do not establish backend authorization, ful
 
 ## Next step and resumption
 
+### Free test-project setup update
+
+The user authorized any necessary free work and explicitly forbade Supabase spending. The user also allowed erasing existing backend data if necessary because they have an app backup; no data was erased, and preservation remains preferable.
+
+The connector's project cost-check operation returned UNAVAILABLE. The dashboard was reached through the authorized browser fallback and showed the existing organization on the Free Plan with one project. A new project form was prepared for `wiffle-ball-multileague-test`, with automatic table exposure disabled and automatic RLS enabled. No new project has been submitted or provisioned by the agent.
+
+Current blocker: the user must complete the new database-password and creation steps in the handed-off browser form. Browser credential policy requires user handoff before entering a new authentication credential. Do not read, log, or request that password in chat. Once the user finishes, verify the project exists, belongs to the expected Free Plan organization, and is accessible to the connector before making staging changes. Never upgrade or incur charges.
+
+GitHub main and this development branch were rechecked and unchanged before this setup checkpoint.
+
 Obtain an authorized, separate Supabase test project/branch or a runtime capable of running local Supabase. The attached instructions explicitly prohibit production experiments as a substitute. Do not create a billable resource or upgrade a plan without the required cost confirmation. Authorization for any additional project must be resolved before provisioning it.
 
 Then re-read this file and the original instructions, re-check both GitHub heads and current backend state, and reproduce the relevant deployed schema in isolation with synthetic data. Continue implementation and acceptance tests. Before production changes, capture a private restorable backup, verify restore and record preservation, prepare versioned migrations and recovery instructions, and validate deployment ordering. Do not reapply migrations blindly or merge unfinished work.
