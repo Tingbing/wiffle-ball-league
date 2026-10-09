@@ -17,8 +17,9 @@
   <button onclick="showCreateLeague()">+ Create League</button>
   <form onsubmit="event.preventDefault();loadDirectory(false)"><label for="directorySearch">Search league names</label><input id="directorySearch" type="search" maxlength="80" placeholder="League name"><button>Search</button></form>
   <p id="directoryMessage" role="status" aria-live="polite">Loading leagues…</p>
+  <p id="directoryAccessMessage" role="alert"></p>
   <button onclick="loadDirectory(false)">Retry / Refresh</button><div id="directoryList"></div><button id="directoryMore" class="hidden" onclick="loadDirectory(true)">Load more leagues</button>
-  <p>Everyone with a league’s code has full access. Successful access is remembered on this device for seven days. Use “Leave &amp; revoke” to remove it.</p>
+  <p>Everyone with a league’s code has full access. This device remembers access until you leave the league or its code changes. Use “Leave &amp; revoke” to forget access. Clearing browser data also removes saved access.</p>
 </main>
 <section id="joinScreen" class="directory-shell hidden">
   <button onclick="if(!accessBusy)showDirectory()">← League directory</button><h1 id="joinTitle">Join league</h1>
