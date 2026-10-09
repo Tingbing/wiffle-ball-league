@@ -73,3 +73,22 @@ The supported local preview supervisor also failed with a prohibited proc mount.
 First actual browser run passed: https://github.com/Tingbing/wiffle-ball-league/actions/runs/37970006788 at a4c08d7b5943fed25b5985f814e0fd99494dec59. Eleven checks covered creation, scheduling, scoring/undo/error, handoff, phone completion, persisted stats and code/session revocation. See tests/BROWSER_RESULTS.md. No production requests or uncaught browser exceptions. Extended substitutions, pitcher change, interrupted-acknowledgment recovery, offline reconnect, box scores/rankings, search/keyboard, delayed response/back-forward isolation, simultaneous Start and one-out overtime checks are prepared but not yet verified.
 
 Extended browser run passed 20 checks at 6ed77aadbe1b2cbc3a1caf4b9205ae7a497451cf: https://github.com/Tingbing/wiffle-ball-league/actions/runs/37970694022 . Results include substitutions, pitcher change, interrupted acknowledgments, offline reconnection, saved box scores/rankings, keyboard directory access, delayed response/back-forward isolation, simultaneous Start and one-out overtime. Remaining tab and directory/form cases are prepared for the final run. Main and the production league revision were rechecked and remain unchanged. The private one-time existing-league setup handoff is prepared and saved outside GitHub; its hash will be provisioned atomically with the gated migration only after acceptance passes. It is not active yet.
+
+## Release preflight — 2026-10-09
+
+Final browser acceptance SUCCESS: 23 checks at b03c5694f35792b41146769f59caded836994e71, https://github.com/Tingbing/wiffle-ball-league/actions/runs/37971240292 . Includes same-device multiple tabs, no-results/error/Retry states and keyboard form/server code validation in addition to the 20 extended checks. Twelve Node tests and 30 real staging HTTP checks also pass. No production requests or uncaught browser exceptions occurred in browser tests. Native private preview login/routing was not tested from the Actions browser; its deployment succeeded separately.
+
+Refreshed production read exactly matches the tested backup: one private league, four backend game rows, 106 receipts, four legacy teams, eight legacy players and one legacy season row. Every original value matches, and all captured schema functions, constraints, views, columns, indexes, grants, policies, triggers, publication and Storage state match. Main remains eca58ba3d8ea44982142ea4c0eb02971ddc5a06e. No active production game exists. Existing GitHub Pages uses the built-in pages build and deployment workflow.
+
+Private owner setup file is saved outside GitHub and linked to the owner before activation. Its random one-time token will be provisioned atomically with the code gate; owner chooses the shared code in the setup form. Token verification and consumption were tested in the isolated representative restore. Neither token nor hash is committed here.
+
+Release order: apply additive access migration plus private one-time setup hash in one transaction, apply tested indexes, verify API gate and preservation, merge the tested frontend through a PR, wait for existing Pages deployment, and perform non-destructive live checks. Old frontend/backend callers fail closed after migration. If frontend release fails, keep the new access boundary closed and repair forward; never restore insecure legacy RPC grants.
+
+- [x] Private HTTPS staging preview published
+- [x] Code, backend, migration preservation and 23 browser acceptance checks
+- [x] Private existing-league setup mechanism prepared and delivered
+- [x] Refreshed production data/schema and main drift checks
+- [ ] Production migrations and preserved-record verification
+- [ ] PR merge, Pages deploy and non-destructive live verification
+
+This is the preflight checkpoint. Production migration and main merge have NOT happened yet.
