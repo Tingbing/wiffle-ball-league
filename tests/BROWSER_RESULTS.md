@@ -20,3 +20,7 @@ Desktop 1280×900; separate mobile context 390×844 with touch enabled.
 - Code rotation revokes both sessions and explicit leave survives reload
 
 The private HTTPS preview deployment succeeded separately. Browser checks served the exact development source through an isolated test server on the Actions runner; they do not establish the native private hosting login flow or remote HTTPS preview routing. No screenshots were captured in this first run. Additional required browser cases are being added; this first successful run alone is not the full release gate.
+
+Extended run: https://github.com/Tingbing/wiffle-ball-league/actions/runs/37970694022
+Commit: 6ed77aadbe1b2cbc3a1caf4b9205ae7a497451cf
+Result: SUCCESS, 20 browser acceptance checks and 12 Node tests. Added verified game-only substitutions, pitcher changes, server-accepted/lost-acknowledgment recovery without duplicate scoring, offline/reconnect, saved box scores and rankings, keyboard directory opening, delayed former-league responses, back/forward navigation, simultaneous browser Start, and natural one-inning/one-out overtime completion. Zero production requests and uncaught browser exceptions. Remaining directory error/no-results, keyboard form validation and same-device multiple-tab checks prepared for a final run.
