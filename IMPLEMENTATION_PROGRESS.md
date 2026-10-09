@@ -1,6 +1,6 @@
 # Multi-league implementation progress
 
-Updated: 2026-10-09. Status: checkpointed at a concrete browser-validation blocker; NOT released.
+Updated: 2026-10-09. Status: private HTTPS staging preview published; browser acceptance workflow prepared; NOT released.
 
 ## Target and source
 
@@ -56,3 +56,16 @@ Browser acceptance and a verified production setup-code mechanism must complete 
 Keep main unchanged. Recovery at this checkpoint: abandon/revert only the development branch if needed; production requires no recovery because it was not modified. Private JSON data restore uses jsonb_populate_recordset into the baseline-shaped tables, in FK order league → games → receipts; tests/fixtures/baseline.sql is test-only and must remain inaccessible to API roles before data loading. For a future release failure, keep the access boundary closed, preserve post-release records, and repair forward from a tested branch. Never replace current data blindly with a pre-release snapshot or re-enable legacy anonymous RPCs.
 
 Representative restore fixture sealed after verification: all of its RPC execution grants were revoked and its test sessions removed. Catalog check confirmed zero API-executable restore functions. This copy is now admin-only; do not reopen it just to resume tests.
+
+## HTTPS preview retry
+
+Private staging preview published successfully: https://wiffle-multileague-staging-check.warm-ghost-4468.chatgpt.site/app.html . Source app checkpoint: a87a4a6348e741c2ee3f02a2d6be7a39156e1057. It targets staging only; production configuration remains unchanged in this repository.
+The supported local preview supervisor also failed with a prohibited proc mount. This requires a different supported test runtime, not additional user approval. Prepared a Chromium acceptance workflow on the development branch using a standard GitHub-hosted Ubuntu runner for this public repository. It has read-only repository permissions, no deployment steps, no production access or secrets, no uploaded artifacts or caches, and a 15-minute timeout. Browser acceptance is pending an actual workflow result; test preparation is not a passing result.
+
+- [x] Code, baseline and custom-rule checks
+- [x] Real isolated backend authorization/concurrency checks
+- [x] Private backup restore and migration preservation proof
+- [x] Private HTTPS staging preview
+- [ ] Desktop, mobile and two-device browser acceptance
+- [ ] Existing-league secure setup and refreshed production drift/backup checks
+- [ ] Production migration, main merge/deployment and live verification
