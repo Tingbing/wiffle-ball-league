@@ -1,6 +1,6 @@
 # Multi-league implementation checklist
 
-Updated: 2026-10-09. **Released. The owner must choose the existing league's shared code using the private one-time setup file.** Final live visual inspection remains blocked by the cloud browser's credential protection; do not claim competition readiness yet.
+Updated: 2026-10-09. **Implementation released, including permanent device access.** The owner confirmed the app works, and production confirms the existing league code has been configured and its one-time setup token consumed.
 
 ## Current checklist
 
@@ -16,18 +16,23 @@ Updated: 2026-10-09. **Released. The owner must choose the existing league's sha
 - [x] Apply production migrations and verify preserved records/security
 - [x] Merge PR #3 and deploy using existing GitHub Pages workflow
 - [x] Verify deployed source hashes and non-destructive production API checks
-- [ ] Owner enters the private setup token, chooses a shared code and reviews the live app
+- [x] Owner configures the existing league code and confirms the live app works
+- [x] Upgrade existing device grants without replacing tokens or changing league data
+- [x] Keep access until explicit leave or code rotation; restore the last league on startup
+- [x] Pass 27 expanded browser checks, 12 Node tests and nine persistence HTTP checks
+- [x] Merge PR #4, deploy permanent access and verify the live source/security
 
 ## Targets and release
 
 - Repository: https://github.com/Tingbing/wiffle-ball-league
 - Working branch: codex/multi-league-2026-10-09
 - Live app: https://tingbing.github.io/wiffle-ball-league/
-- PR: https://github.com/Tingbing/wiffle-ball-league/pull/3
-- App release commit: fb7107559b5f4a5408dec90b451bf2ffaf49f02b
-- Successful Pages deployment: https://github.com/Tingbing/wiffle-ball-league/actions/runs/37972202632
-- Last tested source checkpoint: b03c5694f35792b41146769f59caded836994e71
-- Private preview: https://wiffle-multileague-staging-check.warm-ghost-4468.chatgpt.site
+- Latest PR: https://github.com/Tingbing/wiffle-ball-league/pull/4
+- Initial multi-league PR: https://github.com/Tingbing/wiffle-ball-league/pull/3
+- App release commit: 61b0f215152f24ece1db6add23e18008f1bdce43
+- Successful Pages deployment: https://github.com/Tingbing/wiffle-ball-league/actions/runs/37996645790
+- Last tested source checkpoint: e90be83ad81a72323aaddca8703d3c3e86681749
+- Initial multi-league private preview (historical; live app is current): https://wiffle-multileague-staging-check.warm-ghost-4468.chatgpt.site
 - Production Supabase: hunqtklytyorvmztgpqt
 - Isolated free staging Supabase: axyywkipikyahayzipbu
 
@@ -37,9 +42,11 @@ The uploaded ZIP matched original main eca58ba3d8ea44982142ea4c0eb02971ddc5a06e.
 
 The app opens to a public directory with search, cursor pagination, loading/error/empty states and Create/Join/Open controls. Listings expose only ID, name and creation time. Duplicate names remain independent. Creation is transactional and supports idempotent retries.
 
-Each league has one shared code stored as a private bcrypt hash. Server-validated random-token sessions last seven days. Everyone with a valid code has equal full league permissions. Explicit leave revokes that device's grant; code rotation revokes every grant and releases live recorder ownership. Codes, setup secrets and hashes are excluded from listings and this repository.
+Each league has one shared code stored as a private bcrypt hash. Server-validated random-token device grants have no time expiry. Previously stored grants are upgraded in place; changing the shared code or deliberately leaving still revokes access. Everyone with a valid code has equal full league permissions. Explicit leave revokes that device's grant; code rotation revokes every grant and releases live recorder ownership. Codes, setup secrets and hashes are excluded from listings and this repository.
 
 Private reads and mutations use gated RPCs. Legacy anonymous RPC, table, view and publication access is closed. Private tables have RLS, no direct API-role table grants, and no public policies. The app uses gated polling; it does not use Realtime or Storage. Security advisers intentionally flag exposed SECURITY DEFINER RPCs and deny-by-default private RLS tables; do not weaken security to silence those informational/design warnings.
+
+The last opened league automatically reopens on a fresh visit using its saved grant, after server validation. Switching to the directory preserves joined-league grants and respects that deliberate navigation. Temporary network failures keep grants and offer a code-free Retry. Clearing browser data removes saved access.
 
 Caches, routes, recorder identities, recovery copies and in-memory state are league scoped. Generation checks discard late responses after switching. Scoring saves require server acknowledgment, revision/epoch/lease ownership and idempotent receipts. One live game is enforced per league; different leagues can record independently. Unconfirmed saves pause scoring and handoff.
 
@@ -49,22 +56,26 @@ Supported customization: 2–8 teams, 1–52 weeks, 1–9 innings and 1–6 outs
 
 - 12 Node tests: original four/five-team schedules, default overtime/recoverable completion, 2–8 team schedules and 1/1, 5/3, 9/6 custom inning/out boundaries and pitching denominators.
 - 30 real staging HTTP checks: codes, minimal directory, creation/retry/throttling, duplicate names, same-code league isolation, forged sessions, private/legacy access denial, ID substitution, recorder concurrency/handoff/expiry, stale writes, receipts, immutable rules, completion, revocation and setup-token consumption. See tests/BACKEND_RESULTS.md.
+- Nine additional real staging HTTP checks: previously expired grant migration, permanent creation retry/join/setup, forged and cross-league rejection, device-only leave, revoked creation retry rejection, all-device code rotation and single-use setup. Reproducible staging-only runner: tests/persistent-access.mjs.
+- Latest Chromium acceptance: 27 checks passed at https://github.com/Tingbing/wiffle-ball-league/actions/runs/37996482810 on e90be83ad81a72323aaddca8703d3c3e86681749, including all prior cases plus old locally expired grants, automatic reopening, failed-open Retry, same-profile new tabs and deliberate directory switching. Zero production requests and uncaught browser exceptions.
 - Representative private restore: every original league/game/receipt field matches after migration; source teams, players, schedule, statistics, live-game snapshots and relationships were preserved.
 - 23 Chromium acceptance checks: https://github.com/Tingbing/wiffle-ball-league/actions/runs/37971240292 . Includes full creation/roster/schedule/scoring/finish/stat workflow, phone, substitution/pitcher change, undo/error, box scores/rankings, wrong/correct codes, two-device handoff, same-device tabs, simultaneous Start, lost acknowledgments/offline recovery, back/forward/delayed-response isolation, search/error/Retry states, keyboard controls, and one-out overtime. No production requests or uncaught browser exceptions. See tests/BROWSER_RESULTS.md.
 - Production verification: eight non-destructive HTTP checks passed for the minimal directory and denial of legacy/forged private reads, forged edits and private table/view paths. Six deployed app files match the tested source by SHA-256: app.html, app.boot.js, app.leagues.js, core.sync.js, app.recording.js and app.game.play.js.
 - All applicable JavaScript syntax and git whitespace checks passed.
 
-The cloud browser rejected the initial local-file preview and the supported local supervisor could not mount proc. These were infrastructure/policy limits, not code failures; they were not bypassed. Browser acceptance subsequently ran successfully in a standard GitHub-hosted runner for this public repository. Native private HTTPS preview login/routing was not exercised by those tests. A final live cloud-browser observation remained restricted by credential protection after documented recovery; no successful live visual or owner-authenticated workflow is claimed.
+The cloud browser rejected the initial local-file preview and the supported local supervisor could not mount proc. These were infrastructure/policy limits, not code failures; they were not bypassed. Browser acceptance subsequently ran successfully in a standard GitHub-hosted runner for this public repository. Native private HTTPS preview login/routing was not exercised by those tests. The earlier live cloud-browser observation remained restricted by credential protection after documented recovery. The owner subsequently confirmed the app works; production confirms setup completed. Automated Chromium covers the updated app in staging, and the live deployment is verified by source hashes and non-destructive HTTP checks. No agent-authenticated production workflow is claimed.
 
 ## Production migrations and preservation
 
 Checked-in source:
 - supabase/migrations/20261009170646_multi_league_access.sql
 - supabase/migrations/20261009173146_directory_indexes.sql
+- supabase/migrations/20261009215433_persistent_device_access.sql
 
 Production tool-assigned versions:
 - 20261009181500 multi_league_access
 - 20261009181523 directory_indexes
+- 20261009215839 persistent_device_access
 
 The access transaction locked affected tables, asserted no data drift since the refreshed backup, applied the tested additive access changes and provisioned the private one-time setup hash. Indexing followed. Backend gates were verified before frontend merge. Old clients fail closed; legacy grants were never reopened.
 
@@ -72,11 +83,13 @@ Existing league ID 6767 remains stable. Exact original values were verified unch
 
 Private restorable data and full schema backups were saved outside GitHub. During construction of the isolated representative restore fixture, legacy execution grants were found open and immediately revoked; the fixture now revokes access before loading data. Production was unaffected. A focused staging logs query found zero matching requests in the checked window, which is not proof of complete logging. The representative fixture was then sealed: all its API execution grants revoked and test sessions removed. Do not reopen it to resume work.
 
-## Owner's next step
+## Using the finished app
 
-Use the privately supplied wiffle-existing-league-setup.txt file. It is active and the frontend is live. Open the existing league, expand one-time setup, enter that private token, choose an 8–64 byte shared code with a letter and number/symbol, and submit. The token is consumed once. Share only the chosen code with league members. Never put the setup token in URLs, chat, GitHub or a stats backup. No existing-league shared code was invented.
+Open https://tingbing.github.io/wiffle-ball-league/ on the same browser/device. Previously joined leagues retain their grants; open one once to establish its last-league startup preference. Subsequent visits reopen it without entering the code. “Switch league” preserves saved access; “Leave & revoke” removes it. Changing the shared code revokes all device grants. Clearing browser data or using a new browser/device requires the shared code again.
 
-Owner code entry and live visual review are the only outstanding handoff items. Device access is remembered for seven days. Everyone using the shared code has full management permissions, including confirmed season reset. Code changes revoke all device sessions. The existing data remains protected and intact while setup is pending.
+The existing league setup is complete. Its one-time setup file is historical and should not be reused. Everyone using the shared code has full management permissions, including confirmed season reset.
+
+The permanent-access production migration preserved the complete league/game/receipt/credential snapshots and the existing session identity; only expiry changed to NULL. Post-upgrade checks found zero expiring grants, zero API-role private table grants and no private tables without RLS. Security adviser findings were unchanged, including pre-existing legacy-function search-path and unused Supabase Auth configuration warnings. No paid upgrades or data resets were used.
 
 ## Recovery and resuming
 

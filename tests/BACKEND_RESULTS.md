@@ -38,3 +38,9 @@ Additional checks (real HTTP):
 
 SQL verification: exact original-column equality for restored league, games and receipts after migration; zero API table grants; RLS enabled on every private table; no application Realtime publication tables or Storage buckets. Indexed search pagination and literal percent/underscore handling pass.
 Browser acceptance has now passed 23 checks on GitHub Actions. See BROWSER_RESULTS.md. Production deployment succeeded after the acceptance gates. See IMPLEMENTATION_PROGRESS.md for preservation, live API checks and recovery.
+
+## Permanent device access upgrade
+
+Nine real HTTP checks passed against free staging using tests/persistent-access.mjs. A synthetic pre-upgrade grant was deliberately dated in 2000 before applying the additive migration. Its token was accepted afterward. Creation retry, join and one-time setup return expires_at: null. Forged/cross-league tokens remain denied; Leave removes only one device; a creation retry cannot resurrect a revoked grant; code rotation revokes all devices; setup tokens remain single use.
+
+Production upgraded existing grants in place. Full league/game/receipt/credential hashes and session identities matched immediately before and after; the existing session count remained one. Private RLS/grants stayed closed and security adviser findings did not increase. Eight non-destructive live API smoke checks passed. No valid production mutation or synthetic production fixture was used.
