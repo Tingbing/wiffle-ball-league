@@ -9,7 +9,7 @@
 	<meta http-equiv="Pragma" content="no-cache" />
 	<meta http-equiv="Expires" content="0" />
 	<title>Wiggle Ball League</title>
-<link rel="stylesheet" href="app.css?v=setup5">
+<link rel="stylesheet" href="app.css?v=series6">
 
 </head>
 
@@ -48,7 +48,7 @@
       <label>Innings per game<input id="createInnings" type="number" required min="1" max="9" step="1" value="3" data-wbl-input="2c1b7613e6cf"><small>1–9 innings</small></label>
       <label>Outs per half-inning<input id="createOuts" type="number" required min="1" max="6" step="1" value="2" data-wbl-input="2c1b7613e6cf"><small>1–6 outs</small></label>
     </div></fieldset>
-    <fieldset><legend>Season setup</legend><label>Season length (weeks)<input id="createWeeks" type="number" required min="1" max="52" step="1" value="6" data-wbl-input="2c1b7613e6cf"><small>1–52 weeks</small></label><p>One best-of-three series per team each week. Add teams and players inside your league, then create the schedule.</p></fieldset>
+    <fieldset><legend>Roster capacity</legend><label>Maximum players per team<input id="createMaxPlayers" type="number" required min="1" max="30" step="1" value="2" data-wbl-input="2c1b7613e6cf"><small>Capacity of 1–30; smaller rosters are welcome.</small></label></fieldset><fieldset><legend>Season setup</legend><label>Games per series<select id="createSeriesLength" data-wbl-change="2c1b7613e6cf"><option value="1">Best of 1</option><option value="3" selected>Best of 3</option><option value="5">Best of 5</option><option value="7">Best of 7</option><option value="9">Best of 9</option></select><small>One opponent per week. First to a majority wins.</small></label><label>Season length (weeks)<input id="createWeeks" type="number" required min="1" max="52" step="1" value="6" data-wbl-input="2c1b7613e6cf"><small>1–52 weeks</small></label><p>One best-of series per team each week; all games belong to that week. Add teams and players inside your league, then create the schedule.</p></fieldset>
     <details class="setup-notes"><summary>Schedule and postseason details</summary><p>Odd team counts have byes. Complete round-robin cycles are balanced; partial cycles may have unequal opponents or byes. The existing double-elimination postseason supports exactly four teams.</p><p>Overtime starts with a runner on second and one out. One-out leagues start overtime with zero outs.</p></details>
     <p id="createSummary" class="setup-summary" aria-live="polite"></p>
     <div class="wizard-actions"><button id="createSubmit">Create league</button><button id="createBack" type="button" class="secondary" data-wbl-click="6fb7aad68347">Back</button></div>
@@ -57,7 +57,7 @@
 </section>
 <section id="leagueSettingsScreen" class="directory-shell hidden">
   <button data-wbl-click="916694482531">← Main menu</button><h1>League settings</h1><p id="settingsMessage" role="status"></p>
-  <form data-wbl-submit="3c1b94318db3"><label>League name<input id="settingsName" required maxlength="80"></label><div class="form-grid"><label>Season length in weeks<input id="settingsWeeks" type="number" min="1" max="52" required></label><label>Innings per game<input id="settingsInnings" type="number" min="1" max="9" required></label><label>Outs per half-inning<input id="settingsOuts" type="number" min="1" max="6" required></label></div><button>Save settings</button></form>
+  <form data-wbl-submit="3c1b94318db3"><label>League name<input id="settingsName" required maxlength="80"></label><div class="form-grid"><label>Season length in weeks<input id="settingsWeeks" type="number" min="1" max="52" required></label><label>Innings per game<input id="settingsInnings" type="number" min="1" max="9" required></label><label>Outs per half-inning<input id="settingsOuts" type="number" min="1" max="6" required></label></div><label>Maximum players per team<input id="settingsMaxPlayers" type="number" required min="1" max="30" step="1" value="2" data-wbl-input="2c1b7613e6cf"><small>Capacity of 1–30; smaller rosters are welcome.</small></label><label>Games per series<select id="settingsSeriesLength" data-wbl-change="2c1b7613e6cf"><option value="1">Best of 1</option><option value="3" selected>Best of 3</option><option value="5">Best of 5</option><option value="7">Best of 7</option><option value="9">Best of 9</option></select><small>One opponent per week. First to a majority wins.</small></label><button>Save settings</button></form>
   <h2>Change shared code</h2><form data-wbl-submit="7ca28eebc840"><label>New shared code<input id="newCode" type="password" minlength="8" maxlength="64" required autocomplete="new-password"></label><button>Change code &amp; revoke all sessions</button><p id="codeMessage" role="alert"></p></form>
 </section>
 
@@ -76,7 +76,7 @@
 
 <!-- MAIN MENU -->
 <div id="mainMenu" class="hidden">
-<div class="card"><h2 id="activeLeagueTitle"></h2><p id="activeLeagueRules"></p><button data-wbl-click="76e1a211d391">Switch leagues</button><button data-wbl-click="a53ca03881a7">League settings</button><button data-wbl-click="5e9db9692103">Leave &amp; revoke this device’s access</button></div>
+<div class="card league-header"><div><p class="eyebrow">YOUR LEAGUE</p><h2 id="activeLeagueTitle"></h2><p id="activeLeagueRules"></p></div><div class="league-menu"><button id="leagueMenuButton" type="button" aria-label="League menu" aria-expanded="false" aria-controls="leagueMenuItems" aria-haspopup="menu">League menu ▾</button><div id="leagueMenuItems" class="hidden" role="menu" aria-label="League management"><button role="menuitem" data-wbl-click="a53ca03881a7">League settings</button><button role="menuitem" data-wbl-click="76e1a211d391">Switch leagues</button><hr><button role="menuitem" class="destructive" data-wbl-click="5e9db9692103">Leave &amp; revoke device access</button></div></div></div><div id="dashboardSummary" class="card"></div>
 <div id="leagueReadyState" class="card hidden" role="status"><h3>Your league is ready. Add your teams to get started.</h3><p>Teams and players save as you go. Create your schedule when at least two teams have players.</p><button data-wbl-click="9e69d2212de1">Add teams</button></div>
 <div id="connectionMessage" class="card" role="status">Connecting…</div>
 <div id="liveGameList" class="card"></div>
@@ -87,8 +87,8 @@
 	</div>
 	
 	<div class="card">
-		<h3>Welcome to Wiffle Ball!</h3>
-		<p>Manage your league teams and play games</p>
+		<h3>Play and manage</h3>
+		<p>Start a game, check this week’s matchups, or explore your league’s stats.</p>
 		
 		<button class="menu-button" data-wbl-click="9e69d2212de1">
 			⚙️ Teams
@@ -162,7 +162,7 @@
 		<h3>Add Player (Max 2 Per Team)</h3>
 		<select id="teamSelect"></select>
 		<label for="playerName">Player name</label><input id="playerName" placeholder="Player Name" maxlength="60">
-		<button id="addPlayerButton" data-wbl-click="ba9344494226">Add Player</button>
+		<button id="addPlayerButton" data-wbl-click="ba9344494226">Add Player</button><p id="rosterCapacityNotice" role="status"></p>
 	</div>
 
 <div class="card">
@@ -399,7 +399,7 @@
 </div>
 	
 <!-- GAME OVER SCREEN -->
-<div id="gameOverScreen" class="hidden">
+<div id="gameOverScreen" class="hidden"><p class="stats-scope-note">IP is decimal league innings from actual outs and each game’s saved out rule. ERA is an estimate: error-free inning reconstruction is unavailable. K/3 remains strikeouts per three league innings. WHIP is unavailable for games without recorded hits/walks allowed.</p>
 	<button class="back-button" data-wbl-click="916694482531">← Back to Main Menu</button>
 	
 	<div id="winnerBanner" class="winner-banner"></div>
@@ -422,7 +422,7 @@
 </div>
 
 <!-- SEASON STATS SCREEN -->
-<div id="seasonStatsScreen" class="hidden">
+<div id="seasonStatsScreen" class="hidden"><p class="stats-scope-note">IP is decimal league innings from actual outs and each game’s saved out rule. ERA is an estimate: error-free inning reconstruction is unavailable. K/3 remains strikeouts per three league innings. WHIP is unavailable for games without recorded hits/walks allowed.</p>
 	<button class="back-button" data-wbl-click="916694482531">← Back to Main Menu</button>
 
 	<h2>📊 Season Statistics</h2>
@@ -458,28 +458,28 @@
 	</div>
 </div>
 
-<div id="playerStatsScreen" class="hidden">
+<div id="playerStatsScreen" class="hidden"><p class="stats-scope-note">IP is decimal league innings from actual outs and each game’s saved out rule. ERA is an estimate: error-free inning reconstruction is unavailable. K/3 remains strikeouts per three league innings. WHIP is unavailable for games without recorded hits/walks allowed.</p>
 	<button class="back-button" data-wbl-click="7536c2b5b9d1">← Back to Season Stats</button>
 
 	<h2>👤 Player Stats</h2>
 	<div id="playerStatsContainer"></div>
 </div>
 
-<div id="teamStatsScreen" class="hidden">
+<div id="teamStatsScreen" class="hidden"><p class="stats-scope-note">IP is decimal league innings from actual outs and each game’s saved out rule. ERA is an estimate: error-free inning reconstruction is unavailable. K/3 remains strikeouts per three league innings. WHIP is unavailable for games without recorded hits/walks allowed.</p>
 	<button class="back-button" data-wbl-click="7536c2b5b9d1">← Back to Season Stats</button>
 
 	<h2>📋 Team Stats</h2>
 	<div id="teamStatsContainer"></div>
 </div>
 
-<div id="rankingsScreen" class="hidden">
+<div id="rankingsScreen" class="hidden"><p class="stats-scope-note">IP is decimal league innings from actual outs and each game’s saved out rule. ERA is an estimate: error-free inning reconstruction is unavailable. K/3 remains strikeouts per three league innings. WHIP is unavailable for games without recorded hits/walks allowed.</p>
 	<button class="back-button" data-wbl-click="7536c2b5b9d1">← Back to Season Stats</button>
 
 	<h2>🏆 Rankings</h2>
 	<div id="rankingsContainer"></div>
 </div>
 
-<div id="pastGameLogScreen" class="hidden">
+<div id="pastGameLogScreen" class="hidden"><p class="stats-scope-note">IP is decimal league innings from actual outs and each game’s saved out rule. ERA is an estimate: error-free inning reconstruction is unavailable. K/3 remains strikeouts per three league innings. WHIP is unavailable for games without recorded hits/walks allowed.</p>
 	<button class="back-button" data-wbl-click="7536c2b5b9d1">← Back to Season Stats</button>
 
 	<h2>🗂️ Past Game Log</h2>
@@ -494,23 +494,23 @@
 </div>
 <!-- SCHEDULE SCREEN -->
 
-<script src="core.state.js?v=setup5"></script>
-<script src="core.sync.js?v=setup5"></script>
-<script src="core.schedule.js?v=setup5"></script>
-<script src="core.stats.js?v=setup5"></script>
-<script src="core.ui.js?v=setup5"></script>
-<script src="app.game.state.js?v=setup5"></script>
-<script src="app.game.autosave.js?v=setup5"></script>
-<script src="app.game.runners.js?v=setup5"></script>
-<script src="app.game.rules.js?v=setup5"></script>
-<script src="app.game.ui.js?v=setup5"></script>
-<script src="app.game.play.js?v=setup5"></script>
-<script src="app.game.save.js?v=setup5"></script>
-<script src="app.game.views.js?v=setup5"></script>
-<script src="app.recording.js?v=setup5"></script>
-<script src="app.leagues.js?v=setup5"></script>
-<script src="app.events.js?v=setup5"></script>
-<script src="app.boot.js?v=setup5"></script>
+<script src="core.state.js?v=series6"></script>
+<script src="core.sync.js?v=series6"></script>
+<script src="core.schedule.js?v=series6"></script>
+<script src="core.stats.js?v=series6"></script>
+<script src="core.ui.js?v=series6"></script>
+<script src="app.game.state.js?v=series6"></script>
+<script src="app.game.autosave.js?v=series6"></script>
+<script src="app.game.runners.js?v=series6"></script>
+<script src="app.game.rules.js?v=series6"></script>
+<script src="app.game.ui.js?v=series6"></script>
+<script src="app.game.play.js?v=series6"></script>
+<script src="app.game.save.js?v=series6"></script>
+<script src="app.game.views.js?v=series6"></script>
+<script src="app.recording.js?v=series6"></script>
+<script src="app.leagues.js?v=series6"></script>
+<script src="app.events.js?v=series6"></script>
+<script src="app.boot.js?v=series6"></script>
 
 
 

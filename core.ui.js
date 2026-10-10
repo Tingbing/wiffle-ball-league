@@ -44,7 +44,7 @@ function showMainMenu() {
   }
   if(!recording.pending) { game=null; recording.row=null; }
   hideAllScreens(); document.getElementById("mainMenu").classList.remove("hidden");
-  updatePublicAccessUI(); renderLiveGameList(); document.getElementById("leagueReadyState").classList.toggle("hidden",league.teams.length>0);
+  renderDashboardSummary(); updatePublicAccessUI(); renderLiveGameList(); document.getElementById("leagueReadyState").classList.toggle("hidden",league.teams.length>0);
 }
 
 function showTeamConfig() {
@@ -299,7 +299,7 @@ async function addPlayer() {
   const team=league.teams[Number(document.getElementById('teamSelect').value)];
   const name=document.getElementById('playerName').value.replace(/\s+/g,' ').trim();
   if(!team || !name) return false;
-  if(team.players.length>=MAX_PLAYERS_PER_TEAM) return alert(`Maximum ${MAX_PLAYERS_PER_TEAM} players per team.`);
+  if(team.players.length>=rosterLimit()) return alert(`Maximum ${rosterLimit()} players per team.`);
   if(getAllPlayerNames().some(p=>p.toLowerCase()===name.toLowerCase())) return alert('That player already exists.');
   if(!confirmMidSeasonStructureChange('add this player')) return false;
   team.players.push(name); document.getElementById('playerName').value=''; update();
@@ -339,7 +339,7 @@ function update() {
 		select.appendChild(opt);
 	});
 
-	select.disabled=league.teams.length===0; document.getElementById("addPlayerButton").disabled=league.teams.length===0;
+	select.disabled=league.teams.length===0; updateRosterCapacityUI();
 	let list = document.getElementById("teamList");
 	list.innerHTML = "";
 
@@ -357,7 +357,7 @@ function update() {
 		});
 		if (playersHTML === "") playersHTML = "No players yet";
 
-		div.innerHTML = `<b>${escapeHtml(team.name)}</b> <button data-wbl-click="0f5f77e9d383" data-wbl-args='[${teamIndex}]'>Edit name</button> <button data-wbl-click="64b8f2f5cf6c" data-wbl-args='[${teamIndex}]'>Remove Team</button><br>Players:<br>${playersHTML}`;
+		div.innerHTML = `<b>${escapeHtml(team.name)}</b> <button data-wbl-click="0f5f77e9d383" data-wbl-args='[${teamIndex}]'>Edit name</button> <button data-wbl-click="64b8f2f5cf6c" data-wbl-args='[${teamIndex}]'>Remove Team</button><br>Active roster: ${team.players.length} / ${rosterLimit()} players<br>${playersHTML}`;
 		list.appendChild(div);
 	});
 
@@ -641,3 +641,11 @@ async function showSchedule() {
     } catch (e) {}
   }
 }
+
+function updateRosterCapacityUI() {
+ const select=document.getElementById('teamSelect'),button=document.getElementById('addPlayerButton');if(!select||!button)return;
+ const team=league.teams[Number(select.value)];const full=!!team&&team.players.length>=rosterLimit();button.disabled=!team||full;
+ button.title=full?`This team is at its maximum of ${rosterLimit()} active players. Remove a player or increase capacity for an unstarted season.`:'';
+ const note=document.getElementById('rosterCapacityNotice');if(note)note.textContent=team?`${team.players.length} / ${rosterLimit()} active roster players${full?' — team is at capacity.':''}`:'Add a team to begin.';
+}
+document.addEventListener('change',event=>{if(event.target.id==='teamSelect')updateRosterCapacityUI();});

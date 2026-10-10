@@ -1,0 +1,59 @@
+name: Series real staging acceptance
+on:
+  push:
+    branches: [codex/rosters-series-stats-2026-10-10]
+    paths: ['tests/**', '*.js', '*.html', '*.css', 'supabase/migrations/**', '.github/workflows/series-staging-acceptance.yml']
+permissions:
+  contents: read
+concurrency:
+  group: series-real-staging
+  cancel-in-progress: false
+jobs:
+  series-api:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: {node-version: '24'}
+      - run: node tests/series-backend.mjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: series-real-api-evidence
+          path: tests/SERIES_BACKEND_RESULTS.md
+  existing-api:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: {node-version: '24'}
+      - name: Real existing API regressions
+        run: |
+          node - <<'JS'
+          const fs=require('fs'),cp=require('child_process');
+          const source=fs.readFileSync('tests/browser.cjs','utf8');
+          const key=source.match(/const anon = '([^']+)'/)[1],url=source.match(/const staging = '([^']+)'/)[1];
+          const r=cp.spawnSync(process.execPath,['tests/backend.mjs'],{stdio:'inherit',env:{...process.env,WBL_TEST_URL:url,WBL_TEST_KEY:key}});process.exit(r.status||0);
+          JS
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: {name: existing-api-evidence, path: tests/BACKEND_RESULTS.md}
+  persistent-browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: {node-version: '24'}
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: node tests/browser.cjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: persistent-staging-browser-evidence
+          path: |
+            tests/setup-*.png
+            tests/BROWSER_RESULTS.md

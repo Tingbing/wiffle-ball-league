@@ -27,8 +27,27 @@ function ensureExtendedStatFields(stats) {
 }
 
 function getPitchingInningsValue(stats) {
-	const outs = Number(stats?.pitchOuts || 0);
-	return outs / Number(stats?.outsPerInning || 2);
+  if(Array.isArray(stats?.pitchingWorkload))return stats.pitchingWorkload.reduce((sum,w)=>sum+Number(w.outs||0)/Number(w.outsPerInning||2),0);
+  return Number(stats?.pitchOuts||0)/Number(stats?.outsPerInning||2);
+}
+function statInningsScale(stats, scope=null) { return Number(scope?.rules?.innings || stats?.regulationInnings || season?.rules?.innings || leagueSettings.innings || 3); }
+function pitchingRate(stats,field,scale=1) { const ip=getPitchingInningsValue(stats);return ip>0?Number(stats?.[field]||0)/ip*scale:null; }
+function eraValue(stats,scope=null) {return pitchingRate(stats,'earnedRunsAllowed',statInningsScale(stats,scope));}
+function whipValue(stats) {const ip=getPitchingInningsValue(stats);return ip>0&&stats?.pitchingCountsKnown===true?(Number(stats.pitchHitsAllowed||0)+Number(stats.pitchWalksAllowed||0))/ip:null;}
+function formatStatRate(value,digits=2) {return Number.isFinite(value)&&value!==null?value.toFixed(digits):'—';}
+function formatLeagueIP(stats) {return formatStatRate(getPitchingInningsValue(stats),3);}
+function aggregatePitchingLine(target,line) {
+  if(!Array.isArray(target.pitchingWorkload))target.pitchingWorkload=[{outs:Number(target.pitchOuts||0),outsPerInning:Number(target.outsPerInning||2)}];
+  const workload=line.pitchingWorkload || [{outs:Number(line.pitchOuts||0),outsPerInning:Number(line.outsPerInning||2)}];
+  for(const w of workload){let part=target.pitchingWorkload.find(p=>p.outsPerInning===Number(w.outsPerInning));if(!part){part={outs:0,outsPerInning:Number(w.outsPerInning)};target.pitchingWorkload.push(part);}part.outs+=Number(w.outs||0);}
+  target.pitchingCountsKnown=target.pitchingCountsKnown===true&&line.pitchingCountsKnown===true;
+  target.regulationInnings=Number(season?.rules?.innings||leagueSettings.innings||3);
+}
+function battingRates(stats) {
+  const ab=Number(stats.atBats||0),h=Number(stats.hits||0),bb=Number(stats.walks||0),hbp=Number(stats.hitByPitch||0);
+  const tb=Number(stats.singles||0)+2*Number(stats.doubles||0)+3*Number(stats.triples||0)+4*Number(stats.homeRuns||0);
+  const pa=ab+bb+hbp,avg=ab?h/ab:null,obp=pa?(h+bb+hbp)/pa:null,slg=ab?tb/ab:null;
+  return {pa,tb,avg,obp,slg,ops:obp!==null&&slg!==null?obp+slg:null};
 }
 
 function syncPitchingInnings(stats) {
@@ -132,7 +151,7 @@ function scoreExistingRunner(runner, totals, options = {}) {
 	if (!normalized) return;
 
 	const runnerStats = getRunnerGameStats(normalized, game?.batting);
-	if (runnerStats) runnerStats.runsScored += 1;
+	if (runnerStats && normalized.isAutomaticOvertimeRunner !== true) runnerStats.runsScored += 1;
 
 const isEarnedRun = !normalized.reachedOnError && normalized.isAutomaticOvertimeRunner !== true;
 
@@ -280,7 +299,7 @@ function advanceRunnersOnContact(bases, currentBatter, reachedOnError = false, p
 	function advanceExistingRunner(startBase, runner) {
 		if (!runner) return;
 		const endBase = startBase + bases;
-		if (endBase >= 4) scoreExistingRunner(runner, totals, { creditRbi: true });
+		if (endBase >= 4) scoreExistingRunner(runner, totals, { creditRbi: !reachedOnError });
 		else place(endBase, runner);
 	}
 

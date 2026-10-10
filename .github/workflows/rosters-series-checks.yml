@@ -1,0 +1,28 @@
+name: Roster series and stats checks
+on:
+  push:
+    branches: [codex/rosters-series-stats-2026-10-10]
+    paths: ['*.js', '*.html', '*.css', 'tests/**', 'package*.json', '.github/workflows/rosters-series-checks.yml', 'supabase/migrations/**']
+permissions:
+  contents: read
+jobs:
+  isolated-checks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: npm ci
+      - run: npm test
+      - run: npm run test:local-db
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:ui
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: rosters-series-ui-evidence
+          path: |
+            tests/series-*.png
+            tests/SERIES_UI_RESULTS.md

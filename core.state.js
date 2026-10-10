@@ -24,7 +24,8 @@ function currentRules() { return game?.rules || season?.rules || leagueSettings;
 function regulationInnings() { return Number(currentRules().innings || 3); }
 function outsPerHalf() { return Number(currentRules().outs || 2); }
 function leagueKey(kind) { return `wbl-v4:${LEAGUE_CODE}:${kind}`; }
-const MAX_PLAYERS_PER_TEAM = 2;
+function rosterLimit() { return Number(leagueSettings.maxPlayers ?? 2); }
+function configuredSeriesLength() { return Number(season?.rules?.seriesLength ?? leagueSettings.seriesLength ?? 3); }
     let season = { playerStats: {}, teamRecords: {}, seasonSubs: [], subStats: {}, games: [] };
 	let game = null;
 	let gameHistory = [];
@@ -167,14 +168,14 @@ function ensureScheduleShape(obj) {
 			const home = entry?.home || "";
 
 			if (Array.isArray(entry?.gamesInSeries)) {
-				const gamesInSeries = entry.gamesInSeries.slice(0, 3).map((slot, slotIndex) => ({
+				const gamesInSeries = entry.gamesInSeries.slice(0, Number(entry.bestOf || 3)).map((slot, slotIndex) => ({
 					gameNumber: Number(slot?.gameNumber || (slotIndex + 1)),
 					result: slot?.result || null,
 					skipped: slot?.skipped && typeof slot.skipped === "object" ? { ...slot.skipped } : null,
 					subAssignments: Array.isArray(slot?.subAssignments) ? slot.subAssignments.map(a => ({ ...a })) : []
 				}));
 
-				while (gamesInSeries.length < 3) {
+				while (gamesInSeries.length < Number(entry.bestOf || 3)) {
 					gamesInSeries.push(createSeriesGameSlot(gamesInSeries.length + 1));
 				}
 
@@ -195,7 +196,8 @@ function ensureScheduleShape(obj) {
 				return normalized;
 			}
 
-			const migrated = createSeriesEntry(away, home, seriesNumber);
+			const migrated = createSeriesEntry(away, home, seriesNumber, 3);
+			delete migrated.bestOf; // Keep legacy schedule completion semantics.
 			migrated.subAssignments = Array.isArray(entry?.subAssignments) ? entry.subAssignments.map(a => ({ ...a })) : [];
 
 			if (entry?.result) {

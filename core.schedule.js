@@ -38,7 +38,7 @@ function getScheduleConfigForTeamCount(teamCount) {
     const n=Number(teamCount);
     if(!Number.isInteger(n) || n<2 || n>8) return null;
     const weeks=Number(season?.rules?.weeks || leagueSettings.weeks || 6);
-    return {id:"round_robin_weeks",teamCount:n,totalDays:weeks,seriesPerDay:Math.floor(n/2),description:`${weeks} weeks • ${n} teams • one best-of-three series per team/week${n%2?" • one bye each week":""}`};
+    return {id:"round_robin_weeks",teamCount:n,totalDays:weeks,seriesPerDay:Math.floor(n/2),description:`${weeks} weeks • ${n} teams • one best-of-${configuredSeriesLength()} series per team/week${n%2?" • one bye each week":""}`};
   }
 	if (Number(teamCount) === 4) {
 		return {
@@ -76,16 +76,15 @@ function createSeriesGameSlot(gameNumber, result = null) {
 	return { gameNumber, result, skipped: null, subAssignments: [] };
 }
 
-function createSeriesEntry(away, home, seriesNumber) {
+function createSeriesEntry(away, home, seriesNumber, bestOf = configuredSeriesLength()) {
+	if(![1,3,5,7,9].includes(bestOf))throw new Error("Use a best-of setting of 1, 3, 5, 7 or 9.");
 	return {
 		gameNumber: seriesNumber, // keeps the schedule screen looking the same
 		away,
 		home,
-		gamesInSeries: [
-			createSeriesGameSlot(1),
-			createSeriesGameSlot(2),
-			createSeriesGameSlot(3)
-		],
+		bestOf,
+		rules: deepCloneJson(season?.rules || leagueSettings),
+		gamesInSeries: Array.from({length:bestOf},(_,i)=>createSeriesGameSlot(i+1)),
 		subAssignments: [],
 		result: null // final series result only
 	};
@@ -104,6 +103,7 @@ function isSeriesGameResolved(seriesGame) {
 }
 
 function getSeriesEarlyEndCandidate(seriesEntry) {
+	if(seriesEntry?.bestOf)return null; // New series clinch automatically.
 	const games = Array.isArray(seriesEntry?.gamesInSeries) ? seriesEntry.gamesInSeries : [];
 	const game1 = games[0];
 	const game2 = games[1];
@@ -130,6 +130,33 @@ function canEndSeriesEarly(seriesEntry) {
 }
 
 function computeSeriesResult(seriesEntry) {
+  if (!seriesEntry?.bestOf) return computeLegacySeriesResult(seriesEntry);
+  const n=Number(seriesEntry.bestOf), needed=(n+1)/2;
+  if (![1,3,5,7,9].includes(n)) return null;
+  let awayWins=0,homeWins=0;
+  for(const slot of seriesEntry.gamesInSeries || []) {
+    if(slot?.result?.type!=='win') continue;
+    if(slot.result.winner===seriesEntry.away) awayWins++;
+    if(slot.result.winner===seriesEntry.home) homeWins++;
+  }
+  if(Math.max(awayWins,homeWins)<needed) return null;
+  const winner=awayWins>homeWins?seriesEntry.away:seriesEntry.home;
+  return {type:'win',winner,loser:winner===seriesEntry.away?seriesEntry.home:seriesEntry.away,
+    winnerGames:Math.max(awayWins,homeWins),loserGames:Math.min(awayWins,homeWins),tieGames:0,
+    playedAt:Math.max(0,...seriesEntry.gamesInSeries.map(g=>Number(g?.result?.playedAt||0))),endedEarly:awayWins+homeWins<n};
+}
+function reconcileSeriesClinch(entry) {
+  if(!entry?.bestOf)return entry;
+  entry.result=computeSeriesResult(entry);
+  for(const slot of entry.gamesInSeries || []) {
+    if(slot.result)continue;
+    if(entry.result)slot.skipped={reason:'series_clinched',winner:entry.result.winner,loser:entry.result.loser,gameNumber:slot.gameNumber};
+    else if(slot.skipped?.reason==='series_clinched')slot.skipped=null;
+  }
+  return entry;
+}
+
+function computeLegacySeriesResult(seriesEntry) {
 	if (!seriesEntry || !Array.isArray(seriesEntry.gamesInSeries)) return null;
 
 	const playedGames = seriesEntry.gamesInSeries.filter(g => g && g.result);
@@ -603,7 +630,7 @@ function isScheduleCurrentFormat(scheduleObj, teamNames) {
 		return validateSingleRoundRobin5(scheduleObj, normalizedTeamNames);
 	}
 
-	if(config.id==="round_robin_weeks") return scheduleObj.days.every(day=> day.games?.length===Math.floor(teamNames.length/2) && new Set(day.games.flatMap(e=>[e.away,e.home])).size===2*day.games.length && day.games.every(e=>teamNames.includes(e.away) && teamNames.includes(e.home) && e.gamesInSeries?.length===3));
+	if(config.id==="round_robin_weeks") return scheduleObj.days.every(day=> day.games?.length===Math.floor(teamNames.length/2) && new Set(day.games.flatMap(e=>[e.away,e.home])).size===2*day.games.length && day.games.every(e=>teamNames.includes(e.away) && teamNames.includes(e.home) && e.gamesInSeries?.length===Number(e.bestOf || 3)));
 	return false;
 }
 
@@ -796,7 +823,8 @@ function hasRecordedScheduleResults(scheduleObj = schedule) {
 
 function hasRecordedSeasonGames() {
 	return hasRecordedScheduleResults(schedule)
-		|| ((season?.games || []).some(entry => !!entry));
+		|| ((season?.games || []).some(entry => !!entry))
+        || [...Object.values(season?.playerStats || {}),...Object.values(season?.subStats || {})].some(line=>STATS_BACKUP_NUMERIC_FIELDS.some(k=>Number(line[k] || 0)>0));
 }
 
 function getScheduleGuardState() {
@@ -1182,7 +1210,7 @@ function getScheduleSeriesStatusMeta(seriesEntry) {
 
 	if (completedCount > 0) {
 		return {
-			text: `${completedCount} of 3 games played`,
+			text: `Best of ${seriesEntry.bestOf || 3} · In progress · ${completedCount} games played`,
 			className: "schedule-series-status is-partial"
 		};
 	}
@@ -1608,9 +1636,9 @@ function populateScheduleGameSelect() {
 		if (btn) btn.disabled = true;
 
 		if ((seriesEntry.gamesInSeries || []).some(seriesGame => isSeriesGameSkipped(seriesGame))) {
-			if (hint) hint.innerText = "This series ended early. Game 3 was marked not played.";
+			if (hint) hint.innerText = "This series is clinched. Remaining games are not needed.";
 		} else {
-			if (hint) hint.innerText = "All 3 games in that series are already recorded.";
+			if (hint) hint.innerText = "All games in that series are resolved.";
 		}
 	} else {
 		gameSelect.disabled = false;
@@ -1619,7 +1647,7 @@ function populateScheduleGameSelect() {
 		const completedCount = countCompletedSeriesGames(seriesEntry);
 		if (hint) {
 			hint.innerText = completedCount > 0
-				? `${completedCount} of 3 games already recorded for this series.`
+				? `${completedCount} of ${seriesEntry.bestOf || 3} games already recorded for this series.`
 				: "";
 		}
 	}

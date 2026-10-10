@@ -30,7 +30,7 @@ function createBattingStatsTable(team, isSeason) {
 			if (!isSeason && game?.gameStats) game.gameStats[key] = stats;
 		}
 
-		const avg = stats.atBats > 0 ? (stats.hits / stats.atBats).toFixed(3) : ".000";
+		const avg = stats.atBats > 0 ? (stats.hits / stats.atBats).toFixed(3) : "—";
 
 		const values = [
 			getDisplayNameForPlayer(team, player, isSeason),
@@ -63,7 +63,7 @@ function createPitchingStatsTable(team, isSeason) {
 	const table = document.createElement("table");
 	table.className = "stats-table responsive";
 
-	const headers = ["Player", "IP", "K's", "K/3", "Outs", "R", "ER", "ERA", "Errors"];
+	const headers = ["Player", "IP (decimal)", "K's", "K/3", "Outs", "R", "ER (est.)", `ERA (est., per ${statInningsScale(null)} innings)`, "WHIP", "Errors"];
 
 	const thead = document.createElement("thead");
 	const trh = document.createElement("tr");
@@ -88,22 +88,23 @@ function createPitchingStatsTable(team, isSeason) {
 
 const innings = getPitchingInningsValue(stats);
 const era = innings > 0
-	? ((stats.earnedRunsAllowed / innings) * 3).toFixed(2)
+	? formatStatRate(eraValue(stats))
 	: "-";
 
 const kPer3 = innings > 0
-	? ((stats.pitchStrikeouts / innings) * 3).toFixed(2)
+	? formatStatRate(pitchingRate(stats,'pitchStrikeouts',3))
 	: "-";
 
 const values = [
 	getDisplayNameForPlayer(team, player, isSeason),
-	innings.toFixed(1),
+	formatStatRate(innings,3),
 			stats.pitchStrikeouts,
 			kPer3,
 			stats.pitchOuts,
 			stats.runsAllowed,
 			stats.earnedRunsAllowed,
 			era,
+			formatStatRate(whipValue(stats)),
 			stats.fieldingErrors
 		];
 
@@ -138,7 +139,7 @@ function createSubBattingStatsTable(subEntries) {
 
 	const tbody = document.createElement("tbody");
 	(subEntries || []).forEach(stats => {
-		const avg = stats.atBats > 0 ? (stats.hits / stats.atBats).toFixed(3) : ".000";
+		const avg = stats.atBats > 0 ? (stats.hits / stats.atBats).toFixed(3) : "—";
 		const values = [stats.playerName, avg, stats.hits, stats.singles, stats.doubles, stats.triples, stats.homeRuns, stats.rbis, stats.atBats];
 
 		const tr = document.createElement("tr");
@@ -159,7 +160,7 @@ function createSubPitchingStatsTable(subEntries) {
 	const table = document.createElement("table");
 	table.className = "stats-table responsive";
 
-	const headers = ["Player", "IP", "K's", "K/3", "Outs", "R", "ER", "ERA", "Errors"];
+	const headers = ["Player", "IP (decimal)", "K's", "K/3", "Outs", "R", "ER (est.)", `ERA (est., per ${statInningsScale(null)} innings)`, "WHIP", "Errors"];
 	const thead = document.createElement("thead");
 	const trh = document.createElement("tr");
 	headers.forEach(h => {
@@ -173,18 +174,19 @@ function createSubPitchingStatsTable(subEntries) {
 	const tbody = document.createElement("tbody");
 	(subEntries || []).forEach(stats => {
 		const innings = getPitchingInningsValue(stats);
-const era = innings > 0 ? ((stats.earnedRunsAllowed / innings) * 3).toFixed(2) : "-";
-const kPer3 = innings > 0 ? ((stats.pitchStrikeouts / innings) * 3).toFixed(2) : "-";
+const era = innings > 0 ? formatStatRate(eraValue(stats)) : "-";
+const kPer3 = innings > 0 ? formatStatRate(pitchingRate(stats,'pitchStrikeouts',3)) : "-";
 
 const values = [
 	stats.playerName,
-	innings.toFixed(1),
+	formatStatRate(innings,3),
 			stats.pitchStrikeouts,
 			kPer3,
 			stats.pitchOuts,
 			stats.runsAllowed,
 			stats.earnedRunsAllowed,
 			era,
+			formatStatRate(whipValue(stats)),
 			stats.fieldingErrors
 		];
 
@@ -290,43 +292,20 @@ function getSeasonPlayerStatsForOption(option) {
 }
 
 function getSeasonTeamTotals(team) {
-	const totals = createEmptyStats(team?.name || "", team?.name || "", { isSub: false });
-	const statKeys = [
-		"atBats",
-		"hits",
-		"singles",
-		"doubles",
-		"triples",
-		"homeRuns",
-		"walks",
-		"hitByPitch",
-		"strikeouts",
-		"outs",
-		"rbis",
-		"runsScored",
-		"pitchOuts",
-		"pitchStrikeouts",
-		"fieldingErrors",
-		"inningsPitched",
-		"runsAllowed",
-		"earnedRunsAllowed"
-	];
-
-	const seenPlayers = new Set();
-	(team?.players || []).forEach(playerName => {
-		const normalizedPlayerName = String(playerName || "").trim();
-		if (!normalizedPlayerName || seenPlayers.has(normalizedPlayerName)) return;
-		seenPlayers.add(normalizedPlayerName);
-
-		const playerStats = season.playerStats?.[getPlayerKey(team.name, normalizedPlayerName)]
-			|| createEmptyStats(team.name, normalizedPlayerName, { isSub: false });
-
-		statKeys.forEach(key => {
-			totals[key] = Number(totals[key] || 0) + Number(playerStats[key] || 0);
-		});
-	});
-
-	return totals;
+  const totals=createEmptyStats(team?.name||'',team?.name||'');
+  const seen=new Set();
+  for(const line of Object.values(season.playerStats||{}).filter(s=>s.teamName===team.name)){
+    aggregatePitchingLine(totals,line);
+    for(const key of STATS_BACKUP_NUMERIC_FIELDS)totals[key]+=Number(line[key]||0);
+  }
+  for(const entry of season.games||[]){
+    if(entry.postseasonRef||entry.seasonPhase==='postseason'||seen.has(entry.id))continue;seen.add(entry.id);
+    for(const line of entry.playerStats||[]){
+      if(!line.isSub||!entry.lineups?.[team.name]?.includes(line.playerName))continue;
+      aggregatePitchingLine(totals,line);for(const key of STATS_BACKUP_NUMERIC_FIELDS)totals[key]+=Number(line[key]||0);
+    }
+  }
+  syncPitchingInnings(totals);return totals;
 }
 
 function getSeasonTeamRankings(teamsForDisplay) {
@@ -357,7 +336,7 @@ function getSeasonTeamRankings(teamsForDisplay) {
 	let lastRank = 0;
 	let lastRankKey = "";
 	return sorted.map((entry, index) => {
-		const rankKey = `${entry.wins}-${entry.losses}-${Number(entry.avgMargin || 0).toFixed(3)}`;
+		const rankKey = `${entry.wins}-${entry.losses}-${Number(entry.avgMargin || 0)}`;
 		if (rankKey !== lastRankKey) {
 			lastRank = index + 1;
 			lastRankKey = rankKey;
@@ -462,10 +441,10 @@ function createSeasonPlayerDetails(option) {
 	}
 
 	const stats = getSeasonPlayerStatsForOption(option);
-const battingAvg = stats.atBats > 0 ? (stats.hits / stats.atBats).toFixed(3) : ".000";
+const battingAvg = stats.atBats > 0 ? (stats.hits / stats.atBats).toFixed(3) : "—";
 const innings = getPitchingInningsValue(stats);
-const era = innings > 0 ? ((stats.earnedRunsAllowed / innings) * 3).toFixed(2) : "-";
-const kPer3 = innings > 0 ? ((stats.pitchStrikeouts / innings) * 3).toFixed(2) : "-";
+const era = innings > 0 ? formatStatRate(eraValue(stats)) : "-";
+const kPer3 = innings > 0 ? formatStatRate(pitchingRate(stats,'pitchStrikeouts',3)) : "-";
 
 	const header = document.createElement("div");
 	header.className = "season-stats-selection-header";
@@ -496,13 +475,14 @@ const kPer3 = innings > 0 ? ((stats.pitchStrikeouts / innings) * 3).toFixed(2) :
 	pitchingCard.className = "card";
 	pitchingCard.innerHTML = '<h4>Pitching Stats</h4>';
 	pitchingCard.appendChild(buildSeasonStatsMetricGrid([
-		{ label: "IP", value: innings.toFixed(1) },
+		{ label: "IP (decimal)", value: formatStatRate(innings,3) },
 		{ label: "Outs", value: stats.pitchOuts },
 		{ label: "K's", value: stats.pitchStrikeouts },
 		{ label: "K/3", value: kPer3 },
 		{ label: "R", value: stats.runsAllowed },
-		{ label: "ER", value: stats.earnedRunsAllowed },
-		{ label: "ERA", value: era },
+		{ label: "ER (est.)", value: stats.earnedRunsAllowed },
+		{ label: `ERA (est., per ${statInningsScale(null)} innings)`, value: era },
+		{ label: "WHIP", value: formatStatRate(whipValue(stats)) },
 		{ label: "Errors", value: stats.fieldingErrors }
 	]));
 	wrap.appendChild(pitchingCard);
@@ -523,15 +503,15 @@ function createSeasonTeamDetails(team, rankings) {
 	const wins = Number(record.wins || 0);
 	const losses = Number(record.losses || 0);
 	const totalGames = wins + losses;
-	const winRate = totalGames > 0 ? wins / totalGames : 0;
+	const winRate = totalGames > 0 ? wins / totalGames : null;
 	const rankedTeam = (rankings || []).find(entry => entry.teamName === team.name) || null;
 	const teamRank = rankedTeam?.rank || "-";
 	const avgMargin = rankedTeam ? rankedTeam.avgMargin : 0;
 	const totals = getSeasonTeamTotals(team);
-	const battingAvg = Number(totals.atBats || 0) > 0 ? (Number(totals.hits || 0) / Number(totals.atBats || 0)).toFixed(3) : ".000";
+	const battingAvg = Number(totals.atBats || 0) > 0 ? (Number(totals.hits || 0) / Number(totals.atBats || 0)).toFixed(3) : "—";
 	const innings = getPitchingInningsValue(totals);
-	const era = innings > 0 ? ((Number(totals.earnedRunsAllowed || 0) / innings) * 3).toFixed(2) : "-";
-	const kPer3 = innings > 0 ? ((Number(totals.pitchStrikeouts || 0) / innings) * 3).toFixed(2) : "-";
+	const era = innings > 0 ? formatStatRate(eraValue(totals)) : "-";
+	const kPer3 = innings > 0 ? formatStatRate(pitchingRate(totals,'pitchStrikeouts',3)) : "-";
 
 	const header = document.createElement("div");
 	header.className = "season-stats-selection-header";
@@ -546,7 +526,7 @@ function createSeasonTeamDetails(team, rankings) {
 	summaryCard.innerHTML = '<h4>Team Summary</h4>';
 	summaryCard.appendChild(buildSeasonStatsMetricGrid([
 		{ label: "Record", value: `${wins}-${losses}` },
-		{ label: "Win Rate", value: formatSeasonStatsPercent(winRate) },
+		{ label: "Win Rate", value: winRate===null?"—":formatSeasonStatsPercent(winRate) },
 		{ label: "Avg Margin", value: totalGames > 0 ? formatSeasonStatsSignedNumber(avgMargin, 1) : "-" },
 		{ label: "League Rank", value: `#${teamRank}` }
 	]));
@@ -578,13 +558,14 @@ function createSeasonTeamDetails(team, rankings) {
 	pitchingCard.className = "card";
 	pitchingCard.innerHTML = '<h4>Team Pitching Summary</h4>';
 	pitchingCard.appendChild(buildSeasonStatsMetricGrid([
-		{ label: "IP", value: innings.toFixed(1) },
+		{ label: "IP (decimal)", value: formatStatRate(innings,3) },
 		{ label: "Outs", value: totals.pitchOuts },
 		{ label: "K's", value: totals.pitchStrikeouts },
 		{ label: "K/3", value: kPer3 },
 		{ label: "R", value: totals.runsAllowed },
-		{ label: "ER", value: totals.earnedRunsAllowed },
-		{ label: "ERA", value: era },
+		{ label: "ER (est.)", value: totals.earnedRunsAllowed },
+		{ label: `ERA (est., per ${statInningsScale(null)} innings)`, value: era },
+		{ label: "WHIP", value: formatStatRate(whipValue(totals)) },
 		{ label: "Errors", value: totals.fieldingErrors }
 	]));
 	wrap.appendChild(pitchingCard);
@@ -946,16 +927,16 @@ function displayRankings() {
 	pitchingGrid.appendChild(createRankingsTable("K/3", players, {
 getValue: stats => {
 	const innings = getPitchingInningsValue(stats);
-	return innings > 0 ? (stats.pitchStrikeouts / innings) * 3 : NaN;
+	return innings > 0 ? pitchingRate(stats,'pitchStrikeouts',3) : NaN;
 },
 isEligible: stats => getPitchingInningsValue(stats) > 0,
 		formatValue: value => value.toFixed(2)
 	}));
 
-	pitchingGrid.appendChild(createRankingsTable("ERA", players, {
+	pitchingGrid.appendChild(createRankingsTable(`ERA (est., per ${statInningsScale(null)} innings)`, players, {
 	getValue: stats => {
 		const innings = getPitchingInningsValue(stats);
-		return innings > 0 ? (stats.earnedRunsAllowed / innings) * 3 : NaN;
+		return innings > 0 ? eraValue(stats) : NaN;
 	},
 	isEligible: stats => getPitchingInningsValue(stats) > 0,
 	lowerIsBetter: true,
@@ -972,7 +953,7 @@ isEligible: stats => getPitchingInningsValue(stats) > 0,
 	pitchingGrid.appendChild(createRankingsTable("Total Innings Pitched", players, {
 		getValue: stats => getPitchingInningsValue(stats),
 isEligible: stats => getPitchingInningsValue(stats) > 0,
-		formatValue: value => value.toFixed(1)
+		formatValue: value => value.toFixed(3)
 	}));
 
 	pitchingSection.appendChild(pitchingGrid);
@@ -1718,7 +1699,7 @@ function createPastGameBattingTable(entry, teamName) {
 	const headers = ["Player", "AVG", "AB", "H", "1B", "2B", "3B", "HR", "RBI", "BB", "K"];
 
 	const rows = teamStats.map(stats => {
-		const avg = Number(stats.atBats || 0) > 0 ? (Number(stats.hits || 0) / Number(stats.atBats || 0)).toFixed(3) : ".000";
+		const avg = Number(stats.atBats || 0) > 0 ? (Number(stats.hits || 0) / Number(stats.atBats || 0)).toFixed(3) : "—";
 		return [
 			getPastGamePlayerDisplayName(stats),
 			avg,
@@ -1746,21 +1727,22 @@ function createPastGamePitchingTable(entry, teamName) {
 		Number(stats.earnedRunsAllowed || 0) > 0
 	);
 	const rowsSource = teamStats.length ? teamStats : allTeamStats;
-	const headers = ["Player", "IP", "K's", "K/3", "R", "ER", "ERA", "Errors"];
+	const headers = ["Player", "IP (decimal)", "K's", "K/3", "R", "ER (est.)", `ERA (est., per ${statInningsScale(null,entry)} innings)`, "WHIP", "Errors"];
 
 	const rows = rowsSource.map(stats => {
 		const innings = getPitchingInningsValue(stats);
-		const kPer3 = innings > 0 ? ((Number(stats.pitchStrikeouts || 0) / innings) * 3).toFixed(2) : "-";
-		const era = innings > 0 ? ((Number(stats.earnedRunsAllowed || 0) / innings) * 3).toFixed(2) : "-";
+		const kPer3 = innings > 0 ? formatStatRate(pitchingRate(stats,'pitchStrikeouts',3)) : "-";
+		const era = innings > 0 ? formatStatRate(eraValue(stats,entry)) : "-";
 
 		return [
 			getPastGamePlayerDisplayName(stats),
-			innings.toFixed(1),
+			formatStatRate(innings,3),
 			stats.pitchStrikeouts,
 			kPer3,
 			stats.runsAllowed,
 			stats.earnedRunsAllowed,
 			era,
+			formatStatRate(whipValue(stats)),
 			stats.fieldingErrors
 		];
 	});
@@ -2148,8 +2130,10 @@ const MANUAL_GAME_STAT_EDITOR_BATTING_FIELDS = [
 const MANUAL_GAME_STAT_EDITOR_PITCHING_FIELDS = [
 	{ key: "pitchOuts", label: "Pitch Outs" },
 	{ key: "pitchStrikeouts", label: "K" },
+	{ key: "pitchHitsAllowed", label: "H allowed" },
+	{ key: "pitchWalksAllowed", label: "BB allowed" },
 	{ key: "runsAllowed", label: "R" },
-	{ key: "earnedRunsAllowed", label: "ER" }
+	{ key: "earnedRunsAllowed", label: "ER (est.)" }
 ];
 
 function getManualGameStatEditorEditableFields(kind) {
@@ -2532,9 +2516,17 @@ async function saveManualGameStatEditorCorrections(entryId) {
 		STATS_BACKUP_NUMERIC_FIELDS.forEach(field => {
 			stats[field] = Math.max(0, Math.trunc(Number(stats[field] || 0)));
 		});
+		stats.outsPerInning = Number(nextEntry.rules?.outs || stats.outsPerInning || 2);
+		stats.regulationInnings = Number(nextEntry.rules?.innings || stats.regulationInnings || 3);
+		stats.pitchingWorkload = [{ outs: stats.pitchOuts, outsPerInning: stats.outsPerInning }];
 		syncPitchingInnings(stats);
 		return stats;
 	});
+	const consistencyError = getCorrectedGameStatsError(nextEntry);
+	if (consistencyError) {
+		alert(consistencyError + " Nothing was saved.");
+		return false;
+	}
 
 	const confirmMessage =
 		"Save these corrected stats for this completed game?\n\n" +
@@ -2568,4 +2560,16 @@ async function saveManualGameStatEditorCorrections(entryId) {
 
 
 	return true;
+}
+
+function getCorrectedGameStatsError(entry) {
+	for (const s of entry.playerStats || []) {
+		if (s.hits !== s.singles + s.doubles + s.triples + s.homeRuns || s.hits > s.atBats)
+			return "Hits must equal singles + doubles + triples + home runs and cannot exceed at-bats.";
+		if (s.earnedRunsAllowed > s.runsAllowed)
+			return "Earned runs cannot exceed runs allowed.";
+		if (s.pitchStrikeouts > s.pitchOuts)
+			return "Pitching strikeouts cannot exceed actual pitching outs.";
+	}
+	return "";
 }

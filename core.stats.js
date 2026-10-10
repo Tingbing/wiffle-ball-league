@@ -86,6 +86,7 @@ function updateScheduleForCompletedGame(teamA, teamB, resultObj) {
 	if (seriesGame.result) return true; // idempotent retry; do not double-apply
 
 	seriesGame.result = resultObj;
+	reconcileSeriesClinch(seriesEntry);
 	seriesEntry.result = computeSeriesResult(seriesEntry);
 	applySeriesWinLoss(seriesEntry);
 saveSchedule({ skipServerSync: true, allowConflictBypass: true });
@@ -178,6 +179,8 @@ const STATS_BACKUP_NUMERIC_FIELDS = [
 	"runsScored",
 	"pitchOuts",
 	"pitchStrikeouts",
+	"pitchHitsAllowed",
+	"pitchWalksAllowed",
 	"fieldingErrors",
 	"runsAllowed",
 	"earnedRunsAllowed"
@@ -197,10 +200,10 @@ function stripScheduleResultsForStatsClear(scheduleObj) {
 			day: Number(dayObj?.day || (dayIndex + 1)),
 			byeTeam: getByeTeamForDay(dayObj, teamNames),
 			games: (dayObj?.games || []).map((seriesEntry, seriesIndex) => ({
-				...createSeriesEntry(seriesEntry?.away || "", seriesEntry?.home || "", Number(seriesEntry?.gameNumber || (seriesIndex + 1))),
+				...createSeriesEntry(seriesEntry?.away || "", seriesEntry?.home || "", Number(seriesEntry?.gameNumber || (seriesIndex + 1)), seriesEntry.bestOf || 3),
 				result: null,
 				subAssignments: [],
-				gamesInSeries: [1, 2, 3].map(gameNumber => createSeriesGameSlot(gameNumber, null))
+				gamesInSeries: Array.from({length:seriesEntry.bestOf || 3},(_,i) => createSeriesGameSlot(i+1, null))
 			}))
 		}))
 	});
@@ -434,15 +437,20 @@ function createComparableStatsLine(rawStats, fallback = {}) {
 		normalized[field] = normalizeNumericStatValue(rawStats?.[field]);
 	});
 
-	normalized.outsPerInning = Number(rawStats?.outsPerInning || 2);
-	normalized.inningsPitched = normalized.pitchOuts / normalized.outsPerInning;
+	normalized.outsPerInning = Number(rawStats?.outsPerInning || fallback.outsPerInning || 2);
+	normalized.pitchingCountsKnown = rawStats?.pitchingCountsKnown === true;
+	normalized.regulationInnings = Number(rawStats?.regulationInnings || fallback.regulationInnings || 3);
+	const parts=Array.isArray(rawStats?.pitchingWorkload)?rawStats.pitchingWorkload:[{outs:normalized.pitchOuts,outsPerInning:normalized.outsPerInning}];
+ const work=new Map();for(const part of parts){const d=Number(part.outsPerInning);work.set(d,(work.get(d)||0)+Number(part.outs));}
+ normalized.pitchingWorkload=[...work].filter(([,outs])=>outs>0).sort((a,b)=>a[0]-b[0]).map(([outsPerInning,outs])=>({outs,outsPerInning}));
+	normalized.inningsPitched = getPitchingInningsValue(normalized);
 	return normalized;
 }
 
 function createComparableStatsBucketSignature(bucket) {
 	const entries = Object.keys(bucket || {})
 		.sort((a, b) => a.localeCompare(b))
-		.map(key => [key, createComparableStatsLine(bucket[key])]);
+		.map(key => {const line=createComparableStatsLine(bucket[key]);delete line.regulationInnings;return [key,line];});
 	return JSON.stringify(entries);
 }
 
@@ -468,6 +476,8 @@ function validateBackupStatLine(stats, { key = "", contextLabel = "stats", expec
 	}
 
 	const normalized = createComparableStatsLine(stats);
+	if(!Number.isInteger(normalized.outsPerInning)||normalized.outsPerInning<1||normalized.outsPerInning>6)errors.push(`${contextLabel} has an invalid out-rule snapshot.`);
+	if(stats.pitchingWorkload!==undefined && (!Array.isArray(stats.pitchingWorkload)||stats.pitchingWorkload.some(w=>!Number.isInteger(w.outs)||w.outs<0||!Number.isInteger(w.outsPerInning)||w.outsPerInning<1||w.outsPerInning>6)||stats.pitchingWorkload.reduce((n,w)=>n+w.outs,0)!==normalized.pitchOuts))errors.push(`${contextLabel} has invalid workload snapshots.`);
 	const expectedKey = expectedSub ? getSubKey(normalized.playerName) : getPlayerKey(normalized.teamName, normalized.playerName);
 
 	if (!normalized.playerName) {
@@ -500,7 +510,7 @@ function validateBackupStatLine(stats, { key = "", contextLabel = "stats", expec
 	}
 
 	STATS_BACKUP_NUMERIC_FIELDS.forEach(field => {
-		if (!isFiniteNonNegativeNumber(stats?.[field] ?? 0)) {
+		if (!isFiniteNonNegativeNumber(stats?.[field] ?? 0) || !Number.isInteger(Number(stats?.[field] ?? 0))) {
 			errors.push(`${contextLabel} has an invalid numeric value for ${field}${normalized.playerName ? ` (${normalized.playerName})` : ""}.`);
 		}
 	});
@@ -607,7 +617,11 @@ function validateScheduleStructure(scheduleObj, rosterLookup, errors, warnings) 
 		return;
 	}
 
-	const originalTeamNames = Array.isArray(scheduleObj.teamNames) ? scheduleObj.teamNames : [];
+	if(Array.isArray(scheduleObj.days) && scheduleObj.days.length===0) {
+   if(!Array.isArray(scheduleObj.teamNames)||uniqueTrimmedStrings(scheduleObj.teamNames).length!==scheduleObj.teamNames.length)errors.push('Empty schedule contains invalid team names.');
+   return; // New leagues and manually scored seasons need no generated schedule.
+ }
+ const originalTeamNames = Array.isArray(scheduleObj.teamNames) ? scheduleObj.teamNames : [];
 	const normalizedTeamNames = uniqueTrimmedStrings(originalTeamNames);
 	if (!normalizedTeamNames.length) {
 		errors.push("Backup schedule is missing team names.");
@@ -643,8 +657,8 @@ function validateScheduleStructure(scheduleObj, rosterLookup, errors, warnings) 
 			teamsSeenThisDay.add(away);
 			teamsSeenThisDay.add(home);
 
-			if (!Array.isArray(seriesEntry?.gamesInSeries) || seriesEntry.gamesInSeries.length !== 3) {
-				errors.push(`${label} does not contain exactly 3 games in the series.`);
+			if ((seriesEntry.bestOf!==undefined && ![1,3,5,7,9].includes(seriesEntry.bestOf)) || !Array.isArray(seriesEntry?.gamesInSeries) || seriesEntry.gamesInSeries.length !== Number(seriesEntry.bestOf || 3)) {
+				errors.push(`${label} has a game count that does not match its best-of setting.`);
 				return;
 			}
 
@@ -659,9 +673,9 @@ function validateScheduleStructure(scheduleObj, rosterLookup, errors, warnings) 
 
 			const computedResult = computeSeriesResult(seriesEntry);
 			if (seriesEntry?.result && !computedResult) {
-				errors.push(`${label} has a saved series result even though not all 3 games were recorded.`);
+				errors.push(`${label} has a saved series result without a valid clinch.`);
 			} else if (seriesEntry?.result && computedResult && !doSeriesResultsMatch(seriesEntry.result, computedResult)) {
-				errors.push(`${label} has a saved series result that does not match the 3 recorded game results.`);
+				errors.push(`${label} has a saved series result that does not match the recorded game results.`);
 			}
 		});
 
@@ -929,6 +943,9 @@ function sanitizeImportedStatsBucket(bucket, { subBucket = false } = {}) {
 			base[field] = normalized[field];
 		});
         base.outsPerInning=normalized.outsPerInning;
+        base.pitchingCountsKnown=normalized.pitchingCountsKnown;
+        base.pitchingWorkload=deepCloneJson(normalized.pitchingWorkload);
+        base.regulationInnings=normalized.regulationInnings;
 		syncPitchingInnings(base);
 		nextBucket[safeKey] = base;
 	});
@@ -977,22 +994,24 @@ function buildSanitizedScheduleForRestore(scheduleObj) {
 			const normalized = createSeriesEntry(
 				String(seriesEntry?.away || "").trim(),
 				String(seriesEntry?.home || "").trim(),
-				Number(seriesEntry?.gameNumber || (seriesIndex + 1))
+				Number(seriesEntry?.gameNumber || (seriesIndex + 1)), seriesEntry.bestOf || 3
 			);
+			if(!seriesEntry.bestOf)delete normalized.bestOf;
 
 			normalized.subAssignments = Array.isArray(seriesEntry?.subAssignments)
 				? deepCloneJson(seriesEntry.subAssignments)
 				: [];
-			normalized.gamesInSeries = (Array.isArray(seriesEntry?.gamesInSeries) ? seriesEntry.gamesInSeries : []).slice(0, 3).map((seriesGame, seriesGameIndex) => ({
+			normalized.gamesInSeries = (Array.isArray(seriesEntry?.gamesInSeries) ? seriesEntry.gamesInSeries : []).slice(0, seriesEntry.bestOf || 3).map((seriesGame, seriesGameIndex) => ({
 				gameNumber: Number(seriesGame?.gameNumber || (seriesGameIndex + 1)),
 				result: seriesGame?.result ? deepCloneJson(seriesGame.result) : null,
 				skipped: seriesGame?.skipped && typeof seriesGame.skipped === "object" ? deepCloneJson(seriesGame.skipped) : null,
 				subAssignments: Array.isArray(seriesGame?.subAssignments) ? deepCloneJson(seriesGame.subAssignments) : []
 			}));
-			while (normalized.gamesInSeries.length < 3) {
+			while (normalized.gamesInSeries.length < Number(seriesEntry.bestOf || 3)) {
 				normalized.gamesInSeries.push(createSeriesGameSlot(normalized.gamesInSeries.length + 1));
 			}
 
+			reconcileSeriesClinch(normalized);
 			normalized.result = computeSeriesResult(normalized);
 			delete normalized._seriesStandingsApplied;
 			return normalized;
@@ -1098,11 +1117,13 @@ function rebuildSeasonStatBucketsFromGameLogs(seasonObj) {
 	const rebuiltSubStats = {};
 	const subNames = new Set();
 
+	const seenGameIds=new Set();
 	(seasonObj?.games || [])
+		.filter(entry=>{if(entry?.id&&seenGameIds.has(entry.id))return false;if(entry?.id)seenGameIds.add(entry.id);return true;})
 		.filter(entry => entry?.seasonPhase !== "postseason" && !entry?.postseasonRef)
 		.forEach(entry => {
 			(entry?.playerStats || []).forEach(rawStats => {
-				const normalized = createComparableStatsLine(rawStats);
+				const normalized = createComparableStatsLine(rawStats,{outsPerInning:entry.rules?.outs,regulationInnings:entry.rules?.innings});
 				if (!normalized.playerName || (!normalized.isSub && !normalized.teamName)) return;
 
 				const key = normalized.isSub
@@ -1114,6 +1135,7 @@ function rebuildSeasonStatBucketsFromGameLogs(seasonObj) {
 					bucket[key] = createEmptyStats(normalized.isSub ? "SUB" : normalized.teamName, normalized.playerName, { isSub: normalized.isSub });
 				}
 
+				aggregatePitchingLine(bucket[key], normalized);
 				STATS_BACKUP_NUMERIC_FIELDS.forEach(field => {
 					bucket[key][field] = Number(bucket[key][field] || 0) + normalized[field];
 				});
@@ -1471,6 +1493,10 @@ function createEmptyStats(teamName, playerName, extra = {}) {
 		runsScored: 0,
 		pitchOuts: 0,
 		pitchStrikeouts: 0,
+		pitchHitsAllowed: 0,
+		pitchWalksAllowed: 0,
+		pitchingCountsKnown: true,
+		regulationInnings: Number(season?.rules?.innings || leagueSettings.innings || 3),
 		fieldingErrors: 0,
 		inningsPitched: 0,
 		outsPerInning: Number(season?.rules?.outs || leagueSettings.outs || 2),

@@ -182,21 +182,8 @@ async function endGameEarly() {
 	const summary = `Current score: ${game.team1.name} ${t1Score} — ${game.team2.name} ${t2Score}`;
 
 	if (isTied) {
-		const firstWarn = confirm(
-			"⚠️ THIS GAME IS TIED.\n\n" +
-			summary + "\n\n" +
-			"Saving a tied game early can MESS UP standings, seeding, and the playoff bracket.\n\n" +
-			"In real play you should only End & Save when there is a clear winner. Continue playing or break the tie unless you absolutely have no other option.\n\n" +
-			"Press OK only if you understand and accept the risk."
-		);
-		if (!firstWarn) return;
-
-		const finalConfirm = confirm(
-			"Last warning.\n\n" +
-			"This will save the game as a TIE. It will NOT credit either team with a win or loss, and the schedule slot will be marked as a tie.\n\n" +
-			"Are you absolutely sure you want to save this tied game?"
-		);
-		if (!finalConfirm) return;
+    alert('This game is tied. Continue playing until one team wins; the game stays available to resume.');
+    return false;
 	} else {
 		const winner = t1Score > t2Score ? game.team1.name : game.team2.name;
 		const ok = confirm(
@@ -205,7 +192,7 @@ async function endGameEarly() {
 		if (!ok) return;
 	}
 
-	await recordAction("finish",()=>{game._gameCompletePendingSave=true; game._allowTie=true;}, {allowComplete:true,skipPitcher:true});
+	await recordAction("finish",()=>{game._gameCompletePendingSave=true; game._allowTie=false;}, {allowComplete:true,skipPitcher:true});
 	return true;
 }
 
@@ -374,7 +361,7 @@ function confirmError() {
 }
 
 function applyConfirmError() {
-	if (!lastPlay) return;
+	if (!lastPlay || !["single","double","triple"].includes(lastPlay.result)) return;
 
 	const fielders = Array.isArray(lastPlay.fieldingPlayers) && lastPlay.fieldingPlayers.length
 		? lastPlay.fieldingPlayers
@@ -416,6 +403,8 @@ const pitcherCharges = (lastPlay.pitcherCharges && typeof lastPlay.pitcherCharge
 	: null;
 
 	if (batterStats && reversibleHit) {
+		const allowed=game?.gameStats?.[lastPlay.pitcherKey];
+		if(allowed)allowed.pitchHitsAllowed=Math.max(0,Number(allowed.pitchHitsAllowed||0)-1);
 		if (lastPlay.result === "single") {
 			batterStats.hits = Math.max(0, Number(batterStats.hits || 0) - 1);
 			batterStats.singles = Math.max(0, Number(batterStats.singles || 0) - 1);
@@ -499,6 +488,8 @@ let rbis = 0;
 let pitcherCharges = {};
 let scoringEvents = [];
 
+	if (["single","double","triple","HR"].includes(result) && !reachedOnError) pitcherStats.pitchHitsAllowed = Number(pitcherStats.pitchHitsAllowed || 0)+1;
+	if (result === "walk") pitcherStats.pitchWalksAllowed = Number(pitcherStats.pitchWalksAllowed || 0)+1;
 	if (result !== "walk" && result !== "HBP") {
 		batterStats.atBats++;
 	}
