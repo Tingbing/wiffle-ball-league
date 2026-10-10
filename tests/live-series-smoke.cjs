@@ -13,7 +13,7 @@ async function play(p,r){await p.waitForFunction(()=>recordingCanAct());await cl
  let ready=false;for(let i=0;i<30;i++){if(await bytesMatch()){ready=true;break;}await new Promise(r=>setTimeout(r,5000));}assert.ok(ready,'Deployed bytes do not match the tested commit');pass('HTTPS deployed app/config/schedule/stats hashes match the tested checkout');
  browser=await chromium.launch();const context=await browser.newContext({viewport:{width:390,height:844}}),p=await context.newPage(),errors=[];p.on('pageerror',e=>errors.push(e.message));p.on('dialog',d=>d.accept());
  await p.goto(url);await p.waitForFunction(()=>!directoryBusy);await click(p,'#directoryScreen button[data-wbl-click="f610aeac471a"]');
- await p.locator('#createName').fill('ROLLOUT SMOKE '+crypto.randomUUID());await p.locator('#createCode').fill('Smoke8!');await click(p,'#createNext');
+ await p.locator('#createName').fill('ROLLOUT SMOKE '+crypto.randomUUID());await p.locator('#createCode').fill('Smoke8!!');await click(p,'#createNext');await p.locator('#createWeeks').waitFor({state:'visible'});
  for(const key of ['Weeks','Innings','Outs'])await p.locator('#create'+key).fill('1');await p.locator('#createMaxPlayers').fill('3');await p.locator('#createSeriesLength').selectOption('1');await p.locator('#createSubmit').click();await main(p);
  await click(p,'#mainMenu .menu-button[data-wbl-click="9e69d2212de1"]');
  for(let i=0;i<2;i++){await p.locator('#teamName').fill('Smoke '+(i?'B':'A'));await click(p,'#teamConfigScreen button[data-wbl-click="4b5fa1fd4dda"]');await p.locator('#teamSelect').selectOption(String(i));await p.locator('#playerName').fill('Smoke Player '+i);await click(p,'#teamConfigScreen button[data-wbl-click="ba9344494226"]');}
