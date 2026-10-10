@@ -10,7 +10,7 @@ League menu contains Settings, Switch and confirmed Leave/revoke. Frequent Teams
 
 ## Rollout record
 
-The earlier migration request-state blocker was resolved after target verification and removal of an unnecessary trigger deletion. The migration has applied to staging, and real API acceptance has passed. Production backend application passed after final browser gates, with unchanged raw/security fingerprints and preserved private privileges. Frontend deployment and live smoke are the remaining release steps. IMPLEMENTATION_PROGRESS.md holds exact final state and CI/deployment links.
+The earlier migration request-state blocker was resolved after target verification and removal of an unnecessary trigger deletion. The migration has applied to staging, and real API acceptance has passed. Production backend application passed after final browser gates, with unchanged raw/security fingerprints and preserved private privileges. Frontend deployment and live smoke passed; exact synthetic fixtures were cleaned and all five production fingerprints match their pre-rollout values. IMPLEMENTATION_PROGRESS.md holds exact final state and CI/deployment links.
 
 A private pre-rollout backup contains affected league/game snapshots and previous validator/mutation definitions, without credential/session exports. Internal before/after hashes cover league rows, game rows, credentials, sessions and receipts. The SQL migration changes functions and adds a validator trigger; it has no league/game data rewrite or historical backfill.
 

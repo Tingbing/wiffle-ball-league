@@ -1,6 +1,6 @@
 # Statistics audit and implementation checkpoint
 
-Status: staging migration and real API/browser acceptance completed; production rollout underway. The failed initial connector attempts and test-fixture failures are resolved as recorded in IMPLEMENTATION_PROGRESS.md.
+Status: staging migration and real API/browser acceptance completed; production backend/frontend rollout and live smoke completed, with synthetic fixtures cleaned and existing data preserved. The failed initial connector attempts and test-fixture failures are resolved as recorded in IMPLEMENTATION_PROGRESS.md.
 
 ## Source and architecture
 
