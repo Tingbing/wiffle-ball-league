@@ -298,8 +298,9 @@ async function play(page, result) {
   check('Scored-season rules lock and persisted stats render after reload');
   const restored=await b.evaluate(async()=>{
     const original=JSON.stringify({season,schedule});const backup=createStatsBackupPayload();
-    await restoreStatsBackupFromPayload(backup);
-    const same=JSON.stringify(season.games)===JSON.stringify(backup.season.games);
+    const revisionBefore=leagueRevision;const succeeded=await restoreStatsBackupFromPayload(backup);
+    const signature=g=>({id:g.id,team1:g.team1Name,team2:g.team2Name,score1:g.team1Score,score2:g.team2Score,rules:g.rules,lines:g.playerStats.length});
+    const same=succeeded===true && leagueRevision>revisionBefore && JSON.stringify(season.games.map(signature))===JSON.stringify(backup.season.games.map(signature));
     const before=JSON.stringify({season,schedule});await restoreStatsBackupFromPayload({...backup,leagueCode:'another-league'});
     const cross=before===JSON.stringify({season,schedule});
     await restoreStatsBackupFromPayload({...backup,code:'Disallowed8!'});
