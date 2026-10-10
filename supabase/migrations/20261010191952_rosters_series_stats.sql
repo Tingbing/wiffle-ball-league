@@ -115,7 +115,6 @@ BEGIN
  end loop;
  return new;
 END $$;
-DROP TRIGGER IF EXISTS validate_capacity_schedule ON wbl_private.league;
 CREATE TRIGGER validate_capacity_schedule BEFORE INSERT OR UPDATE OF settings,teams_json,schedule_json ON wbl_private.league FOR EACH ROW EXECUTE FUNCTION wbl_private.validate_league_capacity_schedule();
 REVOKE ALL ON FUNCTION wbl_private.series_winner(jsonb),wbl_private.validate_league_capacity_schedule() FROM PUBLIC,anon,authenticated;
 

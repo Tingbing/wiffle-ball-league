@@ -16,7 +16,7 @@ const check = (name) => { results.push(name); console.log('PASS ' + name); };
 async function idle(page) {
   await page.waitForFunction(() => !accessBusy && !leagueEditActive && !recording.busy && !recording.pending && !gameStartInProgress, null, {timeout:30000});
 }
-async function click(page, selector) { await page.locator(selector).click(); await idle(page); }
+async function click(page, selector) { if(selector.includes('#mainMenu button[data-wbl-click=') && /76e1a211d391|a53ca03881a7|5e9db9692103/.test(selector))await page.locator('#leagueMenuButton').click(); await page.locator(selector).click(); await idle(page); }
 async function owned(page) { await page.waitForFunction(() => recordingCanAct(), null, {timeout:30000}); }
 async function main(page) {
   await page.locator('#mainMenu').waitFor({state:'visible',timeout:30000});
@@ -202,7 +202,7 @@ async function play(page, result) {
   assert.match(await a.locator('#subAssignmentSummary').textContent(),/Browser Substitute/);
   await click(a,'#startScheduledGameBtn');
   await a.locator('#gameScreen').waitFor({state:'visible'}); await owned(a);
-  assert.deepEqual(await a.evaluate(() => game.rules),{weeks:7,innings:5,outs:3});
+  assert.deepEqual(await a.evaluate(() => game.rules),{weeks:7,innings:5,outs:3,maxPlayers:2,seriesLength:3});
   assert.ok(await a.evaluate(() => [game.team1,game.team2].some(t=>t.players.includes('Browser Substitute'))));
   check('Game-only substitution survives server save and enters active roster');
   const gameId = await a.evaluate(() => recording.row.id);
@@ -273,11 +273,11 @@ async function play(page, result) {
   assert.equal(await b.evaluate(() => recording.row.id),gameId);
   await a.waitForFunction(() => !recording.row?.mine, null,{timeout:15000});
   check('Recorder handoff preserves game and disables former recorder');
-  await play(b,'HR');
+  await play(b,'HR'); await play(b,'HR');
   await b.locator('#gameScreen .end-game-button').click();
   await b.locator('#gameOverScreen').waitFor({state:'visible',timeout:30000}); await idle(b);
   assert.equal(await b.evaluate(() => season.games.length),1);
-  assert.deepEqual(await b.evaluate(() => season.games[0].rules),{weeks:7,innings:5,outs:3});
+  assert.deepEqual(await b.evaluate(() => season.games[0].rules),{weeks:7,innings:5,outs:3,maxPlayers:2,seriesLength:3});
   check('Phone finishes game and persists immutable rules and season stats');
   await click(b,'#gameOverScreen button[data-wbl-click="916694482531"]');
   await click(b,'#mainMenu button[data-wbl-click="a53ca03881a7"]');
@@ -374,7 +374,7 @@ async function play(page, result) {
   releaseRead();
   await a.waitForFunction(()=>window.delayedReadResult!==null);
   assert.match(await a.evaluate(()=>window.delayedReadResult),/old response ignored/);
-  assert.deepEqual(await a.evaluate(()=>leagueSettings),{weeks:1,innings:1,outs:1});
+  assert.deepEqual(await a.evaluate(()=>leagueSettings),{weeks:1,innings:1,outs:1,maxPlayers:2,seriesLength:3});
   assert.equal(await a.evaluate(()=>season.games.length),0);
   await a.unroute(staging+'/rest/v1/rpc/wbl_read',delayedA);
   await a.goBack(); await a.locator('#directoryScreen').waitFor({state:'visible'});
@@ -398,7 +398,7 @@ async function play(page, result) {
   assert.equal(await recorder.evaluate(()=>!!game.bases.second),true);
   await play(recorder,'HR'); await play(recorder,'K'); await play(recorder,'K');
   await recorder.locator('#gameOverScreen').waitFor({state:'visible'}); await idle(recorder);
-  assert.deepEqual(await recorder.evaluate(()=>season.games[0].rules),{weeks:1,innings:1,outs:1});
+  assert.deepEqual(await recorder.evaluate(()=>season.games[0].rules),{weeks:1,innings:1,outs:1,maxPlayers:2,seriesLength:3});
   assert.equal(await recorder.evaluate(()=>season.games.length),1);
   check('One-inning/one-out browser overtime and natural completion use snapshot rules');
   assert.deepEqual(productionRequests,[],'Browser must never contact production');
