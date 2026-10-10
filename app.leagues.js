@@ -138,7 +138,8 @@ function clearCreationDraft() {creationDraft=null;localStorage.removeItem(PENDIN
 async function openCreatedLeague(response,token) {
   // Save the confirmed grant BEFORE loading the dashboard, so an interrupted read can recover.
   rememberAccess(response.league_id,{token,expires_at:null});clearCreationDraft();
-  await enterLeague(response.league_id,{token,expires_at:null});
+  try {await enterLeague(response.league_id,{token,expires_at:null});}
+  catch(error){showDirectory();message('directoryAccessMessage','Your league was created and this device’s access is saved. Could not open it. '+error.message+' ');el('directoryAccessMessage').append(makeButton('Open created league',()=>requestOpenLeague({id:response.league_id,name:'Your league'})));}
 }
 async function recoverPendingCreation() {
   const pending=readJsonStorage(PENDING_CREATE_KEY,null);if(!pending || accessBusy)return false;
@@ -167,11 +168,12 @@ async function submitCreate(event) {
     await openCreatedLeague(response,creationDraft.session_token);
   }catch(error){
     message('createMessage',error.message+' Retry to confirm the same creation.');
-    if(error.definite)clearCreationDraft();
+    if(error.definite){creationDraft=null;localStorage.removeItem(PENDING_CREATE_KEY);setCreateLocked(false);}
   }finally {accessBusy=false;el('createSubmit').disabled=false;}
 }
 function clearLeagueCache(id) {
   const prefix='wbl-v4:'+id+':';
+  if(id==='6767')for(const key of ['wbl-pre-handoff-backup','wiggleLeague','wiggleSeason','wiggleSchedule','wiggleSyncHeadV1','wiggleLiveGameStateV1','wiggleActiveGameLock'])localStorage.removeItem(key);
   for(const key of Object.keys(localStorage))if(key.startsWith(prefix))localStorage.removeItem(key);
 }
 function showLeagueSettings() {

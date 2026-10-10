@@ -353,11 +353,11 @@ function update() {
 
 		let playersHTML = "";
 		team.players.forEach((player, playerIndex) => {
-			playersHTML += `<div>${escapeHtml(player)} <button onclick="removePlayer(${teamIndex},${playerIndex})">Remove</button></div>`;
+			playersHTML += `<div>${escapeHtml(player)} <button data-wbl-click="b8ff4e7730a5" data-wbl-args='[${teamIndex},${playerIndex}]'>Remove</button></div>`;
 		});
 		if (playersHTML === "") playersHTML = "No players yet";
 
-		div.innerHTML = `<b>${escapeHtml(team.name)}</b> <button onclick="renameTeam(${teamIndex})">Edit name</button> <button onclick="removeTeam(${teamIndex})">Remove Team</button><br>Players:<br>${playersHTML}`;
+		div.innerHTML = `<b>${escapeHtml(team.name)}</b> <button data-wbl-click="0f5f77e9d383" data-wbl-args='[${teamIndex}]'>Edit name</button> <button data-wbl-click="64b8f2f5cf6c" data-wbl-args='[${teamIndex}]'>Remove Team</button><br>Players:<br>${playersHTML}`;
 		list.appendChild(div);
 	});
 
@@ -371,7 +371,7 @@ function update() {
 		} else {
 			subs.forEach((subName, subIndex) => {
 				const row = document.createElement("div");
-				row.innerHTML = `${escapeHtml(subName)} <button onclick="removeSeasonSub(${subIndex})">Remove</button>`;
+				row.innerHTML = `${escapeHtml(subName)} <button data-wbl-click="b9b98b77753c" data-wbl-args='[${subIndex}]'>Remove</button>`;
 				subsList.appendChild(row);
 			});
 		}
@@ -529,7 +529,7 @@ function renderSubAssignmentSummary() {
 	if (seriesAssignments.length) {
 		html += '<div style="margin-bottom:8px;"><b>Entire Series</b>';
 		seriesAssignments.forEach((assignment, idx) => {
-			html += `<div style="margin-top:6px;">${assignment.teamName}: ${assignment.subName} for ${assignment.replacedPlayer} <button onclick="removeSubAssignment('series', ${ctx.dayIndex}, ${ctx.seriesIndex}, ${idx})">Remove</button></div>`;
+			html += `<div style="margin-top:6px;">${assignment.teamName}: ${assignment.subName} for ${assignment.replacedPlayer} <button data-wbl-click="ce51b52976c7" data-wbl-args='["series", ${ctx.dayIndex}, ${ctx.seriesIndex}, ${idx}]'>Remove</button></div>`;
 		});
 		html += '</div>';
 	}
@@ -537,7 +537,7 @@ function renderSubAssignmentSummary() {
 	if (gameAssignments.length && Number.isInteger(ctx.seriesGameIndex)) {
 		html += `<div><b>Game ${ctx.seriesGameIndex + 1} Only</b>`;
 		gameAssignments.forEach((assignment, idx) => {
-			html += `<div style="margin-top:6px;">${assignment.teamName}: ${assignment.subName} for ${assignment.replacedPlayer} <button onclick="removeSubAssignment('game', ${ctx.dayIndex}, ${ctx.seriesIndex}, ${ctx.seriesGameIndex}, ${idx})">Remove</button></div>`;
+			html += `<div style="margin-top:6px;">${assignment.teamName}: ${assignment.subName} for ${assignment.replacedPlayer} <button data-wbl-click="dd63c331babe" data-wbl-args='["game", ${ctx.dayIndex}, ${ctx.seriesIndex}, ${ctx.seriesGameIndex}, ${idx}]'>Remove</button></div>`;
 		});
 		html += '</div>';
 	}

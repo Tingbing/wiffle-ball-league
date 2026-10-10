@@ -1401,8 +1401,8 @@ function displayPostseason() {
 		const controls = document.createElement("div");
 		controls.style.cssText = "display:flex; gap:10px; flex-wrap:wrap; margin-top:12px;";
 		controls.innerHTML = `
-			<button type="button" onclick="createPostseasonBracket()">Create Postseason Bracket</button>
-			<button type="button" onclick="resetPostseason()" style="background:#a44; color:white;">Reset Postseason</button>
+			<button type="button" data-wbl-click="f344d513a8f6">Create Postseason Bracket</button>
+			<button type="button" data-wbl-click="1d924e3b4166" style="background:#a44; color:white;">Reset Postseason</button>
 		`;
 		intro.appendChild(controls);
 	}
