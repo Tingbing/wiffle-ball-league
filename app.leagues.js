@@ -14,7 +14,7 @@ function rememberAccess(id,value) {
   if(value)localStorage.setItem(LAST_LEAGUE_KEY,id);
   else if(localStorage.getItem(LAST_LEAGUE_KEY)===id)localStorage.removeItem(LAST_LEAGUE_KEY);
 }
-function renderLeagueHeader() {message('activeLeagueTitle',leagueName);message('activeLeagueRules',`${leagueSettings.weeks} weeks • ${league.teams?.length || 0} teams • ${leagueSettings.innings} innings • ${leagueSettings.outs} outs per half-inning`);}
+function renderLeagueHeader() {message('activeLeagueTitle',leagueName);message('activeLeagueRules',`${leagueSettings.weeks} weeks • ${league.teams?.length || 0} teams • ${leagueSettings.innings} innings • ${leagueSettings.outs} outs per half-inning • Best of ${configuredSeriesLength()} • Max ${rosterLimit()} players/team`);}
 function clearPrivateState() {
   accessGeneration++;stopRealtime();
   if(recording.unlock) recording.unlock();
@@ -104,7 +104,9 @@ async function leaveLeagueAccess() {
   catch(error){alert('Revocation was not confirmed. '+error.message);}finally{accessBusy=false;}
 }
 function readRules(prefix) {
-  const s={weeks:Number(el(prefix+'Weeks').value),innings:Number(el(prefix+'Innings').value),outs:Number(el(prefix+'Outs').value)};
+  const s={weeks:Number(el(prefix+'Weeks').value),innings:Number(el(prefix+'Innings').value),outs:Number(el(prefix+'Outs').value),maxPlayers:Number(el(prefix+'MaxPlayers').value),seriesLength:Number(el(prefix+'SeriesLength').value)};
+  if(!Number.isInteger(s.maxPlayers)||s.maxPlayers<1||s.maxPlayers>30||![1,3,5,7,9].includes(s.seriesLength))throw new Error('Use 1–30 maximum players and best of 1, 3, 5, 7 or 9.');
+  if(prefix==='settings') {if(leagueSettings.maxPlayers===undefined&&s.maxPlayers===2)delete s.maxPlayers;if(leagueSettings.seriesLength===undefined&&s.seriesLength===3)delete s.seriesLength;}
   if(!Number.isInteger(s.weeks)||s.weeks<1||s.weeks>52||!Number.isInteger(s.innings)||s.innings<1||s.innings>9||!Number.isInteger(s.outs)||s.outs<1||s.outs>6)throw new Error('Use 1–52 weeks, 1–9 innings and 1–6 outs.');return s;
 }
 const PENDING_CREATE_KEY='wbl-v5-pending-create';
@@ -122,7 +124,7 @@ function showCreateLeague() {
   if(localStorage.getItem(PENDING_CREATE_KEY)) {recoverPendingCreation();return;}
   creationDraft=null;el('createName').value='';el('createCode').value='';el('createCode').type='password';el('createCodeToggle').textContent='Show';el('createCodeToggle').setAttribute('aria-pressed','false');
   for(const id of ['createNameError','createCodeError','createMessage'])message(id,'');
-  for(const [key,value] of [['Weeks',6],['Innings',3],['Outs',2]])el('create'+key).value=value;
+  for(const [key,value] of [['Weeks',6],['Innings',3],['Outs',2],['MaxPlayers',2],['SeriesLength',3]])el('create'+key).value=value;
   setCreateLocked(false);hideAllScreens();el('createLeagueScreen').classList.remove('hidden');el('createName').focus();
 }
 function toggleCreateCode() {const shown=el('createCode').type==='password';el('createCode').type=shown?'text':'password';el('createCodeToggle').textContent=shown?'Hide':'Show';el('createCodeToggle').setAttribute('aria-pressed',String(shown));}
@@ -132,8 +134,8 @@ function nextCreateStep(event) {
 }
 function backCreateStep() {if(accessBusy || creationDraft)return;hideAllScreens();el('createLeagueScreen').classList.remove('hidden');el('createName').focus();}
 function cancelCreateLeague() {if(accessBusy || creationDraft)return;el('createCode').value='';el('createName').value='';showDirectory();}
-function updateCreateSummary() {message('createSummary',`${el('createInnings').value} innings · ${el('createOuts').value} outs per half-inning · ${el('createWeeks').value}-week season`);}
-function setCreateLocked(locked) {for(const id of ['createName','createCode','createWeeks','createInnings','createOuts','createBack'])el(id).disabled=locked;}
+function updateCreateSummary() {message('createSummary',`${el('createInnings').value} innings · ${el('createOuts').value} outs per half-inning · ${el('createWeeks').value}-week season · Best of ${el('createSeriesLength').value} · Maximum ${el('createMaxPlayers').value} players/team`);}
+function setCreateLocked(locked) {for(const id of ['createName','createCode','createWeeks','createInnings','createOuts','createMaxPlayers','createSeriesLength','createBack'])el(id).disabled=locked;}
 function clearCreationDraft() {creationDraft=null;localStorage.removeItem(PENDING_CREATE_KEY);el('createCode').value='';el('createCode').type='password';setCreateLocked(false);}
 async function openCreatedLeague(response,token) {
   // Save the confirmed grant BEFORE loading the dashboard, so an interrupted read can recover.
@@ -178,15 +180,19 @@ function clearLeagueCache(id) {
 }
 function showLeagueSettings() {
   hideAllScreens();el('leagueSettingsScreen').classList.remove('hidden');el('settingsName').value=leagueName;
-  for(const key of ['Weeks','Innings','Outs'])el('settings'+key).value=leagueSettings[key.toLowerCase()];
+  for(const [key,value] of Object.entries({Weeks:leagueSettings.weeks,Innings:leagueSettings.innings,Outs:leagueSettings.outs,MaxPlayers:rosterLimit(),SeriesLength:configuredSeriesLength()}))el('settings'+key).value=value;
   const blocked=!!game||liveGames.length>0||season.games.length>0;
-  for(const key of ['Weeks','Innings','Outs'])el('settings'+key).disabled=blocked;
+  for(const key of ['Weeks','Innings','Outs','MaxPlayers','SeriesLength'])el('settings'+key).disabled=blocked;
   message('settingsMessage',blocked?'Rule and roster changes are blocked during active games or scored seasons. Finish games, download a backup, then reset the season to change rules.':'Changing rules clears the empty schedule. Configure team names and players under Configure Teams.');
 }
 async function submitSettings(event) {
   event.preventDefault();
   await runLeagueEdit(async()=>{
-    const rules=readRules('settings');leagueName=el('settingsName').value.trim();
+    const rules=readRules('settings');
+    const conflicts=league.teams.filter(t=>t.players.length>Number(rules.maxPlayers ?? 2));
+    if(conflicts.length)throw new Error('Maximum players cannot be reduced: '+conflicts.map(t=>t.name+' has '+t.players.length).join(', ')+'. Remove players first.');
+    if(season.games.length&&JSON.stringify(rules)!==JSON.stringify(leagueSettings))throw new Error('Use a new season to change settings after scoring.');
+    leagueName=el('settingsName').value.trim();
     if(JSON.stringify(rules)!==JSON.stringify(leagueSettings)) {leagueSettings=rules;season.rules=deepCloneJson(rules);schedule={days:[],teamNames:[]};}
   },[]);renderLeagueHeader();
 }
@@ -210,4 +216,13 @@ async function openRoute({restoreLast=false}={}) {
   let id;try{id=match?decodeURIComponent(match[1]):last;}catch{clearPrivateState();showDirectory();return;}
   if(!/^(6767|[a-f0-9-]{36})$/.test(id)){clearPrivateState();showDirectory();message('directoryMessage','Invalid league link. Find a league below.');return;}
   await requestOpenLeague({id,name:'League '+id.slice(0,8)});
+}
+
+function renderDashboardSummary(){
+  const container=el('dashboardSummary');if(!container)return;
+  container.replaceChildren();
+  const series=(schedule.days||[]).flatMap(d=>d.games||[]);
+  const completed=series.filter(s=>s.result?.type==='win').length;
+  for(const [n,label] of [[league.teams.length,'Teams'],[season.games.filter(g=>!g.postseasonRef).length,'Games recorded'],[completed+' / '+series.length,'Series complete']]){const cell=document.createElement('div'),v=document.createElement('strong');v.textContent=n;cell.append(v,document.createTextNode(label));container.append(cell);}
+  const note=document.createElement('p');note.className='stats-scope-note';note.textContent=series.length?'Standings: series wins for scheduled matchups; manual games count individually. Individual games have separate box scores.':'Add teams and players, then create a weekly schedule from Schedule.';container.append(note);
 }

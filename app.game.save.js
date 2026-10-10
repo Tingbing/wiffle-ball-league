@@ -7,7 +7,7 @@ async function finalizeCompletedGame(options={}) {
 }
 function buildFinalLeagueSnapshot(serverLeague) {
   if(!game) throw new Error('No live game to finish.');
-  if(game.team1Score===game.team2Score && (!game._allowTie || game._postseasonRef)) throw new Error('This game is tied. Continue playing until one team wins.');
+  if(game.team1Score===game.team2Score) throw new Error('This game is tied. Continue playing until one team wins.');
   const priorSeason=season,priorSchedule=schedule;
   try {
     season=ensureSeasonShape(cloneJson(serverLeague.season_json));
@@ -24,6 +24,7 @@ function buildFinalLeagueSnapshot(serverLeague) {
       for(const line of entry.playerStats) {
         const key=line.isSub?getSubKey(line.playerName):getPlayerKey(line.teamName,line.playerName);
         const target=getOrCreateSeasonStatsByKey(key,line.teamName,line.playerName);
+        aggregatePitchingLine(target,line);
         for(const field of STATS_BACKUP_NUMERIC_FIELDS) target[field]=Number(target[field]||0)+Number(line[field]||0);
         syncPitchingInnings(target);
         if(line.isSub && !season.seasonSubs.includes(line.playerName)) season.seasonSubs.push(line.playerName);

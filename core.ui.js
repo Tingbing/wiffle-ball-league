@@ -44,7 +44,7 @@ function showMainMenu() {
   }
   if(!recording.pending) { game=null; recording.row=null; }
   hideAllScreens(); document.getElementById("mainMenu").classList.remove("hidden");
-  updatePublicAccessUI(); renderLiveGameList(); document.getElementById("leagueReadyState").classList.toggle("hidden",league.teams.length>0);
+  renderDashboardSummary(); updatePublicAccessUI(); renderLiveGameList(); document.getElementById("leagueReadyState").classList.toggle("hidden",league.teams.length>0);
 }
 
 function showTeamConfig() {
@@ -299,7 +299,7 @@ async function addPlayer() {
   const team=league.teams[Number(document.getElementById('teamSelect').value)];
   const name=document.getElementById('playerName').value.replace(/\s+/g,' ').trim();
   if(!team || !name) return false;
-  if(team.players.length>=MAX_PLAYERS_PER_TEAM) return alert(`Maximum ${MAX_PLAYERS_PER_TEAM} players per team.`);
+  if(team.players.length>=rosterLimit()) return alert(`Maximum ${rosterLimit()} players per team.`);
   if(getAllPlayerNames().some(p=>p.toLowerCase()===name.toLowerCase())) return alert('That player already exists.');
   if(!confirmMidSeasonStructureChange('add this player')) return false;
   team.players.push(name); document.getElementById('playerName').value=''; update();
