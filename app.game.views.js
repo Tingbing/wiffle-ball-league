@@ -2516,9 +2516,17 @@ async function saveManualGameStatEditorCorrections(entryId) {
 		STATS_BACKUP_NUMERIC_FIELDS.forEach(field => {
 			stats[field] = Math.max(0, Math.trunc(Number(stats[field] || 0)));
 		});
+		stats.outsPerInning = Number(nextEntry.rules?.outs || stats.outsPerInning || 2);
+		stats.regulationInnings = Number(nextEntry.rules?.innings || stats.regulationInnings || 3);
+		stats.pitchingWorkload = [{ outs: stats.pitchOuts, outsPerInning: stats.outsPerInning }];
 		syncPitchingInnings(stats);
 		return stats;
 	});
+	const consistencyError = getCorrectedGameStatsError(nextEntry);
+	if (consistencyError) {
+		alert(consistencyError + " Nothing was saved.");
+		return false;
+	}
 
 	const confirmMessage =
 		"Save these corrected stats for this completed game?\n\n" +
@@ -2552,4 +2560,16 @@ async function saveManualGameStatEditorCorrections(entryId) {
 
 
 	return true;
+}
+
+function getCorrectedGameStatsError(entry) {
+	for (const s of entry.playerStats || []) {
+		if (s.hits !== s.singles + s.doubles + s.triples + s.homeRuns || s.hits > s.atBats)
+			return "Hits must equal singles + doubles + triples + home runs and cannot exceed at-bats.";
+		if (s.earnedRunsAllowed > s.runsAllowed)
+			return "Earned runs cannot exceed runs allowed.";
+		if (s.pitchStrikeouts > s.pitchOuts)
+			return "Pitching strikeouts cannot exceed actual pitching outs.";
+	}
+	return "";
 }
