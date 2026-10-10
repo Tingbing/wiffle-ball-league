@@ -433,12 +433,12 @@ async function play(page, result) {
   check('Real two-step best-of5 browser series stays in progress at 2-2, clinches 3-2 and preserves independently expected player/team totals on another device');
   await click(b,'#mainMenu button[data-wbl-click="7536c2b5b9d1"]');await click(b,'#manualGameStatEditorHubBtn');
   const editId=await b.evaluate(()=>season.games[0].id);await b.locator('#manualGameStatEditorSelect').selectOption(editId);
-  const field=b.locator('#manualGameStatEditorContainer input[data-stat-field="pitchOuts"]').first();await field.fill('2');
+  const field=b.locator('#manualGameStatEditorContainer input[data-stat-field="pitchOuts"]').first();const editIndex=Number(await field.getAttribute('data-stat-index'));await field.fill('2');
   await b.locator('#manualGameStatEditorContainer button').filter({hasText:'Save Corrections'}).click();await idle(b);
-  assert.equal(await b.evaluate(()=>season.games[0].playerStats[0].pitchOuts),2);
-  assert.equal(await b.evaluate(()=>getPitchingInningsValue(season.games[0].playerStats[0])),2);
+  assert.equal(await b.evaluate(i=>season.games[0].playerStats[i].pitchOuts,editIndex),2);
+  assert.equal(await b.evaluate(i=>getPitchingInningsValue(season.games[0].playerStats[i]),editIndex),2);
   await b.locator('#manualGameStatEditorContainer input[data-stat-field="pitchOuts"]').first().fill('1');await b.locator('#manualGameStatEditorContainer button').filter({hasText:'Save Corrections'}).click();await idle(b);
-  await a.reload();await main(a);assert.equal(await a.evaluate(()=>season.games.length),5);assert.equal(await a.evaluate(()=>getPitchingInningsValue(season.games[0].playerStats[0])),1);
+  await a.reload();await main(a);assert.equal(await a.evaluate(()=>season.games.length),5);assert.equal(await a.evaluate(i=>getPitchingInningsValue(season.games[0].playerStats[i]),editIndex),1);
   check('Real manual correction rebuilds actual-out workload with saved rules and persists once; restoring original count leaves five game logs');
 
   assert.deepEqual(productionRequests,[],'Browser must never contact production');
