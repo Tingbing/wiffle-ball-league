@@ -1,0 +1,29 @@
+name: Live series rollout smoke
+on:
+  push:
+    branches: [main]
+    paths: ['app.html', 'tests/live-series-smoke.cjs', '.github/workflows/live-series-smoke.yml']
+permissions:
+  contents: read
+concurrency:
+  group: live-series-rollout-smoke
+  cancel-in-progress: false
+jobs:
+  live-smoke:
+    if: contains(github.event.head_commit.message, 'WBL rollout smoke PR6')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: {node-version: '24'}
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: node tests/live-series-smoke.cjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: live-series-evidence
+          path: |
+            tests/live-series-*.png
+            tests/LIVE_SERIES_RESULTS.md
