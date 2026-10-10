@@ -312,7 +312,7 @@ async function play(page, result) {
   await click(b,'#seasonStatsScreen button[data-wbl-click="916694482531"]');
   const previousWinner=await b.evaluate(()=>{const g=season.games[0];return g.team1Score>g.team2Score?g.team1Name:g.team2Name;});
   await click(b,'#mainMenu button[data-wbl-click="33d31c517791"]');await click(b,'#startScheduledGameBtn');await owned(b);
-  if(await b.evaluate(w=>game.team1.name!==w,previousWinner))for(const outcome of ['K','out','out'])await play(b,outcome);
+  if(await b.evaluate(w=>game.batting.name!==w,previousWinner))for(const outcome of ['K','out','out'])await play(b,outcome);
   await play(b,'HR');await b.locator('#gameScreen .end-game-button').click();await b.locator('#gameOverScreen').waitFor({state:'visible'});await idle(b);
   assert.equal(await b.evaluate(()=>season.games.length),2);
   assert.deepEqual(await b.evaluate(()=>{const s=schedule.days[0].games[0];return {played:s.gamesInSeries.filter(g=>g.result).length,unused:s.gamesInSeries.filter(g=>g.skipped).length};}),{played:2,unused:1});
@@ -421,7 +421,7 @@ async function play(page, result) {
   await click(a,'#teamConfigScreen button[data-wbl-click="916694482531"]');await click(a,'#mainMenu button[data-wbl-click="479799de6c39"]');await click(a,'#scheduleScreen button[data-wbl-click="3dd3fb4ce125"]');await click(a,'#scheduleScreen button[data-wbl-click="916694482531"]');
   for(let i=0;i<5;i++){
     await click(a,'#mainMenu button[data-wbl-click="33d31c517791"]');await click(a,'#startScheduledGameBtn');await owned(a);
-    const winner=i%2?'Five B':'Five A';const awayWins=await a.evaluate(w=>game.team1.name===w,winner);
+    const winner=i%2?'Five B':'Five A';const awayWins=await a.evaluate(w=>game.batting.name===w,winner);
     for(const outcome of awayWins?['HR','out','out']:['out','HR','out'])await play(a,outcome);
     await a.locator('#gameOverScreen').waitFor({state:'visible'});await idle(a);assert.equal(await a.evaluate(()=>season.games.length),i+1);
     assert.equal(await a.evaluate(()=>!!schedule.days[0].games[0].result),i===4);
@@ -431,6 +431,16 @@ async function play(page, result) {
   assert.deepEqual(await b.evaluate(()=>{const x=season.playerStats['Five A|Five A1'],y=season.playerStats['Five B|Five B1'];return {a:[x.atBats,x.hits,x.homeRuns,x.rbis,x.runsScored,x.pitchOuts,x.runsAllowed],b:[y.atBats,y.hits,y.homeRuns,y.rbis,y.runsScored,y.pitchOuts,y.runsAllowed],wins:season.teamRecords['Five A'].wins};}),{a:[8,3,3,3,3,5,2],b:[7,2,2,2,2,5,3],wins:1});
   await b.locator('#leagueMenuButton').click();await capture(b,'setup-best5-phone');
   check('Real two-step best-of5 browser series stays in progress at 2-2, clinches 3-2 and preserves independently expected player/team totals on another device');
+  await click(b,'#mainMenu button[data-wbl-click="7536c2b5b9d1"]');await click(b,'#manualGameStatEditorHubBtn');
+  const editId=await b.evaluate(()=>season.games[0].id);await b.locator('#manualGameStatEditorSelect').selectOption(editId);
+  const field=b.locator('#manualGameStatEditorContainer input[data-stat-field="pitchOuts"]').first();await field.fill('2');
+  await b.locator('#manualGameStatEditorContainer button').filter({hasText:'Save Corrections'}).click();await idle(b);
+  assert.equal(await b.evaluate(()=>season.games[0].playerStats[0].pitchOuts),2);
+  assert.equal(await b.evaluate(()=>getPitchingInningsValue(season.games[0].playerStats[0])),2);
+  await b.locator('#manualGameStatEditorContainer input[data-stat-field="pitchOuts"]').first().fill('1');await b.locator('#manualGameStatEditorContainer button').filter({hasText:'Save Corrections'}).click();await idle(b);
+  await a.reload();await main(a);assert.equal(await a.evaluate(()=>season.games.length),5);assert.equal(await a.evaluate(()=>getPitchingInningsValue(season.games[0].playerStats[0])),1);
+  check('Real manual correction rebuilds actual-out workload with saved rules and persists once; restoring original count leaves five game logs');
+
   assert.deepEqual(productionRequests,[],'Browser must never contact production');
   assert.deepEqual(errors,[],'No uncaught browser exceptions');
   fs.writeFileSync(path.join(root,'tests/BROWSER_RESULTS.md'),'# Browser acceptance — 2026-10-10\n\nReal isolated staging backend; desktop and 390px phone Chromium.\n\n'+results.map(r=>'- PASS: '+r).join('\n')+'\n\nNo production requests or uncaught exceptions/CSP violations.\n');
