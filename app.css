@@ -1278,3 +1278,21 @@
 .directory-row h3 {flex:1 1 220px;overflow-wrap:anywhere;}
 .form-grid {display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px;}
 input:focus-visible,button:focus-visible,summary:focus-visible {outline:3px solid #64d8ff;outline-offset:3px;}
+
+/* Short, two-screen league setup; existing app colors retained. */
+.wizard {max-width:600px;margin:24px auto;padding:24px;}
+.setup-progress {display:flex;gap:16px;color:#aaa;font-size:14px;margin-bottom:28px;}
+.setup-progress [aria-current] {color:#ffd700;border-bottom:2px solid #ffd700;padding-bottom:8px;}
+.setup-intro {color:#bbb;line-height:1.6;margin-bottom:24px;overflow-wrap:anywhere;}
+.wizard fieldset {border:1px solid #444;border-radius:12px;padding:20px;margin:22px 0;min-width:0;}
+.wizard legend {font-weight:700;padding:0 8px;}
+.wizard label {display:block;font-weight:600;}
+.wizard input {box-sizing:border-box;width:100%;margin-top:8px;}
+.wizard small,.wizard fieldset p {display:block;color:#bbb;font-weight:400;line-height:1.5;}
+.code-input {display:flex;gap:8px;align-items:center;}.code-input input {flex:1;min-width:0;}.code-input button {width:auto;}
+.field-error {color:#ffb3b3;font-size:14px;}.field-error:empty {display:none;}
+.setup-summary {padding:16px;border-radius:10px;background:#303030;line-height:1.6;}
+.setup-notes {color:#bbb;line-height:1.6;}.setup-notes summary {cursor:pointer;}
+.wizard-actions {display:flex;gap:12px;flex-wrap:wrap;margin-top:24px;}.wizard-actions .secondary {background:#333;color:#fff;}
+button:disabled {opacity:.55;cursor:not-allowed;}button:focus-visible,input:focus-visible,summary:focus-visible {outline:3px solid #ffd700;outline-offset:3px;}
+@media(max-width:600px) {.wizard {margin:12px auto;padding:16px;}.wizard fieldset {padding:16px;}.wizard .form-grid {grid-template-columns:1fr;}.wizard-actions button {flex:1;min-height:48px;}}

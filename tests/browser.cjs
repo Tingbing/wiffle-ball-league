@@ -39,6 +39,7 @@ async function play(page, result) {
     if(!filename.startsWith(root + path.sep) || !/\.(html|js|css)$/.test(filename)) { res.writeHead(404); return res.end(); }
     try {
       let data = fs.readFileSync(filename, 'utf8');
+      if(filename.endsWith('.html'))data=data.replace(/connect-src https:\/\/hunqtklytyorvmztgpqt.supabase.co/g,'connect-src https://axyywkipikyahayzipbu.supabase.co');
       if(path.basename(filename) === 'app.boot.js') {
         data = data.replace(/const SUPABASE_URL = "[^"]+";/, `const SUPABASE_URL = "${staging}";`)
           .replace(/const SUPABASE_ANON_KEY = "[^"]+";/, `const SUPABASE_ANON_KEY = "${anon}";`);
@@ -87,23 +88,48 @@ async function play(page, result) {
   await a.locator('#createName').focus(); await a.keyboard.press('Tab');
   assert.equal(await a.evaluate(()=>document.activeElement.id),'createCode');
   await a.locator('#createCode').fill('AAAAAAAA');
-  await a.locator('#createTeamCount').fill('3');
-  await a.locator('#createTeamCount').dispatchEvent('change');
-  await a.locator('#createWeeks').fill('7');
-  await a.locator('#createInnings').fill('5');
-  await a.locator('#createOuts').fill('3');
-  await a.locator('#createSubmit').click(); await idle(a);
-  assert.match(await a.locator('#createMessage').textContent(),/letter and a number or symbol/);
-  assert.equal(await a.locator('#mainMenu').isVisible(),false);
+  let creates=0;
+  a.on('request',r=>{if(r.url().endsWith('/wbl_create'))creates++;});
+  await click(a,'#createNext');
+  assert.match(await a.locator('#createCodeError').textContent(),/letter and a number or symbol/);
+  assert.equal(creates,0);
   await a.locator('#createCode').fill(code);
-  check('Keyboard form navigation and server-side code validation');
-  await a.locator('#createSubmit').click();
-  await main(a);
+  await click(a,'#createNext');
+  assert.equal(await a.locator('#createSettingsScreen').isVisible(),true);
+  assert.equal(creates,0);
+  await click(a,'#createBack');
+  assert.equal(await a.locator('#createCode').inputValue(),code);
+  await click(a,'#createNext');
+  await a.locator('#createWeeks').fill('7');await a.locator('#createInnings').fill('5');await a.locator('#createOuts').fill('3');
+  await a.screenshot({path:'tests/setup-settings.png',fullPage:true});
+  await click(a,'#createBack');await a.evaluate(()=>{document.getElementById('createCode').type='password';});await a.screenshot({path:'tests/setup-details.png',fullPage:true});await click(a,'#createNext');
+  assert.equal(await a.locator('#createTeams').count(),0);
+  assert.equal(creates,0);
+  assert.ok(!await a.evaluate(code=>Object.values(localStorage).some(v=>v.includes(code)),code));
+  check('Two creation views, inline validation, Back preservation, no teams/code persistence or early writes');
+  // Commit to staging, then lose the successful response. Refresh must recover without another creation.
+  await a.route(staging+'/rest/v1/rpc/wbl_create',async route=>{await route.fetch();await route.abort();},{times:1});
+  await a.locator('#createSubmit').click();await idle(a);
+  assert.ok(await a.evaluate(()=>!!localStorage.getItem(PENDING_CREATE_KEY)));
+  await a.reload();await main(a);
+  assert.equal(creates,1);
   const id = await a.evaluate(() => LEAGUE_CODE);
   assert.match(id,/^[a-f0-9-]{36}$/);
   assert.equal(await a.locator('#activeLeagueTitle').textContent(),name);
-  assert.match(await a.locator('#activeLeagueRules').textContent(),/7 weeks.*3 teams.*5 innings.*3 outs/);
-  check('UI creates custom three-team league and retains validated access');
+  assert.match(await a.locator('#activeLeagueRules').textContent(),/7 weeks.*0 teams.*5 innings.*3 outs/);
+  assert.deepEqual(await a.evaluate(()=>({teams:league.teams.length,days:schedule.days.length,games:season.games.length})),{teams:0,days:0,games:0});
+  await a.screenshot({path:'tests/setup-empty-league.png',fullPage:true});
+  for(const fn of ['showSeasonStats','showRankings','showSchedule','showPostseason']) {await a.evaluate(fn=>window[fn](),fn);await idle(a);await a.evaluate(()=>showMainMenu());}
+  check('Lost creation response recovers on refresh exactly once; empty league screens remain usable');
+  await click(a,'#leagueReadyState button');
+  await a.screenshot({path:'tests/setup-empty-teams.png',fullPage:true});
+  assert.equal(await a.locator('#addPlayerButton').isEnabled(),false);
+  for(let t=1;t<=3;t++) {await a.locator('#teamName').fill('Team '+t);await click(a,'#teamConfigScreen button[onclick="addTeam()"]');}
+  assert.equal(await a.evaluate(()=>league.teams.length),3);
+  await a.evaluate(async()=>{const original=window.prompt;window.prompt=()=>"O'Connor & Sons";try{await renameTeam(2);}finally{window.prompt=original;}});await idle(a);
+  assert.equal(await a.evaluate(()=>league.teams[2].name),"O'Connor & Sons");
+  await click(a,'#teamConfigScreen button[onclick="showMainMenu()"]');
+  check('Teams added inside league one at a time; editing names persists safely');
   assert.equal(await a.evaluate(id=>savedAccess()[id].expires_at,id),null);
   // A grant saved by the previous release may carry an old expiry date.
   await a.evaluate(id=>{const grants=savedAccess();grants[id].expires_at='2000-01-01T00:00:00Z';localStorage.setItem(ACCESS_KEY,JSON.stringify(grants));},id);
@@ -283,12 +309,12 @@ async function play(page, result) {
   await a.locator('#directoryScreen button[onclick="showCreateLeague()"] ').click();
   await a.locator('#createName').fill(name+' B');
   await a.locator('#createCode').fill(code);
-  await a.locator('#createTeamCount').fill('2');
-  await a.locator('#createTeamCount').dispatchEvent('change');
+  await click(a,'#createNext');
   for(const key of ['Weeks','Innings','Outs']) await a.locator('#create'+key).fill('1');
   await a.locator('#createSubmit').click(); await main(a);
   const idB=await a.evaluate(()=>LEAGUE_CODE);
   await click(a,'#mainMenu button[onclick="showTeamConfig()"]');
+  for(let team=0;team<2;team++){await a.locator('#teamName').fill('Team '+(team+1));await click(a,'#teamConfigScreen button[onclick="addTeam()"]');}
   for(let team=0;team<2;team++) {
     await a.locator('#teamSelect').selectOption(String(team));
     await a.locator('#playerName').fill('B Player '+team);

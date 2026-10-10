@@ -398,7 +398,7 @@ function renderRecordingStatus() {
 }
 
 // Existing non-game features participate in a single version-checked league transaction.
-for(const name of ['addTeam','addPlayer','removeTeam','removePlayer','addSeasonSub','removeSeasonSub',
+for(const name of ['addTeam','renameTeam','addPlayer','removeTeam','removePlayer','addSeasonSub','removeSeasonSub',
   'removeSubAssignment','confirmSubAssignment','applySelectedScheduleChange','applyFiveTeamDayEdit',
   'forceRegenerateSchedule','endSeriesEarly','createPostseasonBracket','resetPostseason',
   'saveManualGameStatEditorCorrections','clearCurrentStatsOnly','resetSeason','restoreStatsBackupFromPayload']) {

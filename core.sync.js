@@ -28,7 +28,7 @@ async function wblRpc(name,args) {
         Authorization:'Bearer '+SUPABASE_ANON_KEY}, body:JSON.stringify(args)
     });
     const result=await response.json();
-    if(!response.ok) { const e=new Error(result.message || 'Server request failed'); e.definite=response.status>=400 && response.status<500; throw e; }
+    if(!response.ok) { const raw=String(result.message || ''); const safe=/^(ACCESS_REQUIRED|LEAGUE_CHANGED|LIVE_GAME|SCORED_SEASON|OP_ID_REUSED|INVALID_|GAME_EXISTS|SLOT_CHANGED|ALREADY_COMPLETE|STALE_|LEASE_|NOT_OWNER|OWNER_|EPOCH_|REVISION_|SEASON_RULES_CHANGED|Use |Settings |Each team |Players need |Leagues support |Invalid creation |Add at least)/.test(raw); const e=new Error(safe?raw:'The server could not accept this request. Refresh and try again.'); e.definite=response.status>=400 && response.status<500; throw e; }
     if(!result) throw new Error('Backend migration is missing. Run database/01_recording_handoff.sql.');
     if(privateRpc && generation!==accessGeneration) throw new Error("League changed; old response ignored.");
     if(result.error) {const e=new Error(result.error);e.definite=true;throw e;}

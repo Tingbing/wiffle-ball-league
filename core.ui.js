@@ -44,7 +44,7 @@ function showMainMenu() {
   }
   if(!recording.pending) { game=null; recording.row=null; }
   hideAllScreens(); document.getElementById("mainMenu").classList.remove("hidden");
-  updatePublicAccessUI(); renderLiveGameList();
+  updatePublicAccessUI(); renderLiveGameList(); document.getElementById("leagueReadyState").classList.toggle("hidden",league.teams.length>0);
 }
 
 function showTeamConfig() {
@@ -228,7 +228,7 @@ async function showPostseason() {
 }
 
 function hideAllScreens() {
-	for(const id of ["directoryScreen","joinScreen","createLeagueScreen","leagueSettingsScreen"]) document.getElementById(id)?.classList.add("hidden");
+	for(const id of ["directoryScreen","joinScreen","createLeagueScreen","createSettingsScreen","leagueSettingsScreen"]) document.getElementById(id)?.classList.add("hidden");
 	document.getElementById("publicMenu")?.classList.add("hidden");
 	document.getElementById("mainMenu").classList.add("hidden");
 	document.getElementById("teamConfigScreen").classList.add("hidden");
@@ -284,6 +284,17 @@ async function addTeam() {
   if(!confirmMidSeasonStructureChange('add this team')) return false;
   league.teams.push({name,players:[]}); document.getElementById('teamName').value=''; update();
 }
+async function renameTeam(index) {
+  const team=league.teams[index];if(!team)return;
+  if(hasRecordedSeasonGames())return alert('Reset the season before renaming teams with recorded history.');
+  const name=prompt('New team name',team.name)?.trim();if(!name || name===team.name)return;
+  if(name.length>60 || /[<>"\x00-\x1f]/.test(name))return alert('Use 1–60 characters without markup.');
+  if(league.teams.some((t,i)=>i!==index && t.name.toLowerCase()===name.toLowerCase()))return alert('That team already exists.');
+  if(schedule.days.length && !confirm('Renaming this team clears the unplayed schedule. Continue?'))return;
+  delete season.teamRecords[team.name];
+  for(const player of team.players)delete season.playerStats[getPlayerKey(team.name,player)];
+  team.name=name;schedule={days:[],teamNames:[]};update();
+}
 async function addPlayer() {
   const team=league.teams[Number(document.getElementById('teamSelect').value)];
   const name=document.getElementById('playerName').value.replace(/\s+/g,' ').trim();
@@ -295,7 +306,7 @@ async function addPlayer() {
 }
 async function removeTeam(index) {
   const team=league.teams[index]; if(!team) return false;
-  if(league.teams.length<=2) return alert("Keep at least two teams in the league.");
+
   if(hasRecordedSeasonGames()) return alert('Reset the season before deleting teams with recorded history.');
   if(!confirm(`Remove ${team.name} for everyone?`)) return false;
   league.teams.splice(index,1); delete season.teamRecords[team.name];
@@ -328,6 +339,7 @@ function update() {
 		select.appendChild(opt);
 	});
 
+	select.disabled=league.teams.length===0; document.getElementById("addPlayerButton").disabled=league.teams.length===0;
 	let list = document.getElementById("teamList");
 	list.innerHTML = "";
 
@@ -341,11 +353,11 @@ function update() {
 
 		let playersHTML = "";
 		team.players.forEach((player, playerIndex) => {
-			playersHTML += `<div>${player} <button onclick="removePlayer(${teamIndex},${playerIndex})">Remove</button></div>`;
+			playersHTML += `<div>${escapeHtml(player)} <button onclick="removePlayer(${teamIndex},${playerIndex})">Remove</button></div>`;
 		});
 		if (playersHTML === "") playersHTML = "No players yet";
 
-		div.innerHTML = `<b>${team.name}</b> <button onclick="removeTeam(${teamIndex})">Remove Team</button><br>Players:<br>${playersHTML}`;
+		div.innerHTML = `<b>${escapeHtml(team.name)}</b> <button onclick="renameTeam(${teamIndex})">Edit name</button> <button onclick="removeTeam(${teamIndex})">Remove Team</button><br>Players:<br>${playersHTML}`;
 		list.appendChild(div);
 	});
 
@@ -359,7 +371,7 @@ function update() {
 		} else {
 			subs.forEach((subName, subIndex) => {
 				const row = document.createElement("div");
-				row.innerHTML = `${subName} <button onclick="removeSeasonSub(${subIndex})">Remove</button>`;
+				row.innerHTML = `${escapeHtml(subName)} <button onclick="removeSeasonSub(${subIndex})">Remove</button>`;
 				subsList.appendChild(row);
 			});
 		}
@@ -387,6 +399,8 @@ function addSeasonSub() {
 		return alert("That name is already being used by a roster player. Pick a different sub name.");
 	}
 
+	try {validateSafeTextTree(subName);}catch(error){return alert(error.message);}
+	if(subName.length>60)return alert('Use up to 60 characters for a substitute name.');
 	season.seasonSubs.push(subName);
 	initSubStats(subName);
 	input.value = "";

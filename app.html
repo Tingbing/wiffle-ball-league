@@ -3,11 +3,13 @@
 <head>
 	<meta charset="utf-8">
 	<meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; connect-src https://hunqtklytyorvmztgpqt.supabase.co; img-src 'self' data:; base-uri 'none'; form-action 'none'; object-src 'none'; upgrade-insecure-requests">
+  <meta name="referrer" content="no-referrer">
 	<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
 	<meta http-equiv="Pragma" content="no-cache" />
 	<meta http-equiv="Expires" content="0" />
 	<title>Wiggle Ball League</title>
-<link rel="stylesheet" href="app.css?v=multi4">
+<link rel="stylesheet" href="app.css?v=setup5">
 
 </head>
 
@@ -27,16 +29,31 @@
   <details id="setupFields"><summary>One-time setup for an existing league</summary><p>Use the private setup token supplied to the league owner. Choose a new shared code with 8–64 bytes, a letter and a number or symbol.</p><label for="setupToken">Private setup token</label><input id="setupToken" type="password" autocomplete="off"></details>
   <button id="joinSubmit">Open league</button><p id="joinMessage" role="alert"></p></form>
 </section>
-<section id="createLeagueScreen" class="directory-shell hidden">
-  <button onclick="if(!accessBusy)showDirectory()">← League directory</button><h1>Create a league</h1>
+<section id="createLeagueScreen" class="directory-shell wizard hidden">
+  <nav aria-label="League setup progress" class="setup-progress"><span aria-current="step">1. League details</span><span>2. Settings</span></nav>
+  <h1>Create a league</h1><p class="setup-intro">Start with a name and a code to share with your league.</p>
+  <form onsubmit="nextCreateStep(event)" novalidate>
+    <label for="createName">League name</label><input id="createName" required maxlength="80" autocomplete="off" aria-describedby="createNameError">
+    <p id="createNameError" class="field-error" role="alert"></p>
+    <label for="createCode">Shared access code</label><div class="code-input"><input id="createCode" type="password" required minlength="8" maxlength="64" autocomplete="new-password" aria-describedby="createCodeHelp createCodeError"><button type="button" id="createCodeToggle" onclick="toggleCreateCode()" aria-controls="createCode" aria-pressed="false">Show</button></div>
+    <p id="createCodeHelp">Anyone with this code can view and manage the league. Use 8–64 bytes, with a letter and a number or symbol. Save it privately.</p><p id="createCodeError" class="field-error" role="alert"></p>
+    <div class="wizard-actions"><button id="createNext">Next: League settings</button><button type="button" class="secondary" onclick="cancelCreateLeague()">Cancel</button></div>
+  </form>
+</section>
+<section id="createSettingsScreen" class="directory-shell wizard hidden">
+  <nav aria-label="League setup progress" class="setup-progress"><span>1. League details</span><span aria-current="step">2. Settings</span></nav>
+  <h1 tabindex="-1" id="createSettingsTitle">League settings</h1><p id="createLeagueContext" class="setup-intro"></p>
   <form onsubmit="submitCreate(event)">
-  <label for="createName">League name</label><input id="createName" required maxlength="80">
-  <label for="createCode">Shared access code</label><input id="createCode" type="password" required minlength="8" maxlength="64" autocomplete="new-password"><p>Use 8–64 bytes with a letter and a number or symbol. Share it privately; it grants full access.</p>
-  <label for="createTeamCount">Number of teams (2–8)</label><input id="createTeamCount" type="number" min="2" max="8" value="4" required onchange="updateCreateTeams()">
-  <div id="createTeams" class="form-grid"></div>
-  <div class="form-grid"><label>Season length in weeks<input id="createWeeks" type="number" required min="1" max="52" value="6"></label><label>Innings per game<input id="createInnings" type="number" required min="1" max="9" value="3"></label><label>Outs per half-inning<input id="createOuts" type="number" required min="1" max="6" value="2"></label></div>
-  <p>Each week contains one best-of-three series per team. Odd team counts receive one bye per week. Complete round-robin cycles are balanced; a partial cycle may have unequal opponents or byes. Add players and generate the schedule after creation. Overtime retains the runner-on-second rule; one-out leagues start overtime with zero outs.</p><p id="createPostseason"></p>
-  <button id="createSubmit">Create league</button><p id="createMessage" role="alert"></p></form>
+    <fieldset><legend>Game rules</legend><p>Choose the length of a regulation game.</p><div class="form-grid">
+      <label>Innings per game<input id="createInnings" type="number" required min="1" max="9" step="1" value="3" oninput="updateCreateSummary()"><small>1–9 innings</small></label>
+      <label>Outs per half-inning<input id="createOuts" type="number" required min="1" max="6" step="1" value="2" oninput="updateCreateSummary()"><small>1–6 outs</small></label>
+    </div></fieldset>
+    <fieldset><legend>Season setup</legend><label>Season length (weeks)<input id="createWeeks" type="number" required min="1" max="52" step="1" value="6" oninput="updateCreateSummary()"><small>1–52 weeks</small></label><p>One best-of-three series per team each week. Add teams and players inside your league, then create the schedule.</p></fieldset>
+    <details class="setup-notes"><summary>Schedule and postseason details</summary><p>Odd team counts have byes. Complete round-robin cycles are balanced; partial cycles may have unequal opponents or byes. The existing double-elimination postseason supports exactly four teams.</p><p>Overtime starts with a runner on second and one out. One-out leagues start overtime with zero outs.</p></details>
+    <p id="createSummary" class="setup-summary" aria-live="polite"></p>
+    <div class="wizard-actions"><button id="createSubmit">Create league</button><button id="createBack" type="button" class="secondary" onclick="backCreateStep()">Back</button></div>
+    <p id="createMessage" role="alert"></p>
+  </form>
 </section>
 <section id="leagueSettingsScreen" class="directory-shell hidden">
   <button onclick="showMainMenu()">← Main menu</button><h1>League settings</h1><p id="settingsMessage" role="status"></p>
@@ -60,6 +77,7 @@
 <!-- MAIN MENU -->
 <div id="mainMenu" class="hidden">
 <div class="card"><h2 id="activeLeagueTitle"></h2><p id="activeLeagueRules"></p><button onclick="switchToDirectory()">Switch leagues</button><button onclick="showLeagueSettings()">League settings</button><button onclick="leaveLeagueAccess()">Leave &amp; revoke this device’s access</button></div>
+<div id="leagueReadyState" class="card hidden" role="status"><h3>Your league is ready. Add your teams to get started.</h3><p>Teams and players save as you go. Create your schedule when at least two teams have players.</p><button onclick="showTeamConfig()">Add teams</button></div>
 <div id="connectionMessage" class="card" role="status">Connecting…</div>
 <div id="liveGameList" class="card"></div>
 <div id="recoveryList" class="card hidden"></div>
@@ -73,7 +91,7 @@
 		<p>Manage your league teams and play games</p>
 		
 		<button class="menu-button" onclick="showTeamConfig()">
-			⚙️ Configure Teams
+			⚙️ Teams
 		</button>
 		
 		<button class="menu-button" onclick="showGameSetup()">
@@ -132,19 +150,19 @@
 <div id="teamConfigScreen" class="hidden">
 	<button class="back-button" onclick="showMainMenu()">← Back to Main Menu</button>
 	
-	<h2>⚙️ Team Configuration</h2>
+	<h2>⚙️ Teams &amp; players</h2>
 
 	<div class="card">
-		<h3>Add Team (2–8 teams)</h3>
-		<input id="teamName" placeholder="Team Name">
+		<h3>Add Team (up to 8 teams)</h3>
+		<label for="teamName">Team name</label><input id="teamName" placeholder="Team Name" maxlength="60">
 		<button onclick="addTeam()">Add Team</button>
 	</div>
 
 	<div class="card">
 		<h3>Add Player (Max 2 Per Team)</h3>
 		<select id="teamSelect"></select>
-		<input id="playerName" placeholder="Player Name">
-		<button onclick="addPlayer()">Add Player</button>
+		<label for="playerName">Player name</label><input id="playerName" placeholder="Player Name" maxlength="60">
+		<button id="addPlayerButton" onclick="addPlayer()">Add Player</button>
 	</div>
 
 <div class="card">
@@ -476,22 +494,22 @@
 </div>
 <!-- SCHEDULE SCREEN -->
 
-<script src="core.state.js?v=multi4"></script>
-<script src="core.sync.js?v=multi4"></script>
-<script src="core.schedule.js?v=multi4"></script>
-<script src="core.stats.js?v=multi4"></script>
-<script src="core.ui.js?v=multi4"></script>
-<script src="app.game.state.js?v=multi4"></script>
-<script src="app.game.autosave.js?v=multi4"></script>
-<script src="app.game.runners.js?v=multi4"></script>
-<script src="app.game.rules.js?v=multi4"></script>
-<script src="app.game.ui.js?v=multi4"></script>
-<script src="app.game.play.js?v=multi4"></script>
-<script src="app.game.save.js?v=multi4"></script>
-<script src="app.game.views.js?v=multi4"></script>
-<script src="app.recording.js?v=multi4"></script>
-<script src="app.leagues.js?v=multi4"></script>
-<script src="app.boot.js?v=multi4"></script>
+<script src="core.state.js?v=setup5"></script>
+<script src="core.sync.js?v=setup5"></script>
+<script src="core.schedule.js?v=setup5"></script>
+<script src="core.stats.js?v=setup5"></script>
+<script src="core.ui.js?v=setup5"></script>
+<script src="app.game.state.js?v=setup5"></script>
+<script src="app.game.autosave.js?v=setup5"></script>
+<script src="app.game.runners.js?v=setup5"></script>
+<script src="app.game.rules.js?v=setup5"></script>
+<script src="app.game.ui.js?v=setup5"></script>
+<script src="app.game.play.js?v=setup5"></script>
+<script src="app.game.save.js?v=setup5"></script>
+<script src="app.game.views.js?v=setup5"></script>
+<script src="app.recording.js?v=setup5"></script>
+<script src="app.leagues.js?v=setup5"></script>
+<script src="app.boot.js?v=setup5"></script>
 
 
 

@@ -9,5 +9,5 @@ function getStoredName() { return "Recorder"; }
     privateScreenTemplates.set(id,document.getElementById(id).innerHTML);
   }
   hideAllScreens();
-  try {await openRoute({restoreLast:true});} catch(error) {showDirectory();message('directoryAccessMessage',error.message);}
+  try {if(!await recoverPendingCreation())await openRoute({restoreLast:true});} catch(error) {showDirectory();message('directoryAccessMessage',error.message);}
 })();

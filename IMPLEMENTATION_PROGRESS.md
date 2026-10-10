@@ -96,3 +96,17 @@ The permanent-access production migration preserved the complete league/game/rec
 Keep the new backend access boundary closed. Revert or repair frontend changes through GitHub, preserve post-release records, and fix forward against isolated staging. Do not deploy an old frontend expecting anonymous access, reopen old RPC grants, or blindly replace current data with a pre-release backup. Restores must account for records written after release. Private backup restore uses jsonb_populate_recordset in FK order league → games → receipts. tests/fixtures/baseline.sql is synthetic test-only infrastructure, never a production migration.
 
 For future work, inspect current main, deployed Pages commit and Supabase migration history before making changes. Do not reapply migrations blindly or rerun creation-heavy tests without a reason. No scheduled continuation or paid upgrade was created. The final documentation checkpoint requires no repeat of successful application tests.
+
+# Two-step setup and security update — 2026-10-10
+
+Working branch: `codex/league-setup-security-2026-10-10`. Current main was cloned directly; no new ZIP was attached. No AGENTS.md exists. Production remains unchanged during isolated validation.
+
+Implemented locally: details-only first screen, separate grouped settings screen, in-memory code, Back/Cancel, empty creation, original-token creation recovery after lost responses, team-name edits inside the existing Teams screen, empty dashboard guidance, protected-cache removal on Leave/revocation, backup size/text/field guards, restrictive resource CSP and referrer policy, safe error messages. Audit and rate-limit improvements plus zero/one-team validation are additive.
+
+Staging migrations applied: `league_setup_security` and `setup_text_validation`; the single checked-in migration includes both. The backend supports existing creation payloads and permanent device grants. The sealed representative restore schema was not modified or reopened.
+
+Validation so far: 12 existing Node rule/schedule tests passed; npm audit found zero vulnerabilities in the pinned browser-test dependencies. Real staging HTTPS tests cover empty creation, retries/recovery, exact settings, malformed inputs, unauthorized/cross-league access, one-team save/removal, game prerequisites, second-device persistence, private/audit/legacy API denial, Leave/rotation, old-client payloads and throttling. Full rerun is in progress. Local Chromium download returned invalid archives; use the existing GitHub-hosted Chromium acceptance route. Production deployment is gated on those results.
+
+Design evidence: TeamSnap's official Add a sports organization team article adds teams inside an existing organization/program. LeagueApps' official Getting Started With Program Creation describes staged details setup, defaults, and keeping optional fields simple. The exact two steps, grouped number inputs, summary and empty-dashboard copy are this app's design decisions.
+
+Next: finish staging HTTP and GitHub browser checks, inspect screenshots, record security evidence/limitations, snapshot production and recheck drift, then apply tested additive migration and merge/deploy if all relevant gates pass. Do not report production changes until verified.

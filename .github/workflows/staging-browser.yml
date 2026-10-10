@@ -1,8 +1,8 @@
 name: Staging browser acceptance
 on:
   push:
-    branches: [codex/multi-league-2026-10-09]
-    paths: ['*.js', '*.html', '*.css', 'tests/**', '.github/workflows/staging-browser.yml']
+    branches: [codex/league-setup-security-2026-10-10]
+    paths: ['*.js', '*.html', '*.css', 'tests/**', 'package.json', 'package-lock.json', '.github/workflows/staging-browser.yml']
 permissions:
   contents: read
 concurrency:
@@ -20,8 +20,16 @@ jobs:
       - name: Baseline and custom rules
         run: node --test tests/*.test.cjs
       - name: Install pinned browser test dependency
-        run: npm install --no-save --package-lock=false playwright@1.64.0
+        run: npm ci
       - name: Install Chromium
         run: npx playwright install --with-deps chromium
       - name: Desktop, mobile and two-device staging checks
         run: node tests/browser.cjs
+      - name: Retain screenshots and test evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: league-setup-evidence
+          path: |
+            tests/setup-*.png
+            tests/BROWSER_RESULTS.md

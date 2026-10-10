@@ -1,0 +1,44 @@
+import assert from 'node:assert/strict';
+import {randomUUID,randomBytes} from 'node:crypto';
+import {writeFileSync} from 'node:fs';
+const url=process.env.WBL_TEST_URL,key=process.env.WBL_TEST_KEY;
+if(url!=='https://axyywkipikyahayzipbu.supabase.co'||!key)throw new Error('Only the existing isolated backend is allowed.');
+const results=[],ids=[],token=()=>randomBytes(32).toString('hex');
+async function api(name,args,headers={}) {const r=await fetch(url+'/rest/v1/'+name,{method:'POST',headers:{apikey:key,'Content-Type':'application/json',...headers},body:JSON.stringify(args)});const text=await r.text();let data;try{data=JSON.parse(text);}catch{data={error:'Non-JSON response'};}return {status:r.status,data};}
+const rpc=(name,args,headers)=>api('rpc/'+name,args,headers);
+const ok=r=>{assert.equal(r.status,200,JSON.stringify(r.data));assert.ok(!r.data.error,JSON.stringify(r.data));return r.data;};
+const deny=r=>assert.ok(r.status>=400||r.data.error,JSON.stringify(r.data));
+const pass=n=>{results.push(n);console.log('PASS '+n);};
+const rules={weeks:7,innings:5,outs:3},code='Synthetic8!',tA=token(),tB=token();
+const draft=(name,t)=>({op_id:randomUUID(),session_token:t,name,code,settings:rules,teams:{teams:[]}});
+const aReq=draft('SETUP SECURITY '+randomUUID(),tA),bReq=draft('SETUP SECURITY '+randomUUID(),tB);
+for(const change of [{settings:{...rules,innings:10}},{settings:{...rules,outs:1.5}},{settings:{...rules,hidden:true}},{name:'<img src=x onerror=alert(1)>'},{name:18},{code:25},{code:'weak'},{sessions:[]}])deny(await rpc('wbl_create',{p_request:{...aReq,...change}}));pass('Invalid settings, names, codes, markup and disallowed fields rejected through direct requests');
+const a=ok(await rpc('wbl_create',{p_request:aReq})),b=ok(await rpc('wbl_create',{p_request:bReq}));ids.push(a.league_id,b.league_id);
+const retried=await Promise.all([rpc('wbl_create',{p_request:aReq}),rpc('wbl_create',{p_request:aReq})]);retried.forEach(r=>assert.equal(ok(r).league_id,a.league_id));pass('Empty atomic creation and simultaneous idempotent retries');
+const read=(lid,t)=>rpc('wbl_read',{p_league_id:lid,p_access_token:t});
+let A=ok(await read(a.league_id,tA)).league;
+assert.deepEqual(A.teams_json,{teams:[]});assert.deepEqual(A.settings,rules);assert.deepEqual(A.schedule_json,{days:[],teamNames:[]});assert.equal(A.season_json.games.length,0);pass('Saved empty roster and schedule with exact custom rules');
+assert.equal(ok(await rpc('wbl_recover_creation',{p_op_id:aReq.op_id,p_session_token:tA})).league_id,a.league_id);
+deny(await rpc('wbl_recover_creation',{p_op_id:aReq.op_id,p_session_token:tB}));assert.equal(ok(await rpc('wbl_recover_creation',{p_op_id:randomUUID(),p_session_token:token()})).league_id,undefined);pass('Creation recovery requires original device grant and cannot create records');
+deny(await read(a.league_id,token()));deny(await read(b.league_id,tA));deny(await read(a.league_id,tB));pass('Forged, missing and substituted league access denied');
+const mutate=(lid,t,l,teams,extra={})=>rpc('wbl_mutate',{p_request:{league_id:lid,access_token:t,op:'league',op_id:randomUUID(),league_revision:l.revision,name:l.name,settings:l.settings,teams,season:l.season_json,schedule:l.schedule_json,...extra}});
+for(const teams of [{teams:[{name:'Bad',players:[{}]}]},{teams:[{name:'One',players:['Same']},{name:'Two',players:['same']}]},{teams:[{name:'One',players:['x'.repeat(61)]}]},{teams:[{name:'One',players:[],league_id:b.league_id}]},{teams:Array.from({length:9},(_,i)=>({name:'T'+i,players:[]}))}])deny(await mutate(a.league_id,tA,A,teams));
+deny(await mutate(a.league_id,tA,A,{teams:[]},{credentials:{}}));deny(await mutate(b.league_id,tA,A,{teams:[]}));pass('Team/player types, limits, duplicates, disallowed fields and cross-league writes rejected');
+let resp=ok(await mutate(a.league_id,tA,A,{teams:[{name:"O'Connor & Sons",players:[]}]}));A=resp.data.league;assert.equal(A.teams_json.teams.length,1);
+resp=ok(await mutate(a.league_id,tA,A,{teams:[]}));A=resp.data.league;assert.equal(A.teams_json.teams.length,0);pass('Save one team then remove last team without placeholders or schedule generation');
+const state={game:{rules,team1:{name:'Fake one',players:['P']},team2:{name:'Fake two',players:['Q']},_gameInstanceId:'manual-'+randomUUID(),gameStats:{},bases:{first:null,second:null,third:null},inning:1,halfInning:'top',outs:0},gameHistory:[]};
+deny(await rpc('wbl_mutate',{p_request:{op:'start',op_id:randomUUID(),league_id:a.league_id,access_token:tA,game_id:randomUUID(),token:token(),league_revision:A.revision,state}}));pass('Backend blocks fabricated-team game start in empty league');
+const device=token();ok(await rpc('wbl_join',{p_league_id:a.league_id,p_code:code,p_session_token:device}));assert.deepEqual(ok(await read(a.league_id,device)).league.teams_json,A.teams_json);pass('Second device sees persisted empty league');
+for(const name of ['wbl_private.audit_events','audit_events','league','sessions','credentials','season_data','season_data_public']) {const r=await fetch(url+'/rest/v1/'+name+'?select=*',{headers:{apikey:key}});assert.ok(r.status>=400);}
+deny(await rpc('wbl_read',{p_game_id:null,p_token:null}));pass('Private tables, audit entries and old anonymous RPC routes are unavailable');
+ok(await rpc('wbl_leave_access',{p_league_id:a.league_id,p_access_token:tA}));deny(await read(a.league_id,tA));ok(await read(a.league_id,device));deny(await rpc('wbl_recover_creation',{p_op_id:aReq.op_id,p_session_token:tA}));pass('Leave revokes old token and recovery without affecting another device');
+ok(await rpc('wbl_change_code',{p_league_id:a.league_id,p_access_token:device,p_code:'Rotated9!'}));deny(await read(a.league_id,device));deny(await rpc('wbl_join',{p_league_id:a.league_id,p_code:code,p_session_token:token()}));pass('Code rotation revokes remembered devices and rejects old code');
+const legacy=ok(await rpc('wbl_create',{p_request:{...draft('SETUP LEGACY '+randomUUID(),token()),teams:{teams:[{name:'One',players:[]},{name:'Two',players:[]}]}}}));ids.push(legacy.league_id);pass('Previous client creation payload remains compatible');
+const over=await rpc('wbl_create',{p_request:draft('SETUP RATE '+randomUUID(),token())});deny(over);assert.match(over.data.error,/limit/);pass('Creation limit enforced through direct API');
+const spoofed=await rpc('wbl_create',{p_request:draft('SETUP SPOOF '+randomUUID(),token())},{'x-forwarded-for':'198.51.100.17','cf-connecting-ip':'198.51.100.19','x-real-ip':'198.51.100.23'});
+assert.ok(spoofed.status>=400||spoofed.data.error,'Forwarded header spoof bypassed creation limit');pass('Client-supplied forwarded headers cannot bypass creation throttle');
+// 31 attempts on B must hit its IP-scoped cap. This is bounded synthetic staging traffic.
+let limited=false;for(let i=0;i<31;i++){const r=await rpc('wbl_join',{p_league_id:b.league_id,p_code:'Wrong8!',p_session_token:token()});deny(r);if(/Too many/.test(r.data.error||''))limited=true;}assert.ok(limited);pass('Code-attempt throttle persists across direct requests and fresh tokens');
+writeFileSync('/tmp/setup-test-ids.json',JSON.stringify(ids));
+writeFileSync('tests/SETUP_SECURITY_RESULTS.md','# Setup and security backend checks\n\nReal HTTPS PostgREST requests to isolated free staging only.\n\n'+results.map(r=>'- PASS: '+r).join('\n')+'\n');
+console.log(results.length+' grouped backend checks passed.');
