@@ -92,7 +92,7 @@ const era = innings > 0
 	: "-";
 
 const kPer3 = innings > 0
-	? ((stats.pitchStrikeouts / innings) * 3).toFixed(2)
+	? formatStatRate(pitchingRate(stats,'pitchStrikeouts',3))
 	: "-";
 
 const values = [
@@ -175,7 +175,7 @@ function createSubPitchingStatsTable(subEntries) {
 	(subEntries || []).forEach(stats => {
 		const innings = getPitchingInningsValue(stats);
 const era = innings > 0 ? formatStatRate(eraValue(stats)) : "-";
-const kPer3 = innings > 0 ? ((stats.pitchStrikeouts / innings) * 3).toFixed(2) : "-";
+const kPer3 = innings > 0 ? formatStatRate(pitchingRate(stats,'pitchStrikeouts',3)) : "-";
 
 const values = [
 	stats.playerName,
@@ -444,7 +444,7 @@ function createSeasonPlayerDetails(option) {
 const battingAvg = stats.atBats > 0 ? (stats.hits / stats.atBats).toFixed(3) : "—";
 const innings = getPitchingInningsValue(stats);
 const era = innings > 0 ? formatStatRate(eraValue(stats)) : "-";
-const kPer3 = innings > 0 ? ((stats.pitchStrikeouts / innings) * 3).toFixed(2) : "-";
+const kPer3 = innings > 0 ? formatStatRate(pitchingRate(stats,'pitchStrikeouts',3)) : "-";
 
 	const header = document.createElement("div");
 	header.className = "season-stats-selection-header";
@@ -511,7 +511,7 @@ function createSeasonTeamDetails(team, rankings) {
 	const battingAvg = Number(totals.atBats || 0) > 0 ? (Number(totals.hits || 0) / Number(totals.atBats || 0)).toFixed(3) : "—";
 	const innings = getPitchingInningsValue(totals);
 	const era = innings > 0 ? formatStatRate(eraValue(totals)) : "-";
-	const kPer3 = innings > 0 ? ((Number(totals.pitchStrikeouts || 0) / innings) * 3).toFixed(2) : "-";
+	const kPer3 = innings > 0 ? formatStatRate(pitchingRate(totals,'pitchStrikeouts',3)) : "-";
 
 	const header = document.createElement("div");
 	header.className = "season-stats-selection-header";
@@ -927,7 +927,7 @@ function displayRankings() {
 	pitchingGrid.appendChild(createRankingsTable("K/3", players, {
 getValue: stats => {
 	const innings = getPitchingInningsValue(stats);
-	return innings > 0 ? (stats.pitchStrikeouts / innings) * 3 : NaN;
+	return innings > 0 ? pitchingRate(stats,'pitchStrikeouts',3) : NaN;
 },
 isEligible: stats => getPitchingInningsValue(stats) > 0,
 		formatValue: value => value.toFixed(2)
@@ -953,7 +953,7 @@ isEligible: stats => getPitchingInningsValue(stats) > 0,
 	pitchingGrid.appendChild(createRankingsTable("Total Innings Pitched", players, {
 		getValue: stats => getPitchingInningsValue(stats),
 isEligible: stats => getPitchingInningsValue(stats) > 0,
-		formatValue: value => value.toFixed(1)
+		formatValue: value => value.toFixed(3)
 	}));
 
 	pitchingSection.appendChild(pitchingGrid);
@@ -1731,7 +1731,7 @@ function createPastGamePitchingTable(entry, teamName) {
 
 	const rows = rowsSource.map(stats => {
 		const innings = getPitchingInningsValue(stats);
-		const kPer3 = innings > 0 ? ((Number(stats.pitchStrikeouts || 0) / innings) * 3).toFixed(2) : "-";
+		const kPer3 = innings > 0 ? formatStatRate(pitchingRate(stats,'pitchStrikeouts',3)) : "-";
 		const era = innings > 0 ? formatStatRate(eraValue(stats,entry)) : "-";
 
 		return [

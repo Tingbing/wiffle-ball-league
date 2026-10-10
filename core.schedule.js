@@ -823,7 +823,8 @@ function hasRecordedScheduleResults(scheduleObj = schedule) {
 
 function hasRecordedSeasonGames() {
 	return hasRecordedScheduleResults(schedule)
-		|| ((season?.games || []).some(entry => !!entry));
+		|| ((season?.games || []).some(entry => !!entry))
+        || [...Object.values(season?.playerStats || {}),...Object.values(season?.subStats || {})].some(line=>STATS_BACKUP_NUMERIC_FIELDS.some(k=>Number(line[k] || 0)>0));
 }
 
 function getScheduleGuardState() {

@@ -181,7 +181,7 @@ function clearLeagueCache(id) {
 function showLeagueSettings() {
   hideAllScreens();el('leagueSettingsScreen').classList.remove('hidden');el('settingsName').value=leagueName;
   for(const [key,value] of Object.entries({Weeks:leagueSettings.weeks,Innings:leagueSettings.innings,Outs:leagueSettings.outs,MaxPlayers:rosterLimit(),SeriesLength:configuredSeriesLength()}))el('settings'+key).value=value;
-  const blocked=!!game||liveGames.length>0||season.games.length>0;
+  const blocked=!!game||liveGames.length>0||hasRecordedSeasonGames();
   for(const key of ['Weeks','Innings','Outs','MaxPlayers','SeriesLength'])el('settings'+key).disabled=blocked;
   message('settingsMessage',blocked?'Rule and roster changes are blocked during active games or scored seasons. Finish games, download a backup, then reset the season to change rules.':'Changing rules clears the empty schedule. Configure team names and players under Configure Teams.');
 }
@@ -191,7 +191,7 @@ async function submitSettings(event) {
     const rules=readRules('settings');
     const conflicts=league.teams.filter(t=>t.players.length>Number(rules.maxPlayers ?? 2));
     if(conflicts.length)throw new Error('Maximum players cannot be reduced: '+conflicts.map(t=>t.name+' has '+t.players.length).join(', ')+'. Remove players first.');
-    if(season.games.length&&JSON.stringify(rules)!==JSON.stringify(leagueSettings))throw new Error('Use a new season to change settings after scoring.');
+    if(hasRecordedSeasonGames()&&JSON.stringify(rules)!==JSON.stringify(leagueSettings))throw new Error('Use a new season to change settings after scoring.');
     leagueName=el('settingsName').value.trim();
     if(JSON.stringify(rules)!==JSON.stringify(leagueSettings)) {leagueSettings=rules;season.rules=deepCloneJson(rules);schedule={days:[],teamNames:[]};}
   },[]);renderLeagueHeader();

@@ -440,7 +440,9 @@ function createComparableStatsLine(rawStats, fallback = {}) {
 	normalized.outsPerInning = Number(rawStats?.outsPerInning || fallback.outsPerInning || 2);
 	normalized.pitchingCountsKnown = rawStats?.pitchingCountsKnown === true;
 	normalized.regulationInnings = Number(rawStats?.regulationInnings || fallback.regulationInnings || 3);
-	if(Array.isArray(rawStats?.pitchingWorkload))normalized.pitchingWorkload=deepCloneJson(rawStats.pitchingWorkload);
+	const parts=Array.isArray(rawStats?.pitchingWorkload)?rawStats.pitchingWorkload:[{outs:normalized.pitchOuts,outsPerInning:normalized.outsPerInning}];
+ const work=new Map();for(const part of parts){const d=Number(part.outsPerInning);work.set(d,(work.get(d)||0)+Number(part.outs));}
+ normalized.pitchingWorkload=[...work].filter(([,outs])=>outs>0).sort((a,b)=>a[0]-b[0]).map(([outsPerInning,outs])=>({outs,outsPerInning}));
 	normalized.inningsPitched = getPitchingInningsValue(normalized);
 	return normalized;
 }
@@ -448,7 +450,7 @@ function createComparableStatsLine(rawStats, fallback = {}) {
 function createComparableStatsBucketSignature(bucket) {
 	const entries = Object.keys(bucket || {})
 		.sort((a, b) => a.localeCompare(b))
-		.map(key => [key, createComparableStatsLine(bucket[key])]);
+		.map(key => {const line=createComparableStatsLine(bucket[key]);delete line.regulationInnings;return [key,line];});
 	return JSON.stringify(entries);
 }
 
@@ -615,7 +617,11 @@ function validateScheduleStructure(scheduleObj, rosterLookup, errors, warnings) 
 		return;
 	}
 
-	const originalTeamNames = Array.isArray(scheduleObj.teamNames) ? scheduleObj.teamNames : [];
+	if(Array.isArray(scheduleObj.days) && scheduleObj.days.length===0) {
+   if(!Array.isArray(scheduleObj.teamNames)||uniqueTrimmedStrings(scheduleObj.teamNames).length!==scheduleObj.teamNames.length)errors.push('Empty schedule contains invalid team names.');
+   return; // New leagues and manually scored seasons need no generated schedule.
+ }
+ const originalTeamNames = Array.isArray(scheduleObj.teamNames) ? scheduleObj.teamNames : [];
 	const normalizedTeamNames = uniqueTrimmedStrings(originalTeamNames);
 	if (!normalizedTeamNames.length) {
 		errors.push("Backup schedule is missing team names.");
@@ -669,7 +675,7 @@ function validateScheduleStructure(scheduleObj, rosterLookup, errors, warnings) 
 			if (seriesEntry?.result && !computedResult) {
 				errors.push(`${label} has a saved series result without a valid clinch.`);
 			} else if (seriesEntry?.result && computedResult && !doSeriesResultsMatch(seriesEntry.result, computedResult)) {
-				errors.push(`${label} has a saved series result that does not match the 3 recorded game results.`);
+				errors.push(`${label} has a saved series result that does not match the recorded game results.`);
 			}
 		});
 
@@ -928,7 +934,7 @@ function doesBackupRosterDiffer(backup) {
 function sanitizeImportedStatsBucket(bucket, { subBucket = false } = {}) {
 	const nextBucket = {};
 	Object.entries(bucket || {}).forEach(([key, rawStats]) => {
-		const normalized = createComparableStatsLine(rawStats,{outsPerInning:entry.rules?.outs,regulationInnings:entry.rules?.innings});
+		const normalized = createComparableStatsLine(rawStats);
 		const safeKey = subBucket ? getSubKey(normalized.playerName) : getPlayerKey(normalized.teamName, normalized.playerName);
 		if (!normalized.playerName || (!subBucket && !normalized.teamName)) return;
 
@@ -937,6 +943,9 @@ function sanitizeImportedStatsBucket(bucket, { subBucket = false } = {}) {
 			base[field] = normalized[field];
 		});
         base.outsPerInning=normalized.outsPerInning;
+        base.pitchingCountsKnown=normalized.pitchingCountsKnown;
+        base.pitchingWorkload=deepCloneJson(normalized.pitchingWorkload);
+        base.regulationInnings=normalized.regulationInnings;
 		syncPitchingInnings(base);
 		nextBucket[safeKey] = base;
 	});

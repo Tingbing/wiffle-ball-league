@@ -38,6 +38,14 @@ end $function$
 ;
 
 
+CREATE OR REPLACE FUNCTION wbl_private.has_scored_data(s jsonb, schedule jsonb) RETURNS boolean
+LANGUAGE sql SET search_path='' AS $$
+ select jsonb_array_length(coalesce(s->'games','[]'))>0
+ or exists(select 1 from jsonb_each(coalesce(s->'playerStats','{}')||coalesce(s->'subStats','{}')) p cross join lateral jsonb_each(p.value) v where v.key in ('atBats','hits','walks','hitByPitch','strikeouts','outs','rbis','runsScored','pitchOuts','pitchStrikeouts','fieldingErrors','runsAllowed','earnedRunsAllowed') and jsonb_typeof(v.value)='number' and (v.value#>>'{}')::numeric>0)
+ or exists(select 1 from jsonb_array_elements(coalesce(schedule->'days','[]')) d cross join lateral jsonb_array_elements(coalesce(d->'games','[]')) se cross join lateral jsonb_array_elements(coalesce(se->'gamesInSeries','[]')) g where coalesce(g->'result','null')<>'null'::jsonb)
+$$;
+REVOKE ALL ON FUNCTION wbl_private.has_scored_data(jsonb,jsonb) FROM PUBLIC,anon,authenticated;
+
 CREATE OR REPLACE FUNCTION wbl_private.series_winner(series jsonb) RETURNS text
 LANGUAGE plpgsql SET search_path='' AS $$
 DECLARE n int:=coalesce((series->>'bestOf')::int,3); needed int; a int; b int;
@@ -55,6 +63,7 @@ BEGIN
  perform wbl_private.check_settings(new.settings);
  perform wbl_private.check_teams(new.teams_json);
  cap:=coalesce((new.settings->>'maxPlayers')::int,2);
+ if tg_op='UPDATE' and wbl_private.has_scored_data(old.season_json,old.schedule_json) and wbl_private.has_scored_data(new.season_json,new.schedule_json) and (jsonb_array_length(new.schedule_json->'days')<>jsonb_array_length(old.schedule_json->'days') or new.schedule_json->'teamNames' is distinct from old.schedule_json->'teamNames') then raise exception 'SCORED_SEASON: Frozen schedule cannot be cleared or resized.';end if;
  for team in select value from jsonb_array_elements(new.teams_json->'teams') loop
   if jsonb_array_length(team->'players')>cap then raise exception 'INVALID_ROSTER_CAPACITY: % has % players; maximum is %.',team->>'name',jsonb_array_length(team->'players'),cap;end if;
  end loop;
@@ -62,6 +71,7 @@ BEGIN
  if jsonb_array_length(new.schedule_json->'days')>52 then raise exception 'INVALID_SCHEDULE';end if;
  for day in select value from jsonb_array_elements(new.schedule_json->'days') loop
   names:='{}';si:=0;
+  if tg_op='UPDATE' and wbl_private.has_scored_data(old.season_json,old.schedule_json) and wbl_private.has_scored_data(new.season_json,new.schedule_json) and (day->'day' is distinct from old.schedule_json#>array['days',di::text,'day'] or day->'byeTeam' is distinct from old.schedule_json#>array['days',di::text,'byeTeam'] or jsonb_array_length(day->'games')<>jsonb_array_length(old.schedule_json#>array['days',di::text,'games'])) then raise exception 'SCORED_SEASON: Frozen week identity cannot change.';end if;
   if jsonb_typeof(day->'games') is distinct from 'array' or jsonb_array_length(day->'games')>4 or (day->>'day')::numeric not between 1 and 52 or (day->>'day')::numeric<>trunc((day->>'day')::numeric) or (day->>'day')::int=any(weeks) then raise exception 'INVALID_SCHEDULE_WEEK';end if;
   weeks:=array_append(weeks,(day->>'day')::int);
   for series in select value from jsonb_array_elements(day->'games') loop
@@ -71,7 +81,7 @@ BEGIN
    n:=coalesce((series->>'bestOf')::int,3);
    if (series ? 'bestOf' and (jsonb_typeof(series->'bestOf') is distinct from 'number' or (series->>'bestOf')::numeric not in (1,3,5,7,9))) or jsonb_typeof(series->'gamesInSeries') is distinct from 'array' or jsonb_array_length(series->'gamesInSeries')<>n then raise exception 'INVALID_SERIES_LENGTH';end if;
    if new.settings ? 'seriesLength' and (not series ? 'bestOf' or n<>(new.settings->>'seriesLength')::int) then raise exception 'INVALID_SERIES_LENGTH: Schedule must match season settings.';end if;
-   if tg_op='UPDATE' and jsonb_array_length(coalesce(old.season_json->'games','[]'))>0 and jsonb_array_length(coalesce(new.season_json->'games','[]'))>0 then
+   if tg_op='UPDATE' and wbl_private.has_scored_data(old.season_json,old.schedule_json) and wbl_private.has_scored_data(new.season_json,new.schedule_json) then
     oldseries:=old.schedule_json#>array['days',di::text,'games',si::text];
     if oldseries is null or oldseries->'away' is distinct from series->'away' or oldseries->'home' is distinct from series->'home' or oldseries->'bestOf' is distinct from series->'bestOf' or oldseries->'rules' is distinct from series->'rules' then raise exception 'SCORED_SEASON: Frozen series identity cannot change.';end if;
    end if;
@@ -151,10 +161,10 @@ begin
     perform wbl_private.validate_text_tree(p_request->'schedule');
     perform wbl_private.check_teams(p_request->'teams');
     perform wbl_private.check_settings(p_request->'settings');
-    if exists(select 1 from jsonb_array_elements(coalesce(l.season_json->'games','[]')) e)
+    if wbl_private.has_scored_data(l.season_json,l.schedule_json)
        and p_request#>'{teams,teams}' is distinct from l.teams_json->'teams' then raise exception 'SCORED_SEASON: Reset the season before changing rosters.'; end if;
     if p_request->'settings' is distinct from l.settings and (
-      jsonb_array_length(coalesce(l.season_json->'games','[]'))>0 or jsonb_array_length(coalesce(p_request#>'{season,games}','[]'))>0
+      wbl_private.has_scored_data(l.season_json,l.schedule_json) or wbl_private.has_scored_data(p_request->'season',p_request->'schedule')
     ) then raise exception 'SCORED_SEASON: Reset the season before changing rules.'; end if;
     if coalesce(p_request#>'{season,rules}',l.settings) is distinct from p_request->'settings' then raise exception 'SEASON_RULES_CHANGED'; end if;
     if coalesce(length(trim(p_request->>'name')),0) not between 1 and 80 then raise exception 'Invalid league name'; end if;
@@ -264,6 +274,40 @@ begin
   rc:=jsonb_build_object('op_id',oid,'op',op,'game_id',g.id,'revision',g.revision,'epoch',g.epoch,'league_revision',l.revision);
   insert into wbl_private.receipts(op_id,request_hash,game_id,receipt,league_id) values(oid,request_hash,g.id,rc,lid);
   return jsonb_build_object('ok',true,'receipt',rc,'data',public.wbl_read(lid,access_token,g.id,token));
+end $function$
+;
+
+
+CREATE OR REPLACE FUNCTION wbl_private.validate_state(s jsonb)
+ RETURNS void
+ LANGUAGE plpgsql
+ SET search_path TO ''
+AS $function$
+declare h jsonb; t jsonb; cap int;
+begin
+  if s is null or jsonb_typeof(s)<>'object' or octet_length(s::text)>4194304
+    or jsonb_typeof(s->'game') is distinct from 'object'
+    or jsonb_typeof(s->'gameHistory') is distinct from 'array'
+    or jsonb_typeof(s#>'{game,gameStats}') is distinct from 'object'
+    or jsonb_typeof(s#>'{game,bases}') is distinct from 'object'
+    or coalesce(s#>>'{game,halfInning}','') not in ('top','bottom')
+    or coalesce((s#>>'{game,inning}')::integer,0)<1
+    or coalesce(s#>>'{game,team1,name}','')=''
+    or coalesce(s#>>'{game,team2,name}','')=''
+    or s#>>'{game,team1,name}'=s#>>'{game,team2,name}'
+    or coalesce(s#>>'{game,_gameInstanceId}','')='' then
+    raise exception 'INVALID_STATE: Complete game state is required (maximum 4 MiB).';
+  end if;
+  if coalesce((s#>>'{game,outs}')::int,-1)<0 or coalesce((s#>>'{game,outs}')::int,-1)>coalesce((s#>>'{game,rules,outs}')::int,2) then raise exception 'INVALID_OUTS'; end if;
+  if s#>'{game,rules}' is not null then perform wbl_private.check_settings(s#>'{game,rules}'); end if;
+  cap:=coalesce((s#>>'{game,rules,maxPlayers}')::int,2);
+  for t in select value from jsonb_array_elements(jsonb_build_array(s#>'{game,team1}',s#>'{game,team2}')) loop
+   if jsonb_typeof(t->'players') is distinct from 'array' or jsonb_array_length(t->'players') not between 1 and cap then raise exception 'INVALID_ROSTER_CAPACITY: Game lineups must fit the active roster limit.';end if;
+  end loop;
+  perform wbl_private.validate_text_tree(s-'gameHistory');
+  for h in select value from jsonb_array_elements(s->'gameHistory') loop
+    perform wbl_private.validate_text_tree((h#>>'{}')::jsonb);
+  end loop;
 end $function$
 ;
 
