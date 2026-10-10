@@ -128,3 +128,13 @@ Eight real production smoke groups passed on one labeled synthetic league: minim
 Production security checks: zero private tables without RLS, zero API-role private table grants, no Storage buckets, no app Realtime publication. Recovery RPC has intended execution access; audit trigger does not. Security advisers remain consistent with the deliberately gated RPC/private-table architecture and unused Auth/legacy warnings.
 
 Release next: merge PR #5, allow existing GitHub Pages deployment, verify deployed source hashes/HTTPS, and record final state. Backend remains compatible with the preceding client while frontend deploys. No paid infrastructure or resets were used. Review `SECURITY_OVERVIEW.md` for implemented protections and the real static-hosting/browser-storage limitations.
+
+## Final setup release state — 2026-10-10
+
+PR #5 merged: https://github.com/Tingbing/wiffle-ball-league/pull/5 . Application release commit: `a5cc9bc09c1188d57d6463497815123fb9be6221`. Successful GitHub Pages build/deployment: https://github.com/Tingbing/wiffle-ball-league/actions/runs/38071575038 . Live app: https://tingbing.github.io/wiffle-ball-league/app.html . All 14 changed application files served over HTTPS match tested local source by SHA-256. Production tool-assigned migration version: `20261010171142 league_setup_security`; repository migration: `20261010164826_league_setup_security.sql`.
+
+Additional cloud-browser smoke observed the deployed directory and the details-only first screen, inline empty-input validation/focus, and Cancel returning to the loaded directory. No league creation was submitted through this browser. Directory showed the real league plus the known synthetic smoke league. Browser-extension metadata errors are outside this app; no application runtime/CSP error was observed in this smoke. The full authenticated/scoring acceptance evidence is the isolated Chromium run, not this brief production UI check.
+
+Delivered flow: name/code → grouped rules/settings → one atomic empty league → add teams/players in Teams. Device grants persist until Leave/rotation; schedule generation stays explicit. Security overview and evidence are checked into the repo. Original data, code hashes and device grants were preserved. No paid resources, resets or production rate-limit changes.
+
+Only remaining operational cleanup: remove the exact revoked synthetic smoke league specified above when the SQL connector's `Invalid or expired requestState` error is resolved. Do not delete real league 6767 or reset production. The test code was never shared/stored; both test-device grants are revoked. Recover/fix forward as described in SECURITY_OVERVIEW.md; keep the backend access boundary closed.
