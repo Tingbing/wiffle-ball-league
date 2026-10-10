@@ -6,11 +6,11 @@ Games per series supports best-of1/3/5/7/9, default3. Each weekly matchup has on
 
 Rules and series snapshots cannot be reinterpreted midgame or after scoring. Settings changes clear only an unplayed schedule; over-capacity reductions fail without deleting players. Use a fresh/reset season with a privately downloaded backup before changing a scored season. No production reset is part of this implementation.
 
-League menu contains Settings, Switch and confirmed Leave/revoke. Frequent Teams, Start/Resume, Schedule and Stats stay visible. Device persistence and server revocation are inherited unchanged; they require new real E2E validation before release.
+League menu contains Settings, Switch and confirmed Leave/revoke. Frequent Teams, Start/Resume, Schedule and Stats stay visible. Device persistence and server revocation are inherited unchanged; the real desktop/mobile/two-device E2E suite passed.
 
 ## Rollout record
 
-The earlier migration request-state blocker was resolved after target verification and removal of an unnecessary trigger deletion. The migration has applied to staging, and real API acceptance has passed. Production rollout is being completed in backend-first order after final browser gates. IMPLEMENTATION_PROGRESS.md holds exact final state and CI/deployment links.
+The earlier migration request-state blocker was resolved after target verification and removal of an unnecessary trigger deletion. The migration has applied to staging, and real API acceptance has passed. Production backend application passed after final browser gates, with unchanged raw/security fingerprints and preserved private privileges. Frontend deployment and live smoke are the remaining release steps. IMPLEMENTATION_PROGRESS.md holds exact final state and CI/deployment links.
 
 A private pre-rollout backup contains affected league/game snapshots and previous validator/mutation definitions, without credential/session exports. Internal before/after hashes cover league rows, game rows, credentials, sessions and receipts. The SQL migration changes functions and adds a validator trigger; it has no league/game data rewrite or historical backfill.
 
