@@ -32,7 +32,7 @@ async function join(page, id, code) {
 async function play(page, result) {
   await owned(page);
   if(await page.evaluate(() => game.pitcherSelectionRequired)) await click(page, '#confirmPitcherButton');
-  await click(page, `#gameScreen button[onclick="recordBattingResult('${result}')"]`);
+  const action=require('node:crypto').createHash('sha256').update("click:recordBattingResult('"+result+"')").digest('hex').slice(0,12); await click(page, '#gameScreen button[data-wbl-click="'+action+'"]');
 }
 (async () => {
   server = http.createServer((req, res) => {
