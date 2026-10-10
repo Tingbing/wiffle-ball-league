@@ -1342,6 +1342,8 @@ function openStatsRestorePicker() {
 async function restoreStatsBackupFromPayload(raw) {
 	if (warnIfDestructiveActionUnsafe("restoring a backup")) return false;
 
+	if(!raw || typeof raw!=='object' || Array.isArray(raw) || JSON.stringify(raw).length>12*1024*1024 || ['access_token','session_token','code','credentials','sessions','__proto__','constructor','prototype'].some(k=>Object.hasOwn(raw,k)))return alert('Restore cancelled: invalid or disallowed backup fields.');
+	try {validateSafeTextTree(raw);}catch(error){return alert(error.message);}
 	const prepared = prepareStatsBackupRestore(raw);
 	if (!prepared.ok) {
 		alert(`Restore failed.\n\n${prepared.message}`);
@@ -1407,6 +1409,7 @@ async function handleStatsRestoreFile(event) {
 	if (!file) return;
 
 	try {
+		if(file.size>12*1024*1024)throw new Error('Backup is too large (maximum 12 MiB).');
 		const text = await file.text();
 		let parsed;
 

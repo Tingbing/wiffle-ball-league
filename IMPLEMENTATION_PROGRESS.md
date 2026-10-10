@@ -96,3 +96,35 @@ The permanent-access production migration preserved the complete league/game/rec
 Keep the new backend access boundary closed. Revert or repair frontend changes through GitHub, preserve post-release records, and fix forward against isolated staging. Do not deploy an old frontend expecting anonymous access, reopen old RPC grants, or blindly replace current data with a pre-release backup. Restores must account for records written after release. Private backup restore uses jsonb_populate_recordset in FK order league → games → receipts. tests/fixtures/baseline.sql is synthetic test-only infrastructure, never a production migration.
 
 For future work, inspect current main, deployed Pages commit and Supabase migration history before making changes. Do not reapply migrations blindly or rerun creation-heavy tests without a reason. No scheduled continuation or paid upgrade was created. The final documentation checkpoint requires no repeat of successful application tests.
+
+# Two-step setup and security update — 2026-10-10
+
+Working branch: `codex/league-setup-security-2026-10-10`. Current main was cloned directly; no new ZIP was attached. No AGENTS.md exists. Production remains unchanged during isolated validation.
+
+Implemented locally: details-only first screen, separate grouped settings screen, in-memory code, Back/Cancel, empty creation, original-token creation recovery after lost responses, team-name edits inside the existing Teams screen, empty dashboard guidance, protected-cache removal on Leave/revocation, backup size/text/field guards, restrictive resource CSP and referrer policy, safe error messages. Audit and rate-limit improvements plus zero/one-team validation are additive.
+
+Staging migrations applied: `league_setup_security` and `setup_text_validation`; the single checked-in migration includes both. The backend supports existing creation payloads and permanent device grants. The sealed representative restore schema was not modified or reopened.
+
+Validation so far: 12 existing Node rule/schedule tests passed; npm audit found zero vulnerabilities in the pinned browser-test dependencies. Real staging HTTPS tests cover empty creation, retries/recovery, exact settings, malformed inputs, unauthorized/cross-league access, one-team save/removal, game prerequisites, second-device persistence, private/audit/legacy API denial, Leave/rotation, old-client payloads and throttling. Full rerun is in progress. Local Chromium download returned invalid archives; use the existing GitHub-hosted Chromium acceptance route. Production deployment is gated on those results.
+
+Design evidence: TeamSnap's official Add a sports organization team article adds teams inside an existing organization/program. LeagueApps' official Getting Started With Program Creation describes staged details setup, defaults, and keeping optional fields simple. The exact two steps, grouped number inputs, summary and empty-dashboard copy are this app's design decisions.
+
+Next: finish staging HTTP and GitHub browser checks, inspect screenshots, record security evidence/limitations, snapshot production and recheck drift, then apply tested additive migration and merge/deploy if all relevant gates pass. Do not report production changes until verified.
+
+## Setup validation gate passed — 2026-10-10
+
+- 12 baseline/custom-rule Node checks passed.
+- 16 grouped real staging HTTPS backend security/setup checks passed; `tests/SETUP_SECURITY_RESULTS.md`.
+- 30 desktop/390px phone Chromium checks passed on `265bbf993535a3b6265b347d4376817c69e8db3b`: https://github.com/Tingbing/wiffle-ball-league/actions/runs/38070496850 . Includes Cancel/show-hide, Next/Back/no early writes, lost creation response with refresh, zero teams/screens, individual team additions/name edit, remembered devices, odd-team schedule, scoring/substitutions, handoff/offline/lost-save retry, correct stats, synthetic backup restore and dangerous/foreign imports, rotation/Leave/cache clearing, routing isolation and simultaneous Start/overtime. No production requests, uncaught browser exceptions or CSP violations.
+- Screenshot artifact reviewed with codes masked: https://github.com/Tingbing/wiffle-ball-league/actions/runs/38070496850/artifacts/11676945809 . Mobile details/settings and empty Teams screens are readable with no horizontal overflow.
+- Pinned/locked test dependency audit: zero vulnerabilities. App has no external runtime scripts. Source/reachable Git history scan: no private-key markers or service-role JWTs; two intended public anon JWTs.
+- Removed 84 inline event-handler patterns into reviewed external handlers; CSP no longer permits inline/eval scripts. Existing inline styles are retained.
+- Existing affected production functions exactly matched the original inspection; main stayed at `f21e9a75ddc3680a3eaef97a34fe4457b61709f1`. All 14 application files match the tested remote source.
+
+Production migration `league_setup_security` applied after isolated gates. It holds table locks and compares aggregate row fingerprints before/after inside its transaction: existing league/game/receipt/credential/session/creation records are unchanged. Automatic approval review rejected a full credential/session backup export, so those records were not exported; an affected-schema snapshot was saved privately and data was verified inside the database. No user data is included in GitHub.
+
+Eight real production smoke groups passed on one labeled synthetic league: minimal directory, private/legacy denial, empty creation/exact rules/permanent grant, retry/recovery, team/player addition, second-device persistence and device revocation. Synthetic cleanup was attempted twice with exact generated ID/name checks, but the Supabase connector returned `Invalid or expired requestState` both times. The labeled synthetic league remains: ID `560c5ddf-04d2-4bf8-8f3c-f82ec846dbdc`; name `SYNTHETIC SETUP SMOKE 6e723fc4-f386-440e-83b5-21908f8f1d86`. Both grants were revoked and its code was never saved/shared. Current counts are two leagues, five game records and 120 receipts; one league and one receipt belong to this synthetic smoke check. Original data was verified unchanged in the migration transaction. Do not delete other data. Cleanup remains blocked on that connector error; no alternative guard-bypassing deletion was attempted. No production throttles were reset. `tests/PRODUCTION_SETUP_RESULTS.md` contains the actual groups.
+
+Production security checks: zero private tables without RLS, zero API-role private table grants, no Storage buckets, no app Realtime publication. Recovery RPC has intended execution access; audit trigger does not. Security advisers remain consistent with the deliberately gated RPC/private-table architecture and unused Auth/legacy warnings.
+
+Release next: merge PR #5, allow existing GitHub Pages deployment, verify deployed source hashes/HTTPS, and record final state. Backend remains compatible with the preceding client while frontend deploys. No paid infrastructure or resets were used. Review `SECURITY_OVERVIEW.md` for implemented protections and the real static-hosting/browser-storage limitations.

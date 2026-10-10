@@ -11,6 +11,7 @@ const staging = 'https://axyywkipikyahayzipbu.supabase.co';
 const anon = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImF4eXl3a2lwaWt5YWhheXppcGJ1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTE1NjMwNDIsImV4cCI6MjEwNzEzOTA0Mn0.ZVy5fgy0f7azXXe8n9_1aj0e_l6-ebsC4QJSW0Nne-s';
 const errors = [], productionRequests = [], results = [];
 let browser, server;
+async function capture(page,name) {await page.screenshot({path:'tests/'+name+'.png',fullPage:true});const data=await page.screenshot({type:'jpeg',quality:55,fullPage:true});console.log('SCREENSHOT '+name+' '+data.toString('base64'));}
 const check = (name) => { results.push(name); console.log('PASS ' + name); };
 async function idle(page) {
   await page.waitForFunction(() => !accessBusy && !leagueEditActive && !recording.busy && !recording.pending && !gameStartInProgress, null, {timeout:30000});
@@ -31,7 +32,7 @@ async function join(page, id, code) {
 async function play(page, result) {
   await owned(page);
   if(await page.evaluate(() => game.pitcherSelectionRequired)) await click(page, '#confirmPitcherButton');
-  await click(page, `#gameScreen button[onclick="recordBattingResult('${result}')"]`);
+  const action=require('node:crypto').createHash('sha256').update("click:recordBattingResult('"+result+"')").digest('hex').slice(0,12); await click(page, '#gameScreen button[data-wbl-click="'+action+'"]');
 }
 (async () => {
   server = http.createServer((req, res) => {
@@ -39,6 +40,7 @@ async function play(page, result) {
     if(!filename.startsWith(root + path.sep) || !/\.(html|js|css)$/.test(filename)) { res.writeHead(404); return res.end(); }
     try {
       let data = fs.readFileSync(filename, 'utf8');
+      if(filename.endsWith('.html'))data=data.replace(/connect-src https:\/\/hunqtklytyorvmztgpqt.supabase.co/g,'connect-src https://axyywkipikyahayzipbu.supabase.co');
       if(path.basename(filename) === 'app.boot.js') {
         data = data.replace(/const SUPABASE_URL = "[^"]+";/, `const SUPABASE_URL = "${staging}";`)
           .replace(/const SUPABASE_ANON_KEY = "[^"]+";/, `const SUPABASE_ANON_KEY = "${anon}";`);
@@ -53,12 +55,19 @@ async function play(page, result) {
   const phone = await browser.newContext({viewport:{width:390,height:844},isMobile:true,hasTouch:true});
   for(const context of [desktop,phone]) {
     context.on('page', page => {
-      page.on('pageerror', error => errors.push(error.message));
+      page.on('pageerror', error => errors.push(error.message));page.on('console',msg=>{if(/Content Security Policy|violates.*directive/.test(msg.text()))errors.push(msg.text());});
       page.on('dialog', dialog => dialog.accept());
       page.on('request', request => { if(request.url().includes('hunqtklytyorvmztgpqt')) productionRequests.push(request.url()); });
     });
     await context.route('https://hunqtklytyorvmztgpqt.supabase.co/**', route => route.abort());
   }
+  const m=await phone.newPage();await m.goto('http://127.0.0.1:4173/app.html');
+  await click(m,'#directoryScreen button[data-wbl-click="f610aeac471a"]');await m.locator('#createName').fill('Cancelled setup');await m.locator('#createCode').fill('Cancelled8!');
+  await m.locator('#createCodeToggle').click();assert.equal(await m.locator('#createCode').getAttribute('type'),'text');await m.locator('#createCodeToggle').click();
+  await capture(m,'setup-phone-details');await click(m,'#createNext');await capture(m,'setup-phone-settings');
+  assert.ok(await m.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+2));await click(m,'#createBack');await click(m,'#createLeagueScreen .secondary');
+  assert.equal(await m.locator('#createCode').inputValue(),'');assert.equal(await m.evaluate(()=>localStorage.getItem(PENDING_CREATE_KEY)),null);await m.close();
+  check('Phone wizard fits viewport; show/hide and Cancel discard draft without creation');
   const a = await desktop.newPage();
   await a.goto('http://127.0.0.1:4173/app.html');
   await a.waitForFunction(() => !directoryBusy && document.querySelector('#directoryList').children.length > 0);
@@ -77,33 +86,58 @@ async function play(page, result) {
   await a.locator('#directorySearch').press('Enter');
   await a.waitForFunction(()=>!directoryBusy);
   assert.match(await a.locator('#directoryMessage').textContent(),/Could not load leagues/);
-  await a.locator('#directoryScreen button[onclick="loadDirectory(false)"]').click();
+  await a.locator('#directoryScreen button[data-wbl-click="5b6d12f1c358"]').click();
   await a.waitForFunction(()=>!directoryBusy);
   assert.ok(await a.locator('#directoryList > div').count()>0);
   check('Directory no-results and network-error states recover with Retry');
   const name = 'Browser Acceptance ' + crypto.randomUUID().slice(0,8), code = 'Browser8!';
-  await click(a, '#directoryScreen button[onclick="showCreateLeague()"]');
+  await click(a, '#directoryScreen button[data-wbl-click="f610aeac471a"]');
   await a.locator('#createName').fill(name);
   await a.locator('#createName').focus(); await a.keyboard.press('Tab');
   assert.equal(await a.evaluate(()=>document.activeElement.id),'createCode');
   await a.locator('#createCode').fill('AAAAAAAA');
-  await a.locator('#createTeamCount').fill('3');
-  await a.locator('#createTeamCount').dispatchEvent('change');
-  await a.locator('#createWeeks').fill('7');
-  await a.locator('#createInnings').fill('5');
-  await a.locator('#createOuts').fill('3');
-  await a.locator('#createSubmit').click(); await idle(a);
-  assert.match(await a.locator('#createMessage').textContent(),/letter and a number or symbol/);
-  assert.equal(await a.locator('#mainMenu').isVisible(),false);
+  let creates=0;
+  a.on('request',r=>{if(r.url().endsWith('/wbl_create'))creates++;});
+  await click(a,'#createNext');
+  assert.match(await a.locator('#createCodeError').textContent(),/letter and a number or symbol/);
+  assert.equal(creates,0);
   await a.locator('#createCode').fill(code);
-  check('Keyboard form navigation and server-side code validation');
-  await a.locator('#createSubmit').click();
-  await main(a);
+  await click(a,'#createNext');
+  assert.equal(await a.locator('#createSettingsScreen').isVisible(),true);
+  assert.equal(creates,0);
+  await click(a,'#createBack');
+  assert.equal(await a.locator('#createCode').inputValue(),code);
+  await click(a,'#createNext');
+  await a.locator('#createWeeks').fill('7');await a.locator('#createInnings').fill('5');await a.locator('#createOuts').fill('3');
+  await capture(a,'setup-settings');
+  await click(a,'#createBack');await a.evaluate(()=>{document.getElementById('createCode').type='password';});await capture(a,'setup-details');await click(a,'#createNext');
+  assert.equal(await a.locator('#createTeams').count(),0);
+  assert.equal(creates,0);
+  assert.ok(!await a.evaluate(code=>Object.values(localStorage).some(v=>v.includes(code)),code));
+  check('Two creation views, inline validation, Back preservation, no teams/code persistence or early writes');
+  // Commit to staging, then lose the successful response. Refresh must recover without another creation.
+  await a.route(staging+'/rest/v1/rpc/wbl_create',async route=>{await route.fetch();await route.abort();},{times:1});
+  await a.locator('#createSubmit').click();await idle(a);
+  assert.ok(await a.evaluate(()=>!!localStorage.getItem(PENDING_CREATE_KEY)));
+  await a.reload();await main(a);
+  assert.equal(creates,1);
   const id = await a.evaluate(() => LEAGUE_CODE);
   assert.match(id,/^[a-f0-9-]{36}$/);
   assert.equal(await a.locator('#activeLeagueTitle').textContent(),name);
-  assert.match(await a.locator('#activeLeagueRules').textContent(),/7 weeks.*3 teams.*5 innings.*3 outs/);
-  check('UI creates custom three-team league and retains validated access');
+  assert.match(await a.locator('#activeLeagueRules').textContent(),/7 weeks.*0 teams.*5 innings.*3 outs/);
+  assert.deepEqual(await a.evaluate(()=>({teams:league.teams.length,days:schedule.days.length,games:season.games.length})),{teams:0,days:0,games:0});
+  await capture(a,'setup-empty-league');
+  for(const fn of ['showSeasonStats','showRankings','showSchedule','showPostseason']) {await a.evaluate(fn=>window[fn](),fn);await idle(a);await a.evaluate(()=>showMainMenu());}
+  check('Lost creation response recovers on refresh exactly once; empty league screens remain usable');
+  await click(a,'#leagueReadyState button');
+  await capture(a,'setup-empty-teams');
+  assert.equal(await a.locator('#addPlayerButton').isEnabled(),false);
+  for(let t=1;t<=3;t++) {await a.locator('#teamName').fill('Team '+t);await click(a,'#teamConfigScreen button[data-wbl-click="4b5fa1fd4dda"]');}
+  assert.equal(await a.evaluate(()=>league.teams.length),3);
+  await a.evaluate(async()=>{const original=window.prompt;window.prompt=()=>"O'Connor & Sons";try{await renameTeam(2);}finally{window.prompt=original;}});await idle(a);
+  assert.equal(await a.evaluate(()=>league.teams[2].name),"O'Connor & Sons");
+  await click(a,'#teamConfigScreen button[data-wbl-click="916694482531"]');
+  check('Teams added inside league one at a time; editing names persists safely');
   assert.equal(await a.evaluate(id=>savedAccess()[id].expires_at,id),null);
   // A grant saved by the previous release may carry an old expiry date.
   await a.evaluate(id=>{const grants=savedAccess();grants[id].expires_at='2000-01-01T00:00:00Z';localStorage.setItem(ACCESS_KEY,JSON.stringify(grants));},id);
@@ -123,29 +157,29 @@ async function play(page, result) {
   await reopened.goto('http://127.0.0.1:4173/app.html'); await main(reopened);
   assert.equal(await reopened.evaluate(()=>LEAGUE_CODE),id); await reopened.close();
   check('A new tab in the same device profile reopens the saved league');
-  await click(a,'#mainMenu button[onclick="switchToDirectory()"]');
+  await click(a,'#mainMenu button[data-wbl-click="76e1a211d391"]');
   await a.goto('http://127.0.0.1:4173/app.html');
   await a.locator('#directoryScreen').waitFor({state:'visible'}); await idle(a);
   assert.ok(await a.evaluate(id=>!!savedAccess()[id],id));
   await a.goto('http://127.0.0.1:4173/app.html#league='+id); await main(a);
   check('Switch league keeps access and respects a deliberate return to the directory');
-  await click(a, '#mainMenu button[onclick="showTeamConfig()"]');
+  await click(a, '#mainMenu .menu-button[data-wbl-click="9e69d2212de1"]');
   for(let team=0;team<3;team++) for(let player=1;player<=2;player++) {
     await a.locator('#teamSelect').selectOption(String(team));
     await a.locator('#playerName').fill(`Player ${team+1}-${player}`);
-    await click(a,'#teamConfigScreen button[onclick="addPlayer()"]');
+    await click(a,'#teamConfigScreen button[data-wbl-click="ba9344494226"]');
   }
   assert.deepEqual(await a.evaluate(() => league.teams.map(t=>t.players.length)),[2,2,2]);
   await a.locator('#seasonSubName').fill('Browser Substitute');
-  await click(a,'#teamConfigScreen button[onclick="addSeasonSub()"]');
-  await click(a,'#teamConfigScreen button[onclick="showMainMenu()"]');
-  await click(a,'#mainMenu button[onclick="showSchedule()"]');
+  await click(a,'#teamConfigScreen button[data-wbl-click="5ae4c927470d"]');
+  await click(a,'#teamConfigScreen button[data-wbl-click="916694482531"]');
+  await click(a,'#mainMenu button[data-wbl-click="479799de6c39"]');
   // Rebuild action is a real management control; if not needed, schedule already exists.
-  const rebuild = a.locator('#scheduleScreen button[onclick="forceRegenerateSchedule()"]');
-  if(await rebuild.count()) await click(a,'#scheduleScreen button[onclick="forceRegenerateSchedule()"]');
+  const rebuild = a.locator('#scheduleScreen button[data-wbl-click="3dd3fb4ce125"]');
+  if(await rebuild.count()) await click(a,'#scheduleScreen button[data-wbl-click="3dd3fb4ce125"]');
   assert.equal(await a.evaluate(() => schedule.days.length),7);
   check('Roster edits and seven-week odd-team schedule persist');
-  await click(a,'#scheduleScreen button[onclick="showMainMenu()"]');
+  await click(a,'#scheduleScreen button[data-wbl-click="916694482531"]');
   await a.reload(); await main(a);
   assert.deepEqual(await a.evaluate(() => league.teams.map(t=>t.players.length)),[2,2,2]);
   assert.equal(await a.evaluate(() => schedule.days.length),7);
@@ -161,10 +195,10 @@ async function play(page, result) {
   assert.equal(await b.locator('#activeLeagueTitle').textContent(),name);
   assert.ok(await b.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 2));
   check('Phone code gate, successful join and main-menu width');
-  await click(a,'#mainMenu button[onclick="showGameSetup()"]');
+  await click(a,'#mainMenu button[data-wbl-click="33d31c517791"]');
   await click(a,'#openSubAssignBtn');
   await a.locator('#subScopeSelect').selectOption('game');
-  await click(a,'#subAssignCard button[onclick="confirmSubAssignment()"]');
+  await click(a,'#subAssignCard button[data-wbl-click="45370f8c9887"]');
   assert.match(await a.locator('#subAssignmentSummary').textContent(),/Browser Substitute/);
   await click(a,'#startScheduledGameBtn');
   await a.locator('#gameScreen').waitFor({state:'visible'}); await owned(a);
@@ -176,7 +210,7 @@ async function play(page, result) {
   await b.locator('#liveGameList button').click();
   await b.locator('#gameScreen').waitFor({state:'visible'});
   assert.equal(await b.evaluate(() => recording.row.mine),false);
-  assert.equal(await b.locator("#gameScreen button[onclick=\"recordBattingResult('HR')\"]").isDisabled(),true);
+  assert.equal(await b.locator("#gameScreen button[data-wbl-click=\"0e85202558d7\"]").isDisabled(),true);
   check('Two devices show one recorder and a read-only phone viewer');
   const duplicateTab=await desktop.newPage();
   await duplicateTab.goto('http://127.0.0.1:4173/app.html#league='+id);
@@ -186,7 +220,7 @@ async function play(page, result) {
   assert.equal(await duplicateTab.evaluate(()=>recording.row.mine),false);
   const identities=await Promise.all([a.evaluate(()=>recording.token),duplicateTab.evaluate(()=>recording.token)]);
   assert.notEqual(identities[0],identities[1]);
-  assert.equal(await duplicateTab.locator("#gameScreen button[onclick=\"recordBattingResult('HR')\"]").isDisabled(),true);
+  assert.equal(await duplicateTab.locator("#gameScreen button[data-wbl-click=\"0e85202558d7\"]").isDisabled(),true);
   await duplicateTab.close();
   check('Two tabs sharing a remembered grant retain distinct recorder identities');
   await play(a,'single');
@@ -211,7 +245,7 @@ async function play(page, result) {
     } else await route.continue();
   };
   await a.route(staging+'/rest/v1/rpc/wbl_mutate',dropAcknowledgment);
-  await a.locator("#gameScreen button[onclick=\"recordBattingResult('HR')\"]").click();
+  await a.locator("#gameScreen button[data-wbl-click=\"0e85202558d7\"]").click();
   await saveArrived; releaseSave();
   await a.waitForFunction(()=>!recording.busy && !!recording.pending);
   assert.equal(await a.evaluate(()=>recordingCanAct()),false);
@@ -224,11 +258,11 @@ async function play(page, result) {
   check('Lost acknowledgment pauses scoring/handoff; retry saves exactly once');
   await desktop.setOffline(true);
   await a.waitForFunction(()=>!recordingCanAct());
-  assert.equal(await a.locator("#gameScreen button[onclick=\"recordBattingResult('HR')\"]").isDisabled(),true);
+  assert.equal(await a.locator("#gameScreen button[data-wbl-click=\"0e85202558d7\"]").isDisabled(),true);
   await desktop.setOffline(false); await owned(a);
   check('Offline browser pauses scoring and reconnect verifies ownership');
-  await click(a,'#gameScreen button[onclick="showErrorPicker()"]');
-  await click(a,'#gameScreen button[onclick="confirmError()"]');
+  await click(a,'#gameScreen button[data-wbl-click="1bf90d1391f0"]');
+  await click(a,'#gameScreen button[data-wbl-click="fb6da20fe2f2"]');
   await click(a,'#undoButton');
   await play(a,'K'); await play(a,'out'); await play(a,'out');
   assert.equal(await a.evaluate(() => game.outs),0);
@@ -245,60 +279,74 @@ async function play(page, result) {
   assert.equal(await b.evaluate(() => season.games.length),1);
   assert.deepEqual(await b.evaluate(() => season.games[0].rules),{weeks:7,innings:5,outs:3});
   check('Phone finishes game and persists immutable rules and season stats');
-  await click(b,'#gameOverScreen button[onclick="showMainMenu()"]');
-  await click(b,'#mainMenu button[onclick="showLeagueSettings()"]');
+  await click(b,'#gameOverScreen button[data-wbl-click="916694482531"]');
+  await click(b,'#mainMenu button[data-wbl-click="a53ca03881a7"]');
   assert.equal(await b.locator('#settingsOuts').isDisabled(),true);
-  await click(b,'#leagueSettingsScreen button[onclick="showMainMenu()"]');
+  await click(b,'#leagueSettingsScreen button[data-wbl-click="916694482531"]');
   await b.reload(); await main(b);
   assert.equal(await b.evaluate(() => season.games.length),1);
-  await click(b,'#mainMenu button[onclick="showSeasonStats()"]');
+  await click(b,'#mainMenu button[data-wbl-click="7536c2b5b9d1"]');
   assert.ok((await b.locator('#seasonStatsContainer').textContent()).length>0);
-  await click(b,'#seasonStatsScreen button[onclick="showPastGameLog()"]');
+  await click(b,'#seasonStatsScreen button[data-wbl-click="840c6a173c01"]');
   assert.match(await b.locator('#pastGameDetails').textContent(),/Browser Substitute/);
   assert.equal(await b.locator('#pastGameDetails table').count(),5);
-  await click(b,'#pastGameLogScreen button[onclick="showSeasonStats()"]');
-  await click(b,'#seasonStatsScreen button[onclick="showRankings()"]');
+  await click(b,'#pastGameLogScreen button[data-wbl-click="7536c2b5b9d1"]');
+  await click(b,'#seasonStatsScreen button[data-wbl-click="31ff9779a448"]');
   assert.ok((await b.locator('#rankingsContainer').textContent()).length>0);
-  await click(b,'#rankingsScreen button[onclick="showSeasonStats()"]');
+  await click(b,'#rankingsScreen button[data-wbl-click="7536c2b5b9d1"]');
   check('Phone box score and rankings render saved substitute and pitching lines');
   check('Scored-season rules lock and persisted stats render after reload');
-  await click(b,'#seasonStatsScreen button[onclick="showMainMenu()"]');
-  await click(b,'#mainMenu button[onclick="showLeagueSettings()"]');
+  const restored=await b.evaluate(async()=>{
+    const original=JSON.stringify({season,schedule});const backup=createStatsBackupPayload();
+    const revisionBefore=leagueRevision;const succeeded=await restoreStatsBackupFromPayload(backup);
+    const signature=g=>({id:g.id,team1:g.team1Name,team2:g.team2Name,score1:g.team1Score,score2:g.team2Score,rules:g.rules,lines:g.playerStats.length});
+    const same=succeeded===true && leagueRevision>revisionBefore && JSON.stringify(season.games.map(signature))===JSON.stringify(backup.season.games.map(signature));
+    const before=JSON.stringify({season,schedule});await restoreStatsBackupFromPayload({...backup,leagueCode:'another-league'});
+    const cross=before===JSON.stringify({season,schedule});
+    await restoreStatsBackupFromPayload({...backup,code:'Disallowed8!'});
+    const fields=before===JSON.stringify({season,schedule});
+    await restoreStatsBackupFromPayload({...backup,leagueSnapshot:{teams:[{name:'<img src=x onerror="window.injected=true">',players:[]}]}});
+    return {same,cross,fields,injected:!!window.injected};
+  });await idle(b);assert.deepEqual(restored,{same:true,cross:true,fields:true,injected:false});
+  check('Synthetic backup restores through server; foreign-league, credential and markup imports rejected');
+  await click(b,'#seasonStatsScreen button[data-wbl-click="916694482531"]');
+  await click(b,'#mainMenu button[data-wbl-click="a53ca03881a7"]');
   await b.locator('#newCode').fill('Changed9!');
   await b.locator('#leagueSettingsScreen button').filter({hasText:'Change code'}).click();
   await b.locator('#directoryScreen').waitFor({state:'visible'});
   await a.waitForFunction(() => !activeAccess, null,{timeout:15000});
   assert.equal(await a.locator('#gameScreen').isVisible(),false);
   await join(b,id,'Changed9!');
-  await click(b,'#mainMenu button[onclick="leaveLeagueAccess()"]');
+  await click(b,'#mainMenu button[data-wbl-click="5e9db9692103"]');
   await b.locator('#directoryScreen').waitFor({state:'visible'});
   await b.reload();
   assert.equal(await b.locator('#mainMenu').isVisible(),false);
   assert.equal(await b.evaluate(id=>savedAccess()[id],id),undefined);
   assert.equal(await b.evaluate(()=>localStorage.getItem(LAST_LEAGUE_KEY)),null);
+  assert.equal(await b.evaluate(id=>Object.keys(localStorage).filter(k=>k.startsWith('wbl-v4:'+id+':')).length,id),0);
   await b.goto('http://127.0.0.1:4173/app.html#league='+id);
   await b.locator('#joinScreen').waitFor({state:'visible'});
   check('Code rotation revokes both sessions and device leave survives reload');
   // A second materially different league exercises isolated caches, routes and overtime.
-  await a.locator('#directoryScreen button[onclick="showCreateLeague()"] ').click();
+  await a.locator('#directoryScreen button[data-wbl-click="f610aeac471a"] ').click();
   await a.locator('#createName').fill(name+' B');
   await a.locator('#createCode').fill(code);
-  await a.locator('#createTeamCount').fill('2');
-  await a.locator('#createTeamCount').dispatchEvent('change');
+  await click(a,'#createNext');
   for(const key of ['Weeks','Innings','Outs']) await a.locator('#create'+key).fill('1');
   await a.locator('#createSubmit').click(); await main(a);
   const idB=await a.evaluate(()=>LEAGUE_CODE);
-  await click(a,'#mainMenu button[onclick="showTeamConfig()"]');
+  await click(a,'#mainMenu .menu-button[data-wbl-click="9e69d2212de1"]');
+  for(let team=0;team<2;team++){await a.locator('#teamName').fill('Team '+(team+1));await click(a,'#teamConfigScreen button[data-wbl-click="4b5fa1fd4dda"]');}
   for(let team=0;team<2;team++) {
     await a.locator('#teamSelect').selectOption(String(team));
     await a.locator('#playerName').fill('B Player '+team);
-    await click(a,'#teamConfigScreen button[onclick="addPlayer()"]');
+    await click(a,'#teamConfigScreen button[data-wbl-click="ba9344494226"]');
   }
-  await click(a,'#teamConfigScreen button[onclick="showMainMenu()"]');
-  await click(a,'#mainMenu button[onclick="showSchedule()"]');
-  await click(a,'#scheduleScreen button[onclick="forceRegenerateSchedule()"]');
-  await click(a,'#scheduleScreen button[onclick="showMainMenu()"]');
-  await click(a,'#mainMenu button[onclick="switchToDirectory()"]');
+  await click(a,'#teamConfigScreen button[data-wbl-click="916694482531"]');
+  await click(a,'#mainMenu button[data-wbl-click="479799de6c39"]');
+  await click(a,'#scheduleScreen button[data-wbl-click="3dd3fb4ce125"]');
+  await click(a,'#scheduleScreen button[data-wbl-click="916694482531"]');
+  await click(a,'#mainMenu button[data-wbl-click="76e1a211d391"]');
   await a.locator('#directorySearch').fill(name+' B');
   await a.locator('#directorySearch').press('Enter');
   await a.waitForFunction(()=>!directoryBusy);
@@ -320,7 +368,7 @@ async function play(page, result) {
   await a.route(staging+'/rest/v1/rpc/wbl_read',delayedA);
   await a.evaluate(()=>{window.delayedReadResult=null;refreshLeagueFromServer().then(()=>window.delayedReadResult='accepted').catch(e=>window.delayedReadResult=e.message);});
   await readArrived;
-  await click(a,'#mainMenu button[onclick="switchToDirectory()"]');
+  await click(a,'#mainMenu button[data-wbl-click="76e1a211d391"]');
   await a.locator('#directoryList button').click(); await main(a);
   assert.equal(await a.evaluate(()=>LEAGUE_CODE),idB);
   releaseRead();
@@ -335,7 +383,7 @@ async function play(page, result) {
   await a.goForward(); await main(a); assert.equal(await a.evaluate(()=>LEAGUE_CODE),idB);
   check('Delayed former-league read is discarded; back/forward keeps caches isolated');
   await join(b,idB,code);
-  await Promise.all([click(a,'#mainMenu button[onclick="showGameSetup()"]'),click(b,'#mainMenu button[onclick="showGameSetup()"]')]);
+  await Promise.all([click(a,'#mainMenu button[data-wbl-click="33d31c517791"]'),click(b,'#mainMenu button[data-wbl-click="33d31c517791"]')]);
   await Promise.all([click(a,'#startScheduledGameBtn'),click(b,'#startScheduledGameBtn')]);
   const ownership=await Promise.all([a.evaluate(()=>!!recording.row?.mine),b.evaluate(()=>!!recording.row?.mine)]);
   assert.equal(ownership.filter(Boolean).length,1);
@@ -355,6 +403,7 @@ async function play(page, result) {
   check('One-inning/one-out browser overtime and natural completion use snapshot rules');
   assert.deepEqual(productionRequests,[],'Browser must never contact production');
   assert.deepEqual(errors,[],'No uncaught browser exceptions');
+  fs.writeFileSync(path.join(root,'tests/BROWSER_RESULTS.md'),'# Browser acceptance — 2026-10-10\n\nReal isolated staging backend; desktop and 390px phone Chromium.\n\n'+results.map(r=>'- PASS: '+r).join('\n')+'\n\nNo production requests or uncaught exceptions/CSP violations.\n');
   console.log(`Browser acceptance passed: ${results.length} checks; no production requests.`);
 })().catch(error => { console.error(error); process.exitCode=1; }).finally(async () => {
   if(browser) await browser.close();

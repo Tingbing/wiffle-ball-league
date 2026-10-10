@@ -1,3 +1,12 @@
+function validateSafeTextTree(value,depth=0) {
+  if(depth>40)throw new Error('Data nesting is too deep.');
+  if(typeof value==='string' && /[<>"\x00-\x08]/.test(value))throw new Error('Text must not contain HTML markup, double quotes, or control characters.');
+  if(value && typeof value==='object')for(const [key,item] of Object.entries(value)) {
+    if(/[<>"]/.test(key) || ['__proto__','constructor','prototype'].includes(key))throw new Error('Disallowed data field.');
+    validateSafeTextTree(item,depth+1);
+  }
+}
+function escapeHtml(value) {return String(value ?? '').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
 // Wiffle Ball League - Shared state + utilities
 // Split from app.core.js. Load this BEFORE core.sync.js, core.schedule.js, core.stats.js, core.ui.js, app.game.js, and app.boot.js.
 

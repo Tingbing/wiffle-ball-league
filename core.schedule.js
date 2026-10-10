@@ -906,7 +906,7 @@ function renderScheduleGuardNotice(guard = getScheduleGuardState()) {
 	if (canRebuildHere) {
 		actionHtml = `
 			<div style="display:flex; gap:10px; flex-wrap:wrap; margin-top:12px;">
-				<button type="button" onclick="forceRegenerateSchedule()">Rebuild Schedule from Current Teams</button>
+				<button type="button" data-wbl-click="3dd3fb4ce125">Rebuild Schedule from Current Teams</button>
 			</div>
 			<p style="color:#aaa; font-size:13px; margin:10px 0 0;">
 				This only works before any games have been recorded.
@@ -1306,7 +1306,7 @@ function createScheduleSeriesExpansionRow(dayIndex, seriesIndex, seriesEntry) {
 		const actionWrap = document.createElement("div");
 		actionWrap.className = "schedule-series-action";
 		actionWrap.innerHTML = `
-			<button type="button" onclick="endSeriesEarly(${dayIndex}, ${seriesIndex})">End Series Early</button>
+			<button type="button" data-wbl-click="a1fef1c5242b" data-wbl-args='[${dayIndex}, ${seriesIndex}]'>End Series Early</button>
 			<div class="season-stats-note">This series is already decided 2-0. Game 3 will be marked not played and will not add stats.</div>
 		`;
 		body.appendChild(actionWrap);
@@ -1362,15 +1362,15 @@ function renderScheduleUI() {
 				<div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(170px, 1fr)); gap:10px; align-items:end;">
 					<div>
 						<div style="font-size:13px; color:#aaa; margin-bottom:6px;">Day</div>
-						<select id="changeScheduleDaySelect" onchange="refreshChangeScheduleControls()"></select>
+						<select id="changeScheduleDaySelect" data-wbl-change="631a70834f72"></select>
 					</div>
 					<div>
 						<div style="font-size:13px; color:#aaa; margin-bottom:6px;">Bye Team</div>
-						<select id="changeScheduleByeSelect" onchange="refreshChangeScheduleControls()"></select>
+						<select id="changeScheduleByeSelect" data-wbl-change="631a70834f72"></select>
 					</div>
 				</div>
 				<div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-top:12px;">
-					<button id="applyScheduleChangeBtn" type="button" onclick="applySelectedScheduleChange()">Update Schedule</button>
+					<button id="applyScheduleChangeBtn" type="button" data-wbl-click="d7b1e05a3d4b">Update Schedule</button>
 					<span id="changeScheduleStatus" style="color:#aaa; font-size:13px;"></span>
 				</div>
 			</div>

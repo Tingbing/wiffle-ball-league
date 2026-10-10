@@ -14,7 +14,7 @@ function rememberAccess(id,value) {
   if(value)localStorage.setItem(LAST_LEAGUE_KEY,id);
   else if(localStorage.getItem(LAST_LEAGUE_KEY)===id)localStorage.removeItem(LAST_LEAGUE_KEY);
 }
-function renderLeagueHeader() {message('activeLeagueTitle',leagueName);message('activeLeagueRules',`${leagueSettings.weeks} weeks • ${league.teams?.length || ''} teams • ${leagueSettings.innings} innings • ${leagueSettings.outs} outs per half-inning`);}
+function renderLeagueHeader() {message('activeLeagueTitle',leagueName);message('activeLeagueRules',`${leagueSettings.weeks} weeks • ${league.teams?.length || 0} teams • ${leagueSettings.innings} innings • ${leagueSettings.outs} outs per half-inning`);}
 function clearPrivateState() {
   accessGeneration++;stopRealtime();
   if(recording.unlock) recording.unlock();
@@ -28,7 +28,7 @@ function invalidateCurrentAccess() {
   if(!activeAccess) return;
   const id=LEAGUE_CODE;
   if(recording.pending) persistRecordingRecovery();
-  rememberAccess(id,null);clearPrivateState();
+  rememberAccess(id,null);clearLeagueCache(id);clearPrivateState();
   showDirectory();message('directoryAccessMessage','Access was revoked. Enter the league’s current code to reopen it. Unconfirmed saves remain scoped to that league on this device.');
 }
 function safeToSwitch() {
@@ -100,34 +100,81 @@ async function enterLeague(id,grant) {
 async function leaveLeagueAccess() {
   if(!safeToSwitch() || !confirm('Revoke this device’s access to this league? You will need its code again.'))return;
   accessBusy=true;
-  try{await wblRpc('wbl_leave_access',{});rememberAccess(LEAGUE_CODE,null);clearPrivateState();history.pushState(null,'',location.pathname+location.search);showDirectory();}
+  try{await wblRpc('wbl_leave_access',{});rememberAccess(LEAGUE_CODE,null);clearLeagueCache(LEAGUE_CODE);clearPrivateState();history.pushState(null,'',location.pathname+location.search);showDirectory();}
   catch(error){alert('Revocation was not confirmed. '+error.message);}finally{accessBusy=false;}
 }
 function readRules(prefix) {
   const s={weeks:Number(el(prefix+'Weeks').value),innings:Number(el(prefix+'Innings').value),outs:Number(el(prefix+'Outs').value)};
   if(!Number.isInteger(s.weeks)||s.weeks<1||s.weeks>52||!Number.isInteger(s.innings)||s.innings<1||s.innings>9||!Number.isInteger(s.outs)||s.outs<1||s.outs>6)throw new Error('Use 1–52 weeks, 1–9 innings and 1–6 outs.');return s;
 }
-function showCreateLeague() {if(accessBusy)return;hideAllScreens();el('createLeagueScreen').classList.remove('hidden');message('createMessage','');updateCreateTeams();el('createName').focus();}
-function updateCreateTeams() {
-  const box=el('createTeams'),n=Number(el('createTeamCount').value);
-  const names=Array.from(box.querySelectorAll('input')).map(x=>x.value);box.replaceChildren();
-  for(let i=0;i<n;i++){const label=document.createElement('label');label.textContent='Team '+(i+1);const input=document.createElement('input');input.required=true;input.maxLength=60;input.value=names[i]||'Team '+(i+1);input.name='team'+i;label.append(input);box.append(label);}
-  message('createPostseason',n===4?'Four-team leagues support the existing double-elimination postseason.':'The existing postseason bracket supports exactly four teams. This league will use the regular-season schedule and standings.');
+const PENDING_CREATE_KEY='wbl-v5-pending-create';
+function validateCreateDetails() {
+  const name=el('createName').value.trim(),code=el('createCode').value;
+  const nameError= !name || Array.from(name).length>80 || /[<>"\x00-\x1f]/.test(name) ? 'Enter a league name of 1–80 characters without markup or control characters.' : '';
+  const bytes=new TextEncoder().encode(code).length;
+  const codeError=bytes<8 || bytes>64 || !/[\p{L}]/u.test(code) || !/[\p{N}\p{P}\p{S}]/u.test(code) || [...code].every(c=>c===code[0]) ? 'Use 8–64 bytes with a letter and a number or symbol.' : '';
+  for(const [id,error] of [['createName',nameError],['createCode',codeError]]) {message(id+'Error',error);el(id).setAttribute('aria-invalid',String(!!error));}
+  if(nameError || codeError) {el(nameError?'createName':'createCode').focus();return null;}
+  return {name,code};
+}
+function showCreateLeague() {
+  if(accessBusy)return;
+  if(localStorage.getItem(PENDING_CREATE_KEY)) {recoverPendingCreation();return;}
+  creationDraft=null;el('createName').value='';el('createCode').value='';el('createCode').type='password';el('createCodeToggle').textContent='Show';el('createCodeToggle').setAttribute('aria-pressed','false');
+  for(const id of ['createNameError','createCodeError','createMessage'])message(id,'');
+  for(const [key,value] of [['Weeks',6],['Innings',3],['Outs',2]])el('create'+key).value=value;
+  setCreateLocked(false);hideAllScreens();el('createLeagueScreen').classList.remove('hidden');el('createName').focus();
+}
+function toggleCreateCode() {const shown=el('createCode').type==='password';el('createCode').type=shown?'text':'password';el('createCodeToggle').textContent=shown?'Hide':'Show';el('createCodeToggle').setAttribute('aria-pressed',String(shown));}
+function nextCreateStep(event) {
+  event.preventDefault();if(accessBusy || !validateCreateDetails())return;
+  hideAllScreens();el('createSettingsScreen').classList.remove('hidden');message('createLeagueContext',el('createName').value.trim());updateCreateSummary();el('createSettingsTitle').focus();
+}
+function backCreateStep() {if(accessBusy || creationDraft)return;hideAllScreens();el('createLeagueScreen').classList.remove('hidden');el('createName').focus();}
+function cancelCreateLeague() {if(accessBusy || creationDraft)return;el('createCode').value='';el('createName').value='';showDirectory();}
+function updateCreateSummary() {message('createSummary',`${el('createInnings').value} innings · ${el('createOuts').value} outs per half-inning · ${el('createWeeks').value}-week season`);}
+function setCreateLocked(locked) {for(const id of ['createName','createCode','createWeeks','createInnings','createOuts','createBack'])el(id).disabled=locked;}
+function clearCreationDraft() {creationDraft=null;localStorage.removeItem(PENDING_CREATE_KEY);el('createCode').value='';el('createCode').type='password';setCreateLocked(false);}
+async function openCreatedLeague(response,token) {
+  // Save the confirmed grant BEFORE loading the dashboard, so an interrupted read can recover.
+  rememberAccess(response.league_id,{token,expires_at:null});clearCreationDraft();
+  try {await enterLeague(response.league_id,{token,expires_at:null});}
+  catch(error){showDirectory();message('directoryAccessMessage','Your league was created and this device’s access is saved. Could not open it. '+error.message+' ');el('directoryAccessMessage').append(makeButton('Open created league',()=>requestOpenLeague({id:response.league_id,name:'Your league'})));}
+}
+async function recoverPendingCreation() {
+  const pending=readJsonStorage(PENDING_CREATE_KEY,null);if(!pending || accessBusy)return false;
+  accessBusy=true;
+  try {
+    const result=await wblRpc('wbl_recover_creation',{p_op_id:pending.op_id,p_session_token:pending.session_token});
+    if(result.league_id) {await openCreatedLeague(result,pending.session_token);return true;}
+    if(!creationDraft) {clearCreationDraft();showDirectory();message('directoryAccessMessage','No completed creation was found. Start again and enter your code.');} else {hideAllScreens();el('createSettingsScreen').classList.remove('hidden');message('createMessage','Creation was not committed. Retry Create league with the same details.');}
+    return false;
+  }catch(error) {showDirectory();message('directoryAccessMessage','Could not confirm the previous creation. '+error.message+' ');el('directoryAccessMessage').append(makeButton('Retry creation recovery',recoverPendingCreation));return true;}
+  finally {accessBusy=false;}
 }
 async function submitCreate(event) {
-  event.preventDefault();if(accessBusy)return;accessBusy=true;el('createSubmit').disabled=true;
+  event.preventDefault();if(accessBusy)return;
+  const details=validateCreateDetails();if(!details)return;
+  accessBusy=true;el('createSubmit').disabled=true;
   try {
-    const settings=readRules('create'),name=el('createName').value.trim(),code=el('createCode').value;
-    const teams={teams:Array.from(el('createTeams').querySelectorAll('input')).map(x=>({name:x.value.trim(),players:[]}))};
-    if(new Set(teams.teams.map(t=>t.name.toLowerCase())).size!==teams.teams.length)throw new Error('Use a different name for every team.');
-    creationDraft=creationDraft||{op_id:crypto.randomUUID(),session_token:newRecorderToken()};
-    const request={...creationDraft,name,code,teams,settings};message('createMessage','Creating league…');
-    const response=await wblRpc('wbl_create',{p_request:request});
-    const token=creationDraft.session_token;creationDraft=null;el('createCode').value='';
-    alert(`Created ${name}.\n\nShared code: ${code}\n${settings.weeks} weeks • ${settings.innings} innings • ${settings.outs} outs\n\nSave this code privately. Everyone using it has full league access. This device remembers access until you leave the league or its code changes.`);
-    await enterLeague(response.league_id,{token,expires_at:response.expires_at});
-  }catch(error){message('createMessage',error.message+' If a request was interrupted, retry with the same details in this tab.');if(error.definite)creationDraft=null;}
-  finally{accessBusy=false;el('createSubmit').disabled=false;}
+    if(!creationDraft) {
+      const settings=readRules('create');
+      creationDraft={op_id:crypto.randomUUID(),session_token:newRecorderToken(),...details,settings,teams:{teams:[]}};
+      // Recovery handle only: no code, name, or settings persisted.
+      localStorage.setItem(PENDING_CREATE_KEY,JSON.stringify({op_id:creationDraft.op_id,session_token:creationDraft.session_token}));
+    }
+    setCreateLocked(true);message('createMessage','Creating league…');
+    const response=await wblRpc('wbl_create',{p_request:creationDraft});
+    await openCreatedLeague(response,creationDraft.session_token);
+  }catch(error){
+    message('createMessage',error.message+' Retry to confirm the same creation.');
+    if(error.definite){creationDraft=null;localStorage.removeItem(PENDING_CREATE_KEY);setCreateLocked(false);}
+  }finally {accessBusy=false;el('createSubmit').disabled=false;}
+}
+function clearLeagueCache(id) {
+  const prefix='wbl-v4:'+id+':';
+  if(id==='6767')for(const key of ['wbl-pre-handoff-backup','wiggleLeague','wiggleSeason','wiggleSchedule','wiggleSyncHeadV1','wiggleLiveGameStateV1','wiggleActiveGameLock'])localStorage.removeItem(key);
+  for(const key of Object.keys(localStorage))if(key.startsWith(prefix))localStorage.removeItem(key);
 }
 function showLeagueSettings() {
   hideAllScreens();el('leagueSettingsScreen').classList.remove('hidden');el('settingsName').value=leagueName;
@@ -152,6 +199,7 @@ async function changeSharedCode(event) {
 }
 window.addEventListener('storage',event=>{if(event.key===ACCESS_KEY && activeAccess && !savedAccess()[LEAGUE_CODE])invalidateCurrentAccess();});
 window.addEventListener('popstate',async()=>{
+  if(!el('createSettingsScreen').classList.contains('hidden') || !el('createLeagueScreen').classList.contains('hidden')) {if(creationDraft){await recoverPendingCreation();return;}cancelCreateLeague();return;}
   if(!safeToSwitch()){history.pushState(null,'',LEAGUE_CODE?'#league='+encodeURIComponent(LEAGUE_CODE):location.pathname);return;}
   await openRoute();
 });
